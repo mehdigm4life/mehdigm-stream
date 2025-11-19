@@ -22,7 +22,7 @@
     "iconUrl": "https://web8.topcinema.cam/wp-content/uploads/2023/05/cropped-icon-32x32.png",
     "apiVersion": 1,
     "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 18000,
+    "fileSize": 15617,
     "status": 1,
     "language": "ar",
     "authors": [
@@ -30,7 +30,7 @@
     ],
     "tvTypes": [
     "Movie",
-    "tvTypes"
+    "TvSeries"
     ],
     "version": 1,
     "internalName": "TopCinema",
