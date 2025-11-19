@@ -1,0 +1,6 @@
+{
+  "name": "Mehdi Stream",
+  "description": "مشاهدة الافلام والمسلسلات المترجمة للعربية و المدبلجة من سيرفرات مواقع مشهورة",
+  "manifestVersion": 1,
+  "pluginLists": ["https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/refs/heads/main/plugins.json"]
+}

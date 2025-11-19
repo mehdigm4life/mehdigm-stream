@@ -1,0 +1,529 @@
+[
+  {
+    "iconUrl": "https://wecima.ac/static/img/favicon.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 20000,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Movie",
+    "tvTypes"
+    ],
+    "version": 1,
+    "internalName": "WeCima",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Wecima.cs3",
+    "name": "WeCima"
+  },
+  {
+    "iconUrl": "https://web8.topcinema.cam/wp-content/uploads/2023/05/cropped-icon-32x32.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 18000,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Movie",
+    "tvTypes"
+    ],
+    "version": 1,
+    "internalName": "TopCinema",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Topcinema.cs3",
+    "name": "TopCinema"
+  },
+  {
+    "iconUrl": "https://fullmatchshows.com/wp-content/uploads/2024/04/LOGOSASO.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 23600,
+    "status": 1,
+    "language": "en",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Movie",
+    "Others",
+    "live"
+    ],
+    "version": 2,
+    "internalName": "FullMatchShows",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Replaymatch.cs3",
+    "name": "FullMatchShows"
+  },
+  {
+    "iconUrl": "https://amd.brstej.com/22.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 22500,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Anime"
+    ],
+    "version": 1,
+    "internalName": "Brstej",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Bristege.cs3",
+    "name": "Brstej"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/anime_witcher_round_icon.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26340,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Anime"
+    ],
+    "version": 3,
+    "internalName": "AnimeWitcher",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animewitcher.cs3",
+    "name": "AnimeWitcher"
+  },
+  {
+    "iconUrl": "https://a.egydead.space/wp-content/uploads/2019/01/cropped-yXYdE2f-192x192.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 37900,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Movie",
+    "TvSeries",
+    "Anime",
+    "AsianDrama"
+    ],
+    "version": 1,
+    "internalName": "Egydead",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Egydead.cs3",
+    "name": "Egydead"
+  },
+  {
+    "iconUrl": "https://mycima.page/wp-content/uploads/2025/10/cropped-cropped-mycima-192x192.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 31900,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+    "Movie",
+    "TvSeries",
+    "Anime",
+    "AsianDrama"
+    ],
+    "version": 1,
+    "internalName": "Mycima",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/MyCimaProvider.cs3",
+    "name": "Mycima"
+  },
+  {
+    "iconUrl": "https://ww1.animeiat.tv/logo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 20300,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 2,
+    "internalName": "Animeiat",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animeiat.cs3",
+    "name": "Animeiat"
+  },
+  {
+    "iconUrl": "https://media.licdn.com/dms/image/v2/C4D0BAQEhyYSi351HRw/company-logo_200_200/company-logo_200_200/0/1630489719119?e=2147483647&v=beta&t=Br69OJ2AwT5vdJHgl-DTvliEqOmp6VQLYwUWcFqG4u4",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 12200,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "AsianDrama"
+        ],
+    "version": 3,
+    "internalName": "Asia2tv 2",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Aia2tv%202.cs3",
+    "name": "Asia2tv 2"
+  },
+  {
+    "iconUrl": "https://media.licdn.com/dms/image/v2/C4D0BAQEhyYSi351HRw/company-logo_200_200/company-logo_200_200/0/1630489719119?e=2147483647&v=beta&t=Br69OJ2AwT5vdJHgl-DTvliEqOmp6VQLYwUWcFqG4u4",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 19100,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "AsianDrama"
+        ],
+    "version": 3,
+    "internalName": "Asia2tv",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Aia2tv.cs3",
+    "name": "Asia2tv"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ2vuGLv4zY3XpoN2jza2unCQ95xFfypfe-h3k3xteMbGxl7taw-ziXyNg&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 18400,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 3,
+    "internalName": "Akwam",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Akwam.cs3",
+    "name": "Akwam"
+  },
+  {
+    "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26624,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "3isk",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/3isk.cs3",
+    "name": "3isk"
+  },
+  {
+    "iconUrl": "https://gesseh.net/wp-content/uploads/2024/10/keesatlogo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 11400,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 3,
+    "internalName": "Eshek",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/eseek.cs3",
+    "name": "Eshek"
+  },
+  {
+    "iconUrl": "https://pbs.twimg.com/profile_images/1956680009101271040/yE0lMOSx_400x400.jpg",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 11000,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "krmzy",
+    "description": "البحث لا يعمل حاليا مشكلة من الموقع",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Krmzy.cs3",
+    "name": "krmzy"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 52000,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Animerco",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animerco.cs3",
+    "name": "Animerco"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ7AH2oC7LwumXRpHM8_WLpIFvDIfmS67jkjlhsCKpPaZdqcneigzUQX4g&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 18732,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Witanime",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Witanime.cs3",
+    "name": "Witanime"
+  },  
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS3Ig85ZYdRsjDw--peeI2RsBqOWmvnmvKKsT4UONdPMQ&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 17600,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 2,
+    "internalName": "Shahid4u",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Shahid4u.cs3",
+    "name": "Shahid4u"
+  },  
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQX1z-0NYyzyEiFs4q7X9c8SSBR6kJtVl7f7A&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 16432,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "CimaClub",
+    "description": "سيرفرات الموقع بها ضعف احيانا اذا لم يفتح  غالبا المشكلة من الموقع",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaClub.cs3",
+    "name": "CimaClub"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ03aoQBNDy_Hkm5MUGGvluPvK7To7BdGiSnzQn7WJ3fQ&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 18432,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 3,
+    "internalName": "Faselhd",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Faselhd.cs3",
+    "name": "Faselhd"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTcamMqAuvsinzX-pcOGRo1KkYEbfv2zVJawHsugiX3dDcr64h-CJiL8ShJ&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 23552,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 4,
+    "internalName": "Cimanaw",
+    "description": "يستغرق تحميل الروابط بعض الوقت كن صبورا",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaNowProvider.cs3",
+    "name": "Cimanaw"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjXYRCgXdHTs-hdcOKs1ooTW5plsBI7CWbsA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 41984,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Arabseed",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Arabseed.cs3",
+    "name": "Arabseed"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26624,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 16,
+    "internalName": "Shabakaty_Cinemana",
+    "description": "لا يعمل خارج العراق او اي شبكة غير ايرثلنك",
+    "url": "https://github.com/Abodabodd/Testmyrepo/raw/refs/heads/main/cinemana.cs3",
+    "name": "Shabakaty Cinemana (🇮🇶)"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26624,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 16,
+    "internalName": "Shabakaty_Cinemana_Slow",
+    "description": "لا يعمل خارج العراق او اي شبكة غير ايرثلنك",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/cinemana.cs3",
+    "name": "Shabakaty Cinemana slow (🇮🇶)"
+  }
+]    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Faselhd.cs3",
+    "name": "Faselhd"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTcamMqAuvsinzX-pcOGRo1KkYEbfv2zVJawHsugiX3dDcr64h-CJiL8ShJ&s=10",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 23552,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Cimanaw",
+    "description": "يستغرق تحميل الروابط وقتا كن صبورا",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaNowProvider.cs3",
+    "name": "Cimanaw"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjXYRCgXdHTs-hdcOKs1ooTW5plsBI7CWbsA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 41984,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Arabseed",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Arabseed.cs3",
+    "name": "Arabseed"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26624,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 16,
+    "internalName": "Shabakaty Cinemana (🇮🇶)",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/cinemana.cs3",
+    "name": "Shabakaty Cinemana (🇮🇶)"
+  },
+  {
+    "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 26624,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "Abodabodd"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie"
+    ],
+    "version": 16,
+    "internalName": "Shabakaty Cinemana slow(🇮🇶)",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CinemanaSlow.cs3",
+    "name": "Shabakaty Cinemana slow(🇮🇶)"
+  },
+]
