@@ -7,14 +7,13 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        // تم استبدال الصيغة القديمة بصيغة الرابط المباشر الصحيحة لـ JitPack
         maven { url = uri("https://jitpack.io") }
     }
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
-        // حل المشكلة: جلب الـ Plugin عبر الـ Commit Hash المستقر مباشرة من JitPack لتفادي خطأ الـ jar المحذوف
-        classpath("com.github.recloudstream:gradle:master-81b1d424d2-1")
+        // التعديل هنا: استخدام الإصدار المستقر المباشر من المكون لتفادي تعارض الأسماء في JitPack
+        classpath("com.github.recloudstream:gradle:2.2.4")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")
     }
 }
