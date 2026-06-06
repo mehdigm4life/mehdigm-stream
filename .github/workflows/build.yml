@@ -30,6 +30,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Fix gradlew Line Endings (CRLF to LF)
+        run: |
+          sed -i 's/\r$//' ./gradlew
+
       - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
 
