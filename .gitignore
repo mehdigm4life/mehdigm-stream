@@ -1,0 +1,16 @@
+# Gradle / Android
+.gradle/
+**/build/
+!build/                      # keep root /build (it holds the published .cs3 files)
+build/intermediates/
+build/outputs/
+build/tmp/
+local.properties
+.idea/
+*.iml
+*.apk
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,6 @@
+{
+  "name": "mehdigm-stream",
+  "description": "إضافات Cloudstream لمواقع الأنمي والكرتون العربية — تجربة مشاهدة سلسة بدون إعلانات.",
+  "manifestVersion": 1,
+  "pluginLists": ["https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json"]
+}

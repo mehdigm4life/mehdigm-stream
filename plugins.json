@@ -1,0 +1,26 @@
+[
+  {
+    "iconUrl": "https://animezid.cam/uploads/custom-logo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 0,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "mehdigm4life"
+    ],
+    "tvTypes": [
+      "Anime",
+      "AnimeMovie",
+      "Cartoon",
+      "TvSeries",
+      "Movie",
+      "OVA"
+    ],
+    "version": 1,
+    "internalName": "Animezid",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animezid.cs3",
+    "name": "Animezid (انمي زد)",
+    "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
+  }
+]

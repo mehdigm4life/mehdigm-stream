@@ -1,0 +1,64 @@
+name: Build Cloudstream Extensions
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - 'build/**'
+      - 'plugins.json'
+      - 'repo'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission to gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build all extensions (.cs3)
+        run: ./gradlew make
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Collect .cs3 files into build/
+        run: |
+          mkdir -p build
+          # Cloudstream gradle plugin puts each cs3 into <module>/build/<Module>.cs3
+          find . -name "*.cs3" -not -path "./build/*" -exec cp {} build/ \;
+          ls -la build/
+
+      - name: Regenerate plugins.json (optional)
+        run: |
+          # If you write a helper that scans build/*.cs3 and rebuilds plugins.json,
+          # invoke it here. Otherwise, plugins.json is kept hand-maintained.
+          echo "plugins.json kept as-is."
+
+      - name: Commit and push artifacts
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build/*.cs3 plugins.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: rebuild .cs3 artifacts [skip ci]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
