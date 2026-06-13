@@ -2,6 +2,7 @@
 .gradle/
 **/build/
 !build/                      # keep root /build (it holds the published .cs3 files)
+!build/*.cs3                 # un-ignore .cs3 files in root build/
 build/intermediates/
 build/outputs/
 build/tmp/
