@@ -2,13 +2,14 @@ package com.arabseed
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.util.Base64
+import org.json.JSONObject
 
 /**
  * ArabSeed provider for CloudStream
@@ -488,68 +489,77 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         // ============= جمع الحلقات =============
         val episodes = arrayListOf<Episode>()
 
-        // 1) قائمة المواسم: نجلب الحلقات تتابعياً (طلب AJAX واحد لكل موسم)
-        //    بدلاً من amap المتزامن الذي يسبب timeout مع المواسم الكثيرة
-        val seasonList = doc.select("div.SeasonsListHolder ul > li, #seasons__list li[data-term]")
-        if (seasonList.isNotEmpty()) {
-            for (seasonElement in seasonList) {
-                val seasonNumber = seasonElement.attr("data-season").getIntFromText()
-                    ?: parseArabicSeasonNumber(seasonElement.text())
-                    ?: continue
-                if (seasonNumber > 30) continue // حماية: تجاهل القيم غير المنطقية
-                val postId = seasonElement.attr("data-id")
-                    .ifBlank { seasonElement.attr("data-term") }
-                if (postId.isBlank()) continue
+        // 1) قائمة المواسم عبر #seasons__list li[data-term]
+        //    كل موسم يُجلب عبر AJAX: POST {mainUrl}/season__episodes/ {season_id, csrf_token} ← JSON {html}
+        //    الموسم النشط حالياً في الصفحة محمّل مسبقاً في .episodes__list
+        val seasonElements = doc.select("#seasons__list li[data-term]")
+        if (seasonElements.isNotEmpty()) {
+            // استخرج CSRF token من كود JavaScript في الصفحة
+            val pageHtml = doc.html()
+            val csrfToken = Regex("""csrf__token['"]?\s*:\s*['"]([^'"]+)['"]""")
+                .find(pageHtml)?.groupValues?.getOrNull(1)
+
+            // الحلقات المحملة مسبقاً (الموسم النشط)
+            doc.select(".episodes__list > li > a").forEach { ep ->
+                val href = ep.attr("href").fixUrl()
+                if (href.isNotBlank() && href.startsWith("http")) {
+                    val epNum = ep.selectFirst(".epi__num b")?.text()?.getIntFromText()
+                    episodes.add(newEpisode(href) {
+                        this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                        this.episode = epNum
+                    })
+                }
+            }
+
+            // المواسم المتبقية: نجلبها تتابعياً عبر AJAX
+            for (seasonElement in seasonElements) {
+                if (seasonElement.hasClass("selected") && episodes.isNotEmpty()) continue
+                val termId = seasonElement.attr("data-term")
+                if (termId.isBlank()) continue
+                val seasonNumber = parseArabicSeasonNumber(seasonElement.text()) ?: continue
+                if (seasonNumber > 30) continue
+
                 runCatching {
                     val resp = app.post(
-                        "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
-                        data = mapOf("season" to postId, "post_id" to postId),
+                        "$mainUrl/season__episodes/",
+                        data = mapOf("season_id" to termId, "csrf_token" to (csrfToken ?: "")),
                         headers = baseHeaders,
                         referer = url,
                         timeout = 25
                     )
-                    if (resp.code in listOf(403, 503)) {
-                        val resp2 = app.post(
-                            "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
-                            data = mapOf("season" to postId, "post_id" to postId),
+                    val bodyText = if (resp.code in listOf(403, 503)) {
+                        app.post(
+                            "$mainUrl/season__episodes/",
+                            data = mapOf("season_id" to termId, "csrf_token" to (csrfToken ?: "")),
                             headers = baseHeaders,
                             referer = url,
                             interceptor = cfKiller,
                             timeout = 25
-                        )
-                        resp2.document.select("a[href]").forEach { ep ->
-                            val href2 = ep.attr("href").fixUrl()
-                            if (href2.isNotBlank() && href2.startsWith("http")) {
-                                val epNum2 = ep.text().getIntFromText()
-                                episodes.add(
-                                    newEpisode(href2) {
-                                        this.name = if (epNum2 != null) "الحلقة $epNum2" else ep.text()
-                                        this.season = seasonNumber
-                                        this.episode = epNum2
-                                    }
-                                )
-                            }
-                        }
+                        ).text
                     } else {
-                        resp.document.select("a[href]").forEach { ep ->
-                            val href2 = ep.attr("href").fixUrl()
-                            if (href2.isNotBlank() && href2.startsWith("http")) {
-                                val epNum2 = ep.text().getIntFromText()
-                                episodes.add(
-                                    newEpisode(href2) {
-                                        this.name = if (epNum2 != null) "الحلقة $epNum2" else ep.text()
-                                        this.season = seasonNumber
-                                        this.episode = epNum2
-                                    }
-                                )
-                            }
+                        resp.text
+                    }
+                    val episodeHtml = try {
+                        JSONObject(bodyText).optString("html")
+                    } catch (_: Exception) { null }
+                    if (episodeHtml.isNullOrBlank()) return@runCatching
+                    val episodeDoc = Jsoup.parse(episodeHtml)
+                    episodeDoc.select("a[href]").forEach { ep ->
+                        val href = ep.attr("href").fixUrl()
+                        if (href.isNotBlank() && href.startsWith("http")) {
+                            val epNum = ep.selectFirst(".epi__num b")?.text()?.getIntFromText()
+                            episodes.add(newEpisode(href) {
+                                this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                                this.season = seasonNumber
+                                this.episode = epNum
+                            })
                         }
                     }
                 }
             }
         }
 
-        // 2) القالب الحالي: ul.episodes__list (صفحات الحلقات الجديدة)
+        // 2) احتياط: .episodes__list في حالة عدم وجود seasons__list
         if (episodes.isEmpty()) {
             val seasonGuess = Regex("""(?:الموسم|S)\s*([0-9]{1,2})""", RegexOption.IGNORE_CASE)
                 .find(title)?.groupValues?.getOrNull(1)?.toIntOrNull()
@@ -561,13 +571,11 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                     ?: ep.selectFirst(".epi__num")?.text()
                     ?: ep.text()
                 val epNum = epNumText.getIntFromText()
-                episodes.add(
-                    newEpisode(href) {
-                        this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                        this.season = seasonGuess
-                        this.episode = epNum
-                    }
-                )
+                episodes.add(newEpisode(href) {
+                    this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                    this.season = seasonGuess
+                    this.episode = epNum
+                })
             }
         }
 
@@ -579,12 +587,10 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             ).forEach { ep ->
                 val href = ep.attr("href").fixUrl()
                 if (href.isNotBlank() && href.startsWith("http")) {
-                    episodes.add(
-                        newEpisode(href) {
-                            this.name = ep.text()
-                            this.episode = ep.text().getIntFromText()
-                        }
-                    )
+                    episodes.add(newEpisode(href) {
+                        this.name = ep.text()
+                        this.episode = ep.text().getIntFromText()
+                    })
                 }
             }
         }
