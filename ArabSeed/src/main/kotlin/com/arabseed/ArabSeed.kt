@@ -213,6 +213,11 @@ class ArabSeed : MainAPI() {
         return t.trim()
     }
 
+    /** استخراج رقم الموسم من رابط الحلقة: "...-s4-eps7-..." ← 4 */
+    private fun seasonFromEpisodeUrl(url: String): Int? =
+        Regex("""-s(\d{1,2})-eps""", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
     // ---------- Item parsing (cards in lists) ----------
 
     /**
