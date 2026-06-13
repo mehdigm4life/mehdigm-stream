@@ -118,24 +118,17 @@ jobs:
                     final_url = resp.url
 
                     raw = resp.content
-                    content_enc = resp.headers.get('Content-Encoding', '').lower()
                     content_type = resp.headers.get('Content-Type', '').lower()
 
-                    if 'br' in content_enc:
-                        try:
-                            raw = brotli.decompress(raw)
-                            print(f"  ✅ فك Brotli (بناءً على Content-Encoding: br)")
-                        except Exception as e:
-                            print(f"  ⚠️ فشل فك Brotli من Content-Encoding: {e}")
+                    text = raw.decode("utf-8", errors="replace")
 
-                    if raw[:1] == b"\x0b":
+                    if raw[:1] == b"\x0b" and is_binary(text):
                         try:
                             raw = brotli.decompress(raw)
+                            text = raw.decode("utf-8", errors="replace")
                             print(f"  ✅ فك Brotli (تلقائي - magic byte)")
                         except Exception:
                             pass
-
-                    text = raw.decode("utf-8", errors="replace")
 
                     if resp.status_code == 403 and is_cf_challenge(text):
                         print(f"  ⚠️ Cloudflare تعطيل (محاولة {attempt+1}/{retries})")
@@ -163,7 +156,7 @@ jobs:
                     time.sleep(3 * (attempt + 1))
             return (None, None, None, None)
 
-        async def try_playwright(url: str, retries: int = 2):
+        async def try_playwright(url: str, retries: int = 3):
             for attempt in range(retries):
                 browser = None
                 try:
@@ -174,49 +167,56 @@ jobs:
                         args=[
                             "--disable-blink-features=AutomationControlled",
                             "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                            "--disable-web-security",
+                            "--disable-web-security", "--disable-features=IsolateOrigins,site-per-process",
                         ],
                     )
                     ctx = await browser.new_context(
                         user_agent=ua,
                         viewport={"width": 1920, "height": 1080},
                         locale="ar", timezone_id="Asia/Riyadh",
+                        device_scale_factor=1,
                         java_script_enabled=True, ignore_https_errors=True,
                         extra_http_headers={
                             "Accept-Language": "ar,en;q=0.9",
                             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Sec-Fetch-Dest": "document",
+                            "Sec-Fetch-Mode": "navigate",
+                            "Sec-Fetch-Site": "none",
                         },
                     )
                     await ctx.add_init_script("""
                         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
                         Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
                         Object.defineProperty(navigator, 'languages', {get: () => ['ar','en']});
+                        Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
                         window.chrome = {runtime: {}};
                         delete navigator.__proto__.webdriver;
+                        // Cloudflare evasion: override permission
+                        const origQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (params) => (
+                            params.name === 'notifications' ? Promise.resolve({state: 'denied'}) : origQuery(params)
+                        );
                     """)
                     page = await ctx.new_page()
-                    page.set_default_timeout(60000)
+                    page.set_default_timeout(90000)
 
                     print(f"  🚀 Playwright → {url}")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=90000)
 
-                    try:
-                        await page.wait_for_function(
-                            "() => !document.title.includes('Just a moment') && document.title.length > 0",
-                            timeout=45000,
-                        )
-                    except Exception:
-                        pass
+                    # انتظار أطول لتجاوز Cloudflare
+                    wait_time = 0
+                    while wait_time < 30:
+                        title = await page.title()
+                        html_preview = await page.evaluate("document.body?.innerText?.substring(0,200) || ''")
+                        if not is_cf_challenge(title + " " + html_preview):
+                            break
+                        await asyncio.sleep(2)
+                        wait_time += 2
+                        if wait_time % 10 == 0:
+                            print(f"  ⏳ انتظار Cloudflare... {wait_time}ث")
 
-                    await asyncio.sleep(3)
-
-                    try:
-                        await page.wait_for_function(
-                            "() => document.querySelector('.cf-browser-verification, #cf-please-wait') === null",
-                            timeout=15000,
-                        )
-                    except Exception:
-                        pass
+                    # انتظار إضافي لتحميل JS
+                    await asyncio.sleep(2)
 
                     html = await page.content()
                     final_url = page.url
@@ -226,7 +226,7 @@ jobs:
                     await p.stop()
 
                     if is_cf_challenge(html):
-                        print(f"  ⚠️ Playwright فشل في تخطي Cloudflare (محاولة {attempt+1})")
+                        print(f"  ⚠️ Playwright فشل في تخطي Cloudflare (محاولة {attempt+1}/{retries})")
                         await asyncio.sleep(5 * (attempt + 1))
                         continue
 
