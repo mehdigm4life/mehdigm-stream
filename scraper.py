@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-سكريبت سكراب قوي - يتعامل مع Cloudflare، التحويلات، وكل أنواع الضغط
-"""
-import sys, os, subprocess, shutil
+import sys, os, subprocess, shutil, re
 
 def fetch(url, output=None):
     out = output or (url.strip("/").split("/")[-1] or "index") + ".html"
@@ -24,24 +21,47 @@ def fetch(url, output=None):
     if os.path.exists(out) and os.path.getsize(out) > 0:
         with open(out, "rb") as f:
             c = f.read(200)
-        if b"<!DOCTYPE html" in c or b"<html" in c:
+        is_good = False
+        if b"<!DOCTYPE html" in c or b"<html" in c or b"<HEAD" in c or b"<head" in c:
             print("HTML صحيح ✓", file=sys.stderr)
-        elif all(b < 128 for b in c[:100]):
-            print("نص عادي", file=sys.stderr)
+            is_good = True
         else:
-            print("⚠️  محتوى ثنائي - قد يحتاج فك ضغط", file=sys.stderr)
-            # جرب فك ضغط Brotli يدويًا
-            if c[:1] == b"\x0b":
+            nulls = sum(1 for b in c[:500] if b == 0)
+            if nulls > 20:
+                print("⚠️  محتوى ثنائي! جارٍ فك الضغط...", file=sys.stderr)
+                decompressed = False
                 try:
                     import brotli
                     with open(out, "rb") as f:
                         compressed = f.read()
-                    decompressed = brotli.decompress(compressed)
+                    d = brotli.decompress(compressed)
                     with open(out, "wb") as f:
-                        f.write(decompressed)
-                    print("تم فك ضغط Brotli ✓", file=sys.stderr)
+                        f.write(d)
+                    print(f"تم فك Brotli: {len(compressed)} → {len(d)} بايت ✓", file=sys.stderr)
+                    decompressed = True
+                    is_good = True
                 except:
                     pass
+                if not decompressed:
+                    try:
+                        import gzip
+                        with open(out, "rb") as f:
+                            compressed = f.read()
+                        d = gzip.decompress(compressed)
+                        with open(out, "wb") as f:
+                            f.write(d)
+                        print(f"تم فك Gzip: {len(compressed)} → {len(d)} بايت ✓", file=sys.stderr)
+                        decompressed = True
+                        is_good = True
+                    except:
+                        pass
+                if not decompressed:
+                    print("❌ لم نتمكن من فك الضغط - الملف قد يكون تالفًا", file=sys.stderr)
+            elif all(b < 128 for b in c[:100]):
+                print("نص عادي", file=sys.stderr)
+                is_good = True
+            else:
+                print("⚠️  محتوى غير معروف", file=sys.stderr)
         print(f"محفوظ في: {out}", file=sys.stderr)
         return True
     return False
