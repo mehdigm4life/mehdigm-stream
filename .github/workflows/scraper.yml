@@ -1,5 +1,9 @@
 name: Professional Web Scraper & Cloner
 
+# منح صلاحيات الكتابة للروبوت ليعمل في أي مستودع تلقائياً بدون تعديل إعدادات
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -21,9 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. جلب ملفات المستودع الحالية
+    # 1. جلب ملفات المستودع الحالية مع تفعيل التمرير التلقائي لتوكن الصلاحيات
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        persist-credentials: true
 
     # 2. إعداد بيئة بايثون وتثبيت المكتبات اللازمة
     - name: Set up Python
@@ -119,19 +125,19 @@ jobs:
         print("✅ انتهت عملية السحب بنجاح!")
         EOF
 
-    # 4. رفع الملفات تلقائياً بعمل Commit و Push للمستودع
+    # 4. رفع الملفات تلقائياً بعمل Commit و Push للمستودع باستخدام صلاحيات التوكن الممررة
     - name: Commit and Push Scraped Data
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         
-        # إضافة المجلد الجديد المستخرج فقط
+        # إضافة المجلد المستخرج
         git add scraped_sites/
         
-        # التحقق إذا كانت هناك تغييرات فعلاً لتجنب فشل الـ Workflow في حال عدم وجود جديد
+        # التحقق من وجود تغييرات لتجنب فشل الـ Workflow إذا تم سحب نفس الموقع بدون جديد
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "🤖 ऑटो: Scraped content from ${{ github.event.inputs.target_url }}"
-          git push
+          git commit -m "🤖 Auto: Scraped content from ${{ github.event.inputs.target_url }}"
+          git push origin HEAD:${{ github.ref }}
         fi
