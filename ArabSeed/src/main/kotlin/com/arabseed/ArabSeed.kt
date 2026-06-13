@@ -518,11 +518,31 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                             timeout = 25
                         )
                         resp2.document.select("a[href]").forEach { ep ->
-                            extractAjaxEpisode(ep, seasonNumber, episodes)
+                            val href2 = ep.attr("href").fixUrl()
+                            if (href2.isNotBlank() && href2.startsWith("http")) {
+                                val epNum2 = ep.text().getIntFromText()
+                                episodes.add(
+                                    newEpisode(href2) {
+                                        this.name = if (epNum2 != null) "الحلقة $epNum2" else ep.text()
+                                        this.season = seasonNumber
+                                        this.episode = epNum2
+                                    }
+                                )
+                            }
                         }
                     } else {
                         resp.document.select("a[href]").forEach { ep ->
-                            extractAjaxEpisode(ep, seasonNumber, episodes)
+                            val href2 = ep.attr("href").fixUrl()
+                            if (href2.isNotBlank() && href2.startsWith("http")) {
+                                val epNum2 = ep.text().getIntFromText()
+                                episodes.add(
+                                    newEpisode(href2) {
+                                        this.name = if (epNum2 != null) "الحلقة $epNum2" else ep.text()
+                                        this.season = seasonNumber
+                                        this.episode = epNum2
+                                    }
+                                )
+                            }
                         }
                     }
                 }
