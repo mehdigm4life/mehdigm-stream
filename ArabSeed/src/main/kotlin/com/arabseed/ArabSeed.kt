@@ -678,31 +678,55 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         val seasons: List<Pair<Int, String>> = parentDoc?.extractSeasonsFromParent().orEmpty()
 
         if (seasons.isNotEmpty()) {
-            // اجلب صفحة كل موسم بالتوازي واستخرج الحلقات
             seasons.amap { (seasonNum, seasonUrl) ->
                 runCatching {
-                    val seasonDoc = if (seasonUrl == url) doc else getPage(seasonUrl, referer = parentUrl ?: url)
-                    val eps = seasonDoc.extractEpisodesFromSeasonPage(seasonNum)
-                    synchronized(episodes) { episodes.addAll(eps) }
+                    val isAjaxSeason = seasonUrl.contains("Episodes.php")
+                    if (isAjaxSeason) {
+                        val ajaxDoc = postPage(seasonUrl, emptyMap(), referer = parentUrl ?: url)
+                        ajaxDoc.select("a[href]").forEach { ep ->
+                            val href = ep.attr("href").fixUrl()
+                            if (href.isNotBlank() && href.startsWith("http")) {
+                                val epNum = ep.text().getIntFromText()
+                                val newEp = newEpisode(href) {
+                                    this.name = ep.text()
+                                    this.season = seasonNum
+                                    this.episode = epNum
+                                }
+                                synchronized(episodes) { episodes.add(newEp) }
+                            }
+                        }
+                    } else {
+                        val seasonDoc = if (seasonUrl == url) doc else getPage(seasonUrl, referer = parentUrl ?: url)
+                        val eps = seasonDoc.extractEpisodesFromSeasonPage(seasonNum)
+                        synchronized(episodes) { episodes.addAll(eps) }
+                    }
                 }
             }
         }
 
-        // ---------- Fallback 1: قائمة المواسم القديمة (AJAX قديم) ----------
+        // ---------- Fallback 1: قائمة المواسم القديمة (AJAX) ----------
         if (episodes.isEmpty()) {
-            val seasonList = doc.select("div.SeasonsListHolder ul > li")
+            val seasonList = doc.select(
+                "div.SeasonsListHolder ul > li, " +
+                "#seasons__list li[data-term]"
+            )
             if (seasonList.isNotEmpty()) {
                 seasonList.amap { seasonElement ->
                     val seasonNumber = seasonElement.attr("data-season").getIntFromText()
+                        ?: parseArabicSeasonNumber(seasonElement.text())
+                        ?: return@amap
+                    val dataId = seasonElement.attr("data-id")
+                        .ifBlank { seasonElement.attr("data-term") }
+                    if (dataId.isBlank()) return@amap
                     runCatching {
                         postPage(
                             "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
                             mapOf(
-                                "season" to seasonElement.attr("data-season"),
-                                "post_id" to seasonElement.attr("data-id")
+                                "season" to dataId,
+                                "post_id" to dataId
                             ),
                             referer = url
-                        ).select("a").forEach { ep ->
+                        ).select("a[href]").forEach { ep ->
                             val href = ep.attr("href").fixUrl()
                             if (href.isNotBlank() && href.startsWith("http")) {
                                 val epNum = ep.text().getIntFromText()
@@ -810,9 +834,11 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         val postDoc = getPage(data)
 
         // اكتشاف رابط صفحة المشاهدة
-        val watchUrl = postDoc.selectFirst("a.watch__btn, a.watchBTn, a.WatchButton")
-            ?.attr("href")
-            ?.fixUrl()
+        val watchUrl = postDoc.selectFirst(
+            "a.btton.watch__btn, " +
+            "a.watch__btn, a.watchBTn, a.WatchButton, " +
+            "a[href$='/watch/']"
+        )?.attr("href")?.fixUrl()
             ?.takeIf { it.isNotBlank() && it.startsWith("http") }
             ?: (data.trimEnd('/') + "/watch/")
 
@@ -821,6 +847,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
 
         // 1) قائمة السيرفرات في صفحة المشاهدة
         watchDoc.select(
+            ".servers__list li[data-link], " +
             "ul.servers__list li[data-link], " +
             "li[data-link], li[data-server], " +
             ".containerServers ul li, ul.serversList li"
