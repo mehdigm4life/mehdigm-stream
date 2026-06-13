@@ -234,13 +234,12 @@ class FaselHD : MainAPI() {
                 val epText = ep.text().trim()
                 if (epText.contains("باقي") || epText.contains("المزيد")) return@forEach
                 val epNum = Regex("""\d+""").find(epText)?.value?.toIntOrNull()
-                episodes.add(
-                    newEpisode(epUrl, episodeCallback = {
-                        this.name = epText
-                        this.season = seasonNum
-                        this.episode = epNum
-                    })
-                )
+                newEpisode(epUrl)?.let {
+                    it.name = epText
+                    it.season = seasonNum
+                    it.episode = epNum
+                    episodes.add(it)
+                }
             }
         }
 
