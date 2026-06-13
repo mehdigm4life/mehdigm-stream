@@ -3,7 +3,6 @@ package com.faselhd
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -19,7 +18,7 @@ class FaselHD : MainAPI() {
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie, TvType.Anime)
 
     private val cfKiller = CloudflareKiller()
-    private var baseDomain = mainUrl
+    private var _baseUrl: String? = null
 
     private val baseHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
@@ -28,25 +27,25 @@ class FaselHD : MainAPI() {
         "Upgrade-Insecure-Requests" to "1"
     )
 
-    private suspend fun resolveBaseUrl(): String {
-        if (baseDomain != mainUrl) return baseDomain
+    private suspend fun baseUrl(): String {
+        _baseUrl?.let { return it }
         return try {
             val resp = app.get(mainUrl, allowRedirects = true)
             val finalUrl = resp.url
             val uri = java.net.URI(finalUrl)
-            "${uri.scheme}://${uri.host}".also { baseDomain = it }
+            "${uri.scheme}://${uri.host}".also { _baseUrl = it }
         } catch (_: Exception) {
-            mainUrl
+            mainUrl.also { _baseUrl = it }
         }
     }
 
     private suspend fun getPage(url: String, referer: String? = null): Document {
-        val resolvedBase = resolveBaseUrl()
-        val cleanUrl = if (!url.startsWith("http")) "${resolvedBase}${if (url.startsWith("/")) "" else "/"}$url" else url
+        val base = baseUrl()
+        val cleanUrl = if (url.startsWith("http")) url else "${base}${if (url.startsWith("/")) "" else "/"}$url"
         var response = app.get(
             cleanUrl,
             headers = baseHeaders,
-            referer = referer ?: resolvedBase,
+            referer = referer ?: base,
             timeout = 120
         )
         val doc = response.document
@@ -60,7 +59,7 @@ class FaselHD : MainAPI() {
             response = app.get(
                 cleanUrl,
                 headers = baseHeaders,
-                referer = referer ?: resolvedBase,
+                referer = referer ?: base,
                 interceptor = cfKiller,
                 timeout = 120
             )
@@ -70,7 +69,7 @@ class FaselHD : MainAPI() {
 
     private fun String.fixUrl(): String {
         if (isBlank()) return this
-        val base = baseDomain
+        val base = _baseUrl ?: mainUrl
         return when {
             startsWith("http") -> this
             startsWith("//") -> "https:$this"
@@ -121,11 +120,11 @@ class FaselHD : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية"
+        "/main" to "الرئيسية"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val doc = getPage("${request.data}")
+        val doc = getPage(request.data)
         val lists = mutableListOf<HomePageList>()
 
         val slider = doc.select("#homeSlide .swiper-slide").mapNotNull {
