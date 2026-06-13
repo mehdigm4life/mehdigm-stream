@@ -38,13 +38,13 @@ jobs:
           name: ArabSeed
           path: ArabSeed/build/ArabSeed.cs3
 
-      - name: Commit and push built cs3
+      - name: Commit and push built cs3 to build/
         run: |
           if [ -f "ArabSeed/build/ArabSeed.cs3" ]; then
-            cp ArabSeed/build/ArabSeed.cs3 ArabSeed/
+            cp ArabSeed/build/ArabSeed.cs3 build/ArabSeed.cs3
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
-            git add ArabSeed/ArabSeed.cs3
+            git add build/ArabSeed.cs3
             if ! git diff --staged --quiet; then
               git commit -m "🤖 Build ArabSeed.cs3"
               git push
