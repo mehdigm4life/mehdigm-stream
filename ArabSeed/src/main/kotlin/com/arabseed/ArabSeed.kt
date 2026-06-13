@@ -513,7 +513,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                     val epNum = ep.selectFirst(".epi__num b")?.text()?.getIntFromText()
                     episodes.add(newEpisode(href) {
                         this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                        this.season = activeSeasonNum
+                        this.season = seasonFromEpisodeUrl(href) ?: activeSeasonNum
                         this.episode = epNum
                     })
                 }
@@ -558,7 +558,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                             val epNum = ep.selectFirst(".epi__num b")?.text()?.getIntFromText()
                             episodes.add(newEpisode(href) {
                                 this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                                this.season = seasonNumber
+                                this.season = seasonFromEpisodeUrl(href) ?: seasonNumber
                                 this.episode = epNum
                             })
                         }
@@ -581,7 +581,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                 val epNum = epNumText.getIntFromText()
                 episodes.add(newEpisode(href) {
                     this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                    this.season = seasonGuess
+                    this.season = seasonFromEpisodeUrl(href) ?: seasonGuess
                     this.episode = epNum
                 })
             }
