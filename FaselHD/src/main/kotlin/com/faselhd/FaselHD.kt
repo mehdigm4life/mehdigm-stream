@@ -343,18 +343,23 @@ class FaselHD : MainAPI() {
     }
 
     @OptIn(Prerelease::class)
+    @OptIn(Prerelease::class)
     private suspend fun extractHlsFromPlayer(playerUrl: String): List<String> {
         return try {
             val response = app.get(playerUrl, headers = baseHeaders, referer = baseUrl(), timeout = 60)
             val doc = Jsoup.parse(response.text)
 
-            val obfuscatedScript = doc.select("script:not([src])").mapNotNull { it.data().takeIf { d -> d.isNotBlank() } }
-                .firstOrNull { it.contains("function(_0x") && it.contains("while(!![])") }
-                ?: return emptyList()
+            val scripts = doc.select("script:not([src])").mapNotNull { it.data().takeIf { d -> d.isNotBlank() } }
+            if (scripts.isEmpty()) return emptyList()
+
+            val wrappedScripts = scripts.joinToString("\n") { script ->
+                "try { $script } catch(e) {}"
+            }
 
             val safeUrl = playerUrl.replace("'", "\\'").replace("\\", "\\\\").replace("\n", "\\n")
 
-            val wrapper = """
+            val wrapper = buildString {
+                append("""
 var document = {
     _output: '',
     write: function(html) { this._output += html; },
@@ -366,10 +371,11 @@ var document = {
     createTextNode: function() { return {}; },
     body: { appendChild: function() {}, insertAdjacentHTML: function() {}, innerHTML: '' },
     documentElement: { outerHTML: '' },
-    cookie: ''
+    cookie: '',
+    createEvent: function() { return {}; },
+    addEventListener: function() {}
 };
 var window = this;
-var location = { href: '$safeUrl', host: 'www.fasel-hd.cam', protocol: 'https:' };
 var navigator = { userAgent: 'Mozilla/5.0', platform: 'Win32', language: 'en-US' };
 var setTimeout = function(fn) { try { if (typeof fn === 'function') fn(); } catch(e) {} };
 var setInterval = function() { return 0; };
@@ -377,11 +383,26 @@ var clearInterval = function() {};
 var clearTimeout = function() {};
 var console = { log: function() {}, warn: function() {}, error: function() {} };
 var screen = { width: 1920, height: 1080 };
-try {
-    $obfuscatedScript
-} catch(e) {}
-document._output;
-""".trimIndent().replace("$obfuscatedScript", obfuscatedScript)
+var history = { pushState: function() {} };
+var location = { href: '$safeUrl' };
+var jwplayer = function() {
+    return {
+        key: '',
+        setup: function(config) {
+            try { if (config && config.image) document._output += config.image; } catch(e) {}
+        },
+        on: function() {},
+        load: function() {},
+        getPosition: function() { return 0; },
+        play: function() {},
+        seek: function() {}
+    };
+};
+
+""".trimIndent())
+                append(wrappedScripts)
+                append("\ndocument._output;")
+            }
 
             val rhino = getRhinoContext()
             val scope = rhino.initSafeStandardObjects()
