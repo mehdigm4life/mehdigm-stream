@@ -1,44 +1,29 @@
-name: Professional Web Scraper & Cloner
-
-permissions:
-  contents: write
+name: Scraper
 
 on:
+  schedule:
+    - cron: '0 */6 * * *'
   workflow_dispatch:
-    inputs:
-      target_url:
-        description: 'أدخل رابط الموقع المستهدف (e.g., https://example.com)'
-        required: true
-        type: string
-      scrape_mode:
-        description: 'وضع السحب'
-        required: true
-        type: choice
-        options:
-          - 'Single Page (صفحة واحدة فقط)'
-          - 'Full Website (الموقع بالكامل)'
-        default: 'Single Page (صفحة واحدة فقط)'
-      max_pages:
-        description: 'حد أقصى للصفحات (0 = غير محدود)'
-        required: true
-        type: number
-        default: 0
 
 jobs:
-  scrape_and_commit:
+  scrape:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: true
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Fetch website
+        run: |
+          curl -sL \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
+            -H "Accept-Language: en-US,en;q=0.9,ar;q=0.8" \
+            --compressed \
+            -o main.html \
+            -w "Status: %{http_code}\nContent-Type: %{content_type}\nSize: %{size_download} bytes\n" \
+            "https://web61312x.faselhdx.bid/main"
 
+<<<<<<< HEAD
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
@@ -374,3 +359,21 @@ jobs:
           git commit -m "🤖 Scraped content from ${{ github.event.inputs.target_url }}"
           git push origin HEAD:${{ github.ref }}
         fi
+=======
+      - name: Validate HTML
+        run: |
+          if grep -qi '<!DOCTYPE html' main.html 2>/dev/null || grep -qi '<html' main.html 2>/dev/null; then
+            echo "HTML صحيح ✓"
+          else
+            echo "⚠️  خطأ: المحتوى غير HTML"
+            file main.html
+            xxd main.html | head -5
+            exit 1
+          fi
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraped-page
+          path: main.html
+>>>>>>> ab6f19d (🤖 opencode: auto-commit 2026-06-13 14:46:23Z)
