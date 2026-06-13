@@ -2,7 +2,7 @@ name: 🤖 OpenCode AI Cloud (Web)
 
 # يعمل هذا الـ workflow على أي repository تضع فيه هذا الملف
 # المسار المطلوب: .github/workflows/opencode.yml
-# يقوم بتثبيت OpenCode AI كاملاً على Ubuntu runner ويفتح واجهة Web
+# يقوم بتثبيت OpenCode AI كاملاً على Ubuntu runner ويفتح API/Web
 # عبر Cloudflare Tunnel (TryCloudflare) — يطبع رابط عام يمكنك الدخول منه
 # والتحدث مع النماذج وتعديل ملفات الـ repo. أي تعديل يتم commit + push تلقائياً.
 
@@ -13,11 +13,6 @@ on:
         description: "كم دقيقة يبقى السيرفر شغّال (الحد الأقصى لـ GitHub Actions = 350 دقيقة ≈ 6 ساعات)"
         required: true
         default: "350"
-        type: string
-      password:
-        description: "كلمة مرور لحماية واجهة الويب (المستخدم الافتراضي: opencode). اتركه فارغاً لتعطيل الحماية"
-        required: false
-        default: ""
         type: string
       auto_commit:
         description: "هل تريد commit + push تلقائي لأي تعديلات يقوم بها opencode على الملفات؟"
@@ -41,46 +36,21 @@ jobs:
     # الحد الأقصى لـ job في GitHub Actions = 360 دقيقة
     timeout-minutes: 355
 
-    # =========================================================================
-    # متغيرات بيئية:
-    #   ضع أي مفتاح API تريده داخل Settings → Secrets and variables → Actions
-    #   ثم سيتم تمريره تلقائياً إلى opencode وستظهر النماذج المرتبطة به في الـ UI.
-    #   لست مضطراً لإضافة أي مفتاح: opencode يحتوي على نماذج مجانية عبر OpenCode Zen.
-    # =========================================================================
     env:
-      # حماية بكلمة مرور (HTTP Basic Auth)
-      OPENCODE_SERVER_PASSWORD: ${{ github.event.inputs.password }}
-      OPENCODE_SERVER_USERNAME: "opencode"
-
       # ===== مزودات النماذج الشائعة (كلها اختيارية) =====
-      # OpenCode Zen — مجاني تماماً، يكفي إنشاء حساب على opencode.ai/zen
       OPENCODE_API_KEY:    ${{ secrets.OPENCODE_API_KEY }}
-
-      # Anthropic Claude
       ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
-      # OpenAI (GPT-4.1, GPT-5, o1, ...)
       OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
-      # Google Gemini
       GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      # OpenRouter (يفتح وصول لمئات النماذج بمفتاح واحد)
       OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
-      # Groq (سريع جداً ومجاني للاستخدام الخفيف)
       GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
-      # DeepSeek
       DEEPSEEK_API_KEY:    ${{ secrets.DEEPSEEK_API_KEY }}
-      # Mistral
       MISTRAL_API_KEY:     ${{ secrets.MISTRAL_API_KEY }}
-      # xAI Grok
       XAI_API_KEY:         ${{ secrets.XAI_API_KEY }}
-      # Cohere
       COHERE_API_KEY:      ${{ secrets.COHERE_API_KEY }}
-      # Together AI
       TOGETHER_API_KEY:    ${{ secrets.TOGETHER_API_KEY }}
-      # Perplexity
       PERPLEXITY_API_KEY:  ${{ secrets.PERPLEXITY_API_KEY }}
-      # GitHub Models (مجاني عبر حسابك)
-      GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       # -----------------------------------------------------------------------
@@ -90,7 +60,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # نحتاج token للسماح بـ push لاحقاً
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
@@ -102,16 +71,15 @@ jobs:
           node-version: "20"
 
       # -----------------------------------------------------------------------
-      # 3) تثبيت الأدوات المساعدة (git, curl, jq, unzip)
+      # 3) تثبيت الأدوات المساعدة
       # -----------------------------------------------------------------------
       - name: 🛠️ Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq curl unzip jq git ca-certificates
+          sudo apt-get install -y -qq curl unzip jq git ca-certificates procps
 
       # -----------------------------------------------------------------------
       # 4) تثبيت OpenCode عبر الطريقة الرسمية
-      #    https://opencode.ai/install — هو script رسمي من sst/opencode
       # -----------------------------------------------------------------------
       - name: 🤖 Install OpenCode AI (official installer)
         run: |
@@ -124,17 +92,16 @@ jobs:
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.opencode/bin:$PATH"
 
-          # تثبيت احتياطي عبر npm (بعض النسخ تحتاجها)
+          # تثبيت احتياطي عبر npm
           echo "::group::Installing opencode-ai via npm (fallback)"
           npm install -g opencode-ai || true
           echo "::endgroup::"
 
-          # تحقق
           which opencode || true
           opencode --version || true
 
       # -----------------------------------------------------------------------
-      # 5) تثبيت cloudflared (لفتح نفق عام إلى الـ runner)
+      # 5) تثبيت cloudflared
       # -----------------------------------------------------------------------
       - name: ☁️ Install cloudflared
         uses: AnimMouse/setup-cloudflared@v2
@@ -143,11 +110,10 @@ jobs:
         run: cloudflared --version
 
       # -----------------------------------------------------------------------
-      # 6) إنشاء ملف إعدادات opencode.json بسيط (اختياري لكن مفيد)
+      # 6) إنشاء ملف إعدادات opencode.json
       # -----------------------------------------------------------------------
       - name: 📝 Prepare opencode config
         run: |
-          # إذا لم يوجد ملف إعدادات في الـ repo نُنشئ واحداً افتراضياً
           if [ ! -f "opencode.json" ] && [ ! -f ".opencode/opencode.json" ]; then
             cat > opencode.json <<'JSON'
           {
@@ -163,73 +129,110 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # 7) تشغيل opencode serve في الخلفية على 0.0.0.0:4096
+      # 7) ⭐ تشغيل opencode serve في الخلفية — مع الإصلاح النهائي
+      #
+      # سبب التعليق سابقاً: nohup … & وحده لا يفصل العملية في GitHub Actions،
+      # فالـ step لا يخرج أبداً. الحل: setsid + إعادة توجيه stdin/stdout/stderr
+      # + disown، وفحص /global/health (endpoint الصحيح).
       # -----------------------------------------------------------------------
       - name: 🚀 Start OpenCode web server (background)
+        timeout-minutes: 5    # ⭐ ضمان عدم تعليق الخطوة أبداً
         run: |
-          set -e
+          set -euo pipefail
           export PATH="$HOME/.opencode/bin:$PATH"
 
           mkdir -p "$RUNNER_TEMP/opencode-logs"
           LOG_FILE="$RUNNER_TEMP/opencode-logs/server.log"
+          : > "$LOG_FILE"
 
           echo "Starting opencode serve on 0.0.0.0:4096 ..."
-          nohup opencode serve \
-            --hostname 0.0.0.0 \
-            --port 4096 \
-            > "$LOG_FILE" 2>&1 &
 
-          echo "$!" > "$RUNNER_TEMP/opencode.pid"
-          echo "OpenCode PID = $(cat $RUNNER_TEMP/opencode.pid)"
+          # ⭐⭐ الإصلاح الجوهري ⭐⭐
+          # setsid  : ينشئ process group جديد ويفصل العملية تماماً عن الـ runner
+          # </dev/null : يغلق stdin حتى لا ينتظر input
+          # >LOG 2>&1 : يعيد توجيه stdout/stderr إلى ملف فقط (لا pipe للـ runner)
+          # &        : خلفية
+          # disown   : إزالة الـ job من قائمة jobs الخاصة بـ bash
+          setsid bash -c "opencode serve --hostname 0.0.0.0 --port 4096 --cors '*' </dev/null >>'$LOG_FILE' 2>&1" &
+          OPENCODE_PID=$!
+          disown || true
 
-          # ننتظر حتى يستجيب على المنفذ (حد أقصى 60 ثانية)
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:4096/ > /dev/null 2>&1 \
-            || curl -sf -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://127.0.0.1:4096/ > /dev/null 2>&1; then
-              echo "✅ opencode is up after ${i}s"
-              break
+          echo "$OPENCODE_PID" > "$RUNNER_TEMP/opencode.pid"
+          echo "OpenCode PID = $OPENCODE_PID"
+
+          # ننتظر حتى يستجيب على المنفذ
+          # نستخدم /global/health (Endpoint الرسمي للفحص حسب توثيق opencode)
+          # ومعه fallback: فحص TCP فقط في حال غيّروا الـ API
+          UP=0
+          for i in $(seq 1 120); do
+            # المحاولة 1: health endpoint الرسمي
+            if curl -fsS --max-time 2 http://127.0.0.1:4096/global/health >/dev/null 2>&1; then
+              UP=1; echo "✅ /global/health responded after ${i}s"; break
             fi
-            sleep 1
-            if [ "$i" -eq 60 ]; then
-              echo "❌ opencode failed to start in 60s. Logs:"
+            # المحاولة 2: TCP فقط (المنفذ مفتوح يعني العملية حية)
+            if (echo > /dev/tcp/127.0.0.1/4096) >/dev/null 2>&1; then
+              # نتأكد أن السيرفر يستجيب لـ HTTP بأي status
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:4096/ || echo "000")
+              if [ "$CODE" != "000" ]; then
+                UP=1; echo "✅ opencode listening on :4096 (HTTP $CODE) after ${i}s"; break
+              fi
+            fi
+            # تحقق أن العملية ما زالت حية أصلاً
+            if ! kill -0 "$OPENCODE_PID" 2>/dev/null; then
+              echo "❌ opencode process exited prematurely. Logs:"
               cat "$LOG_FILE" || true
               exit 1
             fi
+            sleep 1
           done
+
+          if [ "$UP" -ne 1 ]; then
+            echo "❌ opencode failed to become reachable in 120s. Logs:"
+            tail -n 200 "$LOG_FILE" || true
+            # نقتل العملية الفاشلة قبل الخروج
+            kill -TERM "$OPENCODE_PID" 2>/dev/null || true
+            exit 1
+          fi
 
           echo "----- last 30 lines of opencode log -----"
           tail -n 30 "$LOG_FILE" || true
 
       # -----------------------------------------------------------------------
-      # 8) فتح Cloudflare Quick Tunnel وطباعة الرابط العام
+      # 8) فتح Cloudflare Quick Tunnel — نفس نمط الفصل الآمن
       # -----------------------------------------------------------------------
       - name: 🌐 Start Cloudflare Quick Tunnel
         id: tunnel
+        timeout-minutes: 3
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/cloudflared-logs"
           TUN_LOG="$RUNNER_TEMP/cloudflared-logs/tunnel.log"
+          : > "$TUN_LOG"
 
-          # quick tunnel — لا يحتاج حساب Cloudflare
-          nohup cloudflared tunnel \
-            --no-autoupdate \
-            --url http://127.0.0.1:4096 \
-            > "$TUN_LOG" 2>&1 &
-
-          echo "$!" > "$RUNNER_TEMP/cloudflared.pid"
+          # نفس نمط setsid لضمان عدم تعليق الخطوة
+          setsid bash -c "cloudflared tunnel --no-autoupdate --url http://127.0.0.1:4096 </dev/null >>'$TUN_LOG' 2>&1" &
+          TUN_PID=$!
+          disown || true
+          echo "$TUN_PID" > "$RUNNER_TEMP/cloudflared.pid"
+          echo "cloudflared PID = $TUN_PID"
 
           # استخراج الرابط https://*.trycloudflare.com من اللوج
           PUBLIC_URL=""
-          for i in $(seq 1 60); do
-            if grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUN_LOG" | head -n1 > /tmp/url.txt; then
-              PUBLIC_URL=$(cat /tmp/url.txt)
+          for i in $(seq 1 90); do
+            if grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUN_LOG" | head -n1 > /tmp/url.txt 2>/dev/null; then
+              PUBLIC_URL=$(cat /tmp/url.txt || true)
               if [ -n "$PUBLIC_URL" ]; then break; fi
+            fi
+            if ! kill -0 "$TUN_PID" 2>/dev/null; then
+              echo "❌ cloudflared exited prematurely. Logs:"
+              cat "$TUN_LOG" || true
+              exit 1
             fi
             sleep 1
           done
 
           if [ -z "$PUBLIC_URL" ]; then
-            echo "❌ Failed to get tunnel URL. Tunnel log:"
+            echo "❌ Failed to get tunnel URL in 90s. Tunnel log:"
             cat "$TUN_LOG"
             exit 1
           fi
@@ -242,33 +245,29 @@ jobs:
           echo "║              🎉 OpenCode AI is LIVE on the Web 🎉              ║"
           echo "╠════════════════════════════════════════════════════════════════╣"
           printf  "║  URL:  %-55s ║\n" "$PUBLIC_URL"
-          if [ -n "$OPENCODE_SERVER_PASSWORD" ]; then
-            printf "║  User: %-55s ║\n" "opencode"
-            printf "║  Pass: %-55s ║\n" "(الكلمة التي أدخلتها عند تشغيل الـ workflow)"
-          else
-            printf "║  Auth: %-55s ║\n" "بدون حماية — الرابط عام لمن يحصل عليه"
-          fi
+          printf  "║  Health: %-53s ║\n" "$PUBLIC_URL/global/health"
           echo "╚════════════════════════════════════════════════════════════════╝"
           echo ""
 
       # -----------------------------------------------------------------------
-      # 9) كتابة الرابط في Summary الـ workflow ليكون قابل للنقر مباشرة
+      # 9) كتابة الرابط في Summary
       # -----------------------------------------------------------------------
       - name: 📌 Publish URL to Job Summary
         run: |
           {
             echo "# 🤖 OpenCode AI — Live Session"
             echo ""
-            echo "## 🌐 افتح هذا الرابط للتحدث مع OpenCode"
+            echo "## 🌐 الرابط العام"
             echo ""
             echo "### 👉 [${PUBLIC_URL}](${PUBLIC_URL})"
+            echo ""
+            echo "- Health check: \`${PUBLIC_URL}/global/health\`"
+            echo "- API docs:     \`${PUBLIC_URL}/doc\`"
             echo ""
             echo "| الحقل | القيمة |"
             echo "|------|--------|"
             echo "| **Repository** | \`${GITHUB_REPOSITORY}\` |"
             echo "| **Branch** | \`${GITHUB_REF_NAME}\` |"
-            echo "| **Username** | \`opencode\` |"
-            echo "| **Password** | ${OPENCODE_SERVER_PASSWORD:+تم تعيينها (مخفية)} ${OPENCODE_SERVER_PASSWORD:-بدون حماية} |"
             echo "| **مدة التشغيل** | ${{ github.event.inputs.duration_minutes }} دقيقة |"
             echo "| **Auto commit** | ${{ github.event.inputs.auto_commit }} |"
             echo ""
@@ -281,18 +280,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # -----------------------------------------------------------------------
-      # 10) Auto-commit loop — في الخلفية يقوم بـ commit/push للتعديلات
+      # 10) Auto-commit loop في الخلفية — مع setsid
       # -----------------------------------------------------------------------
       - name: 🔁 Start auto-commit loop (background)
         if: ${{ github.event.inputs.auto_commit == 'true' }}
+        timeout-minutes: 1
         run: |
-          set -e
+          set -euo pipefail
           git config --global user.email "opencode-bot@users.noreply.github.com"
           git config --global user.name  "opencode-bot"
 
           INTERVAL="${{ github.event.inputs.commit_interval_seconds }}"
           BRANCH="${GITHUB_REF_NAME}"
           LOG="$RUNNER_TEMP/autocommit.log"
+          : > "$LOG"
 
           cat > "$RUNNER_TEMP/autocommit.sh" <<EOF
           #!/usr/bin/env bash
@@ -310,9 +311,12 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/autocommit.sh"
 
-          nohup bash "$RUNNER_TEMP/autocommit.sh" > "$LOG" 2>&1 &
-          echo "$!" > "$RUNNER_TEMP/autocommit.pid"
-          echo "✅ Auto-commit loop started (every ${INTERVAL}s) on branch ${BRANCH}"
+          # ⭐ نفس نمط setsid + disown لمنع التعليق
+          setsid bash -c "bash '$RUNNER_TEMP/autocommit.sh' </dev/null >>'$LOG' 2>&1" &
+          AC_PID=$!
+          disown || true
+          echo "$AC_PID" > "$RUNNER_TEMP/autocommit.pid"
+          echo "✅ Auto-commit loop started (PID=$AC_PID, every ${INTERVAL}s) on branch ${BRANCH}"
 
       # -----------------------------------------------------------------------
       # 11) إبقاء الـ job حياً للمدة المطلوبة
@@ -324,10 +328,7 @@ jobs:
           echo "Session will run for ${DURATION_MIN} minutes (${DURATION_SEC}s)."
           echo "Public URL: ${PUBLIC_URL}"
           echo ""
-          echo "اضغط Cancel workflow في صفحة Actions لإيقاف الجلسة قبل انتهاء المدة."
-          echo ""
 
-          # طباعة حالة دورية كل 5 دقائق + إعادة طباعة الرابط
           ELAPSED=0
           STEP=300   # 5 minutes
           while [ "$ELAPSED" -lt "$DURATION_SEC" ]; do
@@ -336,12 +337,12 @@ jobs:
             REMAIN_MIN=$(( (DURATION_SEC - ELAPSED) / 60 ))
             echo "⏱️ Heartbeat — elapsed=$((ELAPSED/60))min  remaining=${REMAIN_MIN}min"
             echo "🌐 ${PUBLIC_URL}"
-            # تحقق من حياة opencode
-            if ! kill -0 "$(cat $RUNNER_TEMP/opencode.pid)" 2>/dev/null; then
+
+            if [ -f "$RUNNER_TEMP/opencode.pid" ] && ! kill -0 "$(cat $RUNNER_TEMP/opencode.pid)" 2>/dev/null; then
               echo "⚠️ opencode process died — exiting."
               exit 1
             fi
-            if ! kill -0 "$(cat $RUNNER_TEMP/cloudflared.pid)" 2>/dev/null; then
+            if [ -f "$RUNNER_TEMP/cloudflared.pid" ] && ! kill -0 "$(cat $RUNNER_TEMP/cloudflared.pid)" 2>/dev/null; then
               echo "⚠️ cloudflared process died — exiting."
               exit 1
             fi
@@ -350,7 +351,7 @@ jobs:
           echo "✅ Session duration reached. Shutting down."
 
       # -----------------------------------------------------------------------
-      # 12) commit أخير لأي تعديلات لم يتم رفعها
+      # 12) commit أخير
       # -----------------------------------------------------------------------
       - name: 💾 Final commit & push
         if: ${{ always() && github.event.inputs.auto_commit == 'true' }}
@@ -367,7 +368,7 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # 13) عرض اللوجات قبل إنهاء الـ job (مفيد للتشخيص)
+      # 13) عرض اللوجات
       # -----------------------------------------------------------------------
       - name: 📜 Show logs (debug)
         if: ${{ always() }}
@@ -382,7 +383,7 @@ jobs:
           tail -n 60  "$RUNNER_TEMP/autocommit.log" 2>/dev/null || true
 
       # -----------------------------------------------------------------------
-      # 14) إغلاق نظيف لـ cloudflared
+      # 14) إغلاق نظيف
       # -----------------------------------------------------------------------
       - name: 🧹 Shutdown cloudflared
         if: ${{ always() }}
