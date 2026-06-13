@@ -343,7 +343,6 @@ class FaselHD : MainAPI() {
     }
 
     @OptIn(Prerelease::class)
-    @OptIn(Prerelease::class)
     private suspend fun extractHlsFromPlayer(playerUrl: String): List<String> {
         return try {
             val response = app.get(playerUrl, headers = baseHeaders, referer = baseUrl(), timeout = 60)
