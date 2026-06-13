@@ -1,0 +1,56 @@
+name: Build FaselHD Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'FaselHD/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build FaselHD plugin
+        run: ./gradlew :FaselHD:make
+
+      - name: Upload FaselHD.cs3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaselHD
+          path: FaselHD/build/FaselHD.cs3
+
+      - name: Commit and push built cs3 to build/
+        run: |
+          if [ -f "FaselHD/build/FaselHD.cs3" ]; then
+            cp FaselHD/build/FaselHD.cs3 build/FaselHD.cs3
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/FaselHD.cs3
+            if ! git diff --staged --quiet; then
+              git commit -m "🤖 Build FaselHD.cs3"
+              git push
+            else
+              echo "No changes to commit"
+            fi
+          else
+            echo "FaselHD.cs3 not found!"
+          fi
