@@ -30,6 +30,9 @@ jobs:
         python -m playwright install chromium
         python -m playwright install-deps chromium
 
+    - name: Clean previous scraped data
+      run: rm -rf scraped_sites/
+
     - name: Run Legendary Scraper
       env:
         TARGET_URL: ${{ github.event.inputs.target_url }}
