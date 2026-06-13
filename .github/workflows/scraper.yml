@@ -23,7 +23,6 @@ jobs:
             -w "Status: %{http_code}\nContent-Type: %{content_type}\nSize: %{size_download} bytes\n" \
             "https://web61312x.faselhdx.bid/main"
 
-<<<<<<< HEAD
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
@@ -359,21 +358,4 @@ jobs:
           git commit -m "🤖 Scraped content from ${{ github.event.inputs.target_url }}"
           git push origin HEAD:${{ github.ref }}
         fi
-=======
-      - name: Validate HTML
-        run: |
-          if grep -qi '<!DOCTYPE html' main.html 2>/dev/null || grep -qi '<html' main.html 2>/dev/null; then
-            echo "HTML صحيح ✓"
-          else
-            echo "⚠️  خطأ: المحتوى غير HTML"
-            file main.html
-            xxd main.html | head -5
-            exit 1
-          fi
 
-      - name: Upload result
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraped-page
-          path: main.html
->>>>>>> ab6f19d (🤖 opencode: auto-commit 2026-06-13 14:46:23Z)
