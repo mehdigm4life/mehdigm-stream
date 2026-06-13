@@ -422,169 +422,6 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         return results.distinctBy { it.url }.collapseSeasons()
     }
 
-    // ---------- Seasons & Episodes helpers ----------
-
-    /**
-     * يبحث في صفحة (أيّاً كانت: حلقة/موسم/selary) عن رابط الصفحة الأم /selary/مسلسل-X/.
-     * يفضّل الروابط التي:
-     *   - تحتوي "/selary/" في الـ href
-     *   - ليس فيها "الموسم" في الـ slug/النص
-     */
-    private fun Document.findSeriesParentUrl(): String? {
-        val candidates = select("a[href*=/selary/]")
-            .mapNotNull { a ->
-                val href = a.attr("href").trim()
-                if (href.isBlank() || href == "#") null else href.fixUrl()
-            }
-            .distinct()
-
-        // 1) رابط selary لا يحتوي "الموسم" ولا "season" ولا "s\d+"
-        val parent = candidates.firstOrNull { href ->
-            val decoded = try {
-                java.net.URLDecoder.decode(href, "UTF-8")
-            } catch (_: Throwable) {
-                href
-            }
-            !decoded.contains("الموسم") &&
-                    !Regex("""-s\d+""", RegexOption.IGNORE_CASE).containsMatchIn(decoded) &&
-                    !decoded.contains("season", ignoreCase = true)
-        }
-        if (parent != null) return parent
-
-        // 2) fallback: أول رابط /selary/
-        return candidates.firstOrNull()
-    }
-
-    /**
-     * من صفحة /selary/مسلسل-X/ نستخرج روابط كل المواسم.
-     * يعود List<Pair<seasonNumber, seasonUrl>> مرتبة تصاعدياً.
-     */
-    private fun Document.extractSeasonsFromParent(): List<Pair<Int, String>> {
-        // 1) أزرار المواسم (a.season__btn) - الأحدث
-        var anchors: List<Element> = select("a.season__btn")
-
-        if (anchors.isEmpty()) {
-            // 2) fallback: روابط /selary/ تحتوي "الموسم"
-            anchors = select("a[href*=/selary/]").filter { a ->
-                val text = a.text()
-                val decoded = try {
-                    java.net.URLDecoder.decode(a.attr("href"), "UTF-8")
-                } catch (_: Throwable) {
-                    a.attr("href")
-                }
-                decoded.contains("الموسم") || text.contains("الموسم") ||
-                        Regex("""-s\d+""", RegexOption.IGNORE_CASE).containsMatchIn(decoded)
-            }
-        }
-
-        val list = anchors.mapNotNull { a ->
-            val href = a.attr("href").fixUrl()
-            if (href.isBlank() || !href.startsWith("http")) return@mapNotNull null
-            val decoded = try {
-                java.net.URLDecoder.decode(href, "UTF-8")
-            } catch (_: Throwable) {
-                href
-            }
-            val seasonNum = parseArabicSeasonNumber(a.text())
-                ?: parseArabicSeasonNumber(decoded)
-                ?: return@mapNotNull null
-            seasonNum to href
-        }
-
-        if (list.isNotEmpty()) {
-            return list.distinctBy { it.first }.sortedBy { it.first }
-        }
-
-        // 3) fallback: قائمة المواسم عبر data-term (للحصول على الروابط من AJAX)
-        val termIds = select("#seasons__list li[data-term]").mapNotNull { li ->
-            val term = li.attr("data-term").toIntOrNull() ?: return@mapNotNull null
-            val seasonNum = parseArabicSeasonNumber(li.text()) ?: return@mapNotNull null
-            seasonNum to term
-        }
-        if (termIds.isNotEmpty()) {
-            return termIds.sortedBy { it.first }.map { (num, termId) ->
-                num to "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php?term=$termId"
-            }
-        }
-
-        return emptyList()
-    }
-
-    /**
-     * يستخرج حلقات صفحة موسم/حلقة من الـ DOM.
-     */
-    private suspend fun Document.extractEpisodesFromSeasonPage(seasonNumber: Int?): List<Episode> {
-        val episodes = arrayListOf<Episode>()
-
-        // 1) القالب الحالي: ul.episodes__list (صفحات الحلقات/المواسم الجديدة)
-        select(".episodes__list li a, .episodes__list > a, ul.episodes__list a").forEach { ep ->
-            val href = ep.attr("href").fixUrl()
-            if (href.isBlank() || !href.startsWith("http")) return@forEach
-            val epNumText = ep.selectFirst(".epi__num b")?.text()
-                ?: ep.selectFirst(".epi__num")?.text()
-                ?: ep.text()
-            val epNum = epNumText.getIntFromText()
-            episodes.add(
-                newEpisode(href) {
-                    this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                    this.season = seasonNumber
-                    this.episode = epNum
-                }
-            )
-        }
-
-        // 2) تحميل الحلقات الإضافية عبر AJAX (load__more__episodes)
-        val loadMore = selectFirst(".load__more__episodes")
-        if (loadMore != null) {
-            val termId = loadMore.attr("data-id")
-            val currentCount = episodes.size
-            runCatching {
-                val ajaxDoc = postPage(
-                    "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
-                    mapOf("id" to termId, "count" to "$currentCount"),
-                    referer = ""
-                )
-                ajaxDoc.select("a[href]").forEach { ep ->
-                    val href = ep.attr("href").fixUrl()
-                    if (href.isNotBlank() && href.startsWith("http")) {
-                        val epNum = ep.text().getIntFromText()
-                        if (episodes.none { it.data == href }) {
-                            episodes.add(
-                                newEpisode(href) {
-                                    this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                                    this.season = seasonNumber
-                                    this.episode = epNum
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3) قائمة المواسم القديمة (AJAX) - تم تركها كاحتياط
-        if (episodes.isEmpty()) {
-            select(
-                "div.ContainerEpisodesList > a, div.EpisodesList > a, " +
-                "ul.episodes-list a, div.epAll a"
-            ).forEach { ep ->
-                val href = ep.attr("href").fixUrl()
-                if (href.isNotBlank() && href.startsWith("http")) {
-                    val epNum = ep.text().getIntFromText()
-                    episodes.add(
-                        newEpisode(href) {
-                            this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                            this.season = seasonNumber
-                            this.episode = epNum
-                        }
-                    )
-                }
-            }
-        }
-
-        return episodes.distinctBy { it.data }
-    }
-
     // ---------- Load (details + episodes) ----------
 
     override suspend fun load(url: String): LoadResponse {
@@ -651,91 +488,36 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         // ============= جمع الحلقات =============
         val episodes = arrayListOf<Episode>()
 
-        // ---------- استراتيجية جديدة: اكتشاف كل المواسم عبر صفحة /selary/ الأم ----------
-        // الخطوات:
-        //  1) إذا الصفحة الحالية هي صفحة موسم/حلقة، نبحث عن رابط /selary/ الأم.
-        //  2) نجلب الصفحة الأم ونستخرج روابط كل المواسم.
-        //  3) لكل موسم: نجلب صفحته ونستخرج حلقاته بـ season = N الصحيح.
-
-        // هل الصفحة الحالية هي صفحة الأم؟ (تحتوي على /selary/ ولا "الموسم" في URL)
-        val decodedUrl = try {
-            java.net.URLDecoder.decode(url, "UTF-8")
-        } catch (_: Throwable) {
-            url
-        }
-        val isParentSelary = url.contains("/selary/") && !decodedUrl.contains("الموسم")
-
-        // ابحث عن صفحة الأم
-        val parentUrl = if (isParentSelary) url else doc.findSeriesParentUrl()
-
-        // إذا لم نجد parent، فالكود سيتعامل مع الصفحة الحالية فقط كموسم واحد
-        val parentDoc: Document? = when {
-            parentUrl == null -> null
-            parentUrl == url -> doc
-            else -> runCatching { getPage(parentUrl, referer = url) }.getOrNull()
-        }
-
-        val seasons: List<Pair<Int, String>> = parentDoc?.extractSeasonsFromParent().orEmpty()
-
-        if (seasons.isNotEmpty()) {
-            seasons.amap { (seasonNum, seasonUrl) ->
+        // 1) قائمة المواسم القديمة (إن وجدت)
+        val seasonList = doc.select("div.SeasonsListHolder ul > li, #seasons__list li[data-term]")
+        if (seasonList.isNotEmpty()) {
+            seasonList.amap { seasonElement ->
+                val seasonNumber = seasonElement.attr("data-season").getIntFromText()
+                    ?: parseArabicSeasonNumber(seasonElement.text())
+                    ?: return@amap
+                val postId = seasonElement.attr("data-id")
+                    .ifBlank { seasonElement.attr("data-term") }
+                if (postId.isBlank()) return@amap
                 runCatching {
-                    val isAjaxSeason = seasonUrl.contains("Episodes.php")
-                    if (isAjaxSeason) {
-                        val ajaxDoc = postPage(seasonUrl, emptyMap(), referer = parentUrl ?: url)
-                        ajaxDoc.select("a[href]").forEach { ep ->
-                            val href = ep.attr("href").fixUrl()
-                            if (href.isNotBlank() && href.startsWith("http")) {
-                                val epNum = ep.text().getIntFromText()
-                                val newEp = newEpisode(href) {
-                                    this.name = ep.text()
-                                    this.season = seasonNum
-                                    this.episode = epNum
-                                }
-                                synchronized(episodes) { episodes.add(newEp) }
-                            }
-                        }
-                    } else {
-                        val seasonDoc = if (seasonUrl == url) doc else getPage(seasonUrl, referer = parentUrl ?: url)
-                        val eps = seasonDoc.extractEpisodesFromSeasonPage(seasonNum)
-                        synchronized(episodes) { episodes.addAll(eps) }
-                    }
-                }
-            }
-        }
-
-        // ---------- Fallback 1: قائمة المواسم القديمة (AJAX) ----------
-        if (episodes.isEmpty()) {
-            val seasonList = doc.select(
-                "div.SeasonsListHolder ul > li, " +
-                "#seasons__list li[data-term]"
-            )
-            if (seasonList.isNotEmpty()) {
-                seasonList.amap { seasonElement ->
-                    val seasonNumber = seasonElement.attr("data-season").getIntFromText()
-                        ?: parseArabicSeasonNumber(seasonElement.text())
-                        ?: return@amap
-                    val dataId = seasonElement.attr("data-id")
-                        .ifBlank { seasonElement.attr("data-term") }
-                    if (dataId.isBlank()) return@amap
-                    runCatching {
-                        postPage(
-                            "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
-                            mapOf(
-                                "season" to dataId,
-                                "post_id" to dataId
-                            ),
-                            referer = url
-                        ).select("a[href]").forEach { ep ->
-                            val href = ep.attr("href").fixUrl()
-                            if (href.isNotBlank() && href.startsWith("http")) {
-                                val epNum = ep.text().getIntFromText()
-                                val newEp = newEpisode(href) {
-                                    this.name = ep.text()
-                                    this.season = seasonNumber
-                                    this.episode = epNum
-                                }
-                                synchronized(episodes) { episodes.add(newEp) }
+                    postPage(
+                        "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
+                        mapOf(
+                            "season" to postId,
+                            "post_id" to postId
+                        ),
+                        referer = url
+                    ).select("a[href]").forEach { ep ->
+                        val href = ep.attr("href").fixUrl()
+                        if (href.isNotBlank() && href.startsWith("http")) {
+                            val epNum = ep.text().getIntFromText()
+                            synchronized(episodes) {
+                                episodes.add(
+                                    newEpisode(href) {
+                                        this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                                        this.season = seasonNumber
+                                        this.episode = epNum
+                                    }
+                                )
                             }
                         }
                     }
@@ -743,15 +525,48 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             }
         }
 
-        // ---------- Fallback 2: الصفحة الحالية فقط (موسم واحد) ----------
+        // 2) القالب الحالي: ul.episodes__list (صفحات الحلقات الجديدة)
         if (episodes.isEmpty()) {
-            val seasonGuess = parseArabicSeasonNumber(title)
-            episodes.addAll(doc.extractEpisodesFromSeasonPage(seasonGuess))
+            val seasonGuess = Regex("""(?:الموسم|S)\s*([0-9]{1,2})""", RegexOption.IGNORE_CASE)
+                .find(title)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+            doc.select(".episodes__list li a, .episodes__list > a").forEach { ep ->
+                val href = ep.attr("href").fixUrl()
+                if (href.isBlank() || !href.startsWith("http")) return@forEach
+                val epNumText = ep.selectFirst(".epi__num b")?.text()
+                    ?: ep.selectFirst(".epi__num")?.text()
+                    ?: ep.text()
+                val epNum = epNumText.getIntFromText()
+                episodes.add(
+                    newEpisode(href) {
+                        this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                        this.season = seasonGuess
+                        this.episode = epNum
+                    }
+                )
+            }
+        }
+
+        // 3) أنماط حلقات قديمة محتملة
+        if (episodes.isEmpty()) {
+            doc.select(
+                "div.ContainerEpisodesList > a, div.EpisodesList > a, " +
+                "ul.episodes-list a, div.epAll a"
+            ).forEach { ep ->
+                val href = ep.attr("href").fixUrl()
+                if (href.isNotBlank() && href.startsWith("http")) {
+                    episodes.add(
+                        newEpisode(href) {
+                            this.name = ep.text()
+                            this.episode = ep.text().getIntFromText()
+                        }
+                    )
+                }
+            }
         }
 
         // الممثلون (إن وجدوا)
-        val actorsDoc = parentDoc ?: doc
-        val actors = actorsDoc.select(".__actor__item, div.WorkTeamIteM").mapNotNull { item ->
+        val actors = doc.select(".__actor__item, div.WorkTeamIteM").mapNotNull { item ->
             val name = item.selectFirst(".__actor__name, h4 > em, .name")?.text()
                 ?: return@mapNotNull null
             val image = item.selectFirst("img")?.let {
@@ -764,40 +579,14 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             )
         }
 
-        // العنوان النهائي: استخدم اسم المسلسل الأساسي إذا وجدنا الصفحة الأم
-        val finalTitle = if (parentDoc != null && parentDoc !== doc) {
-            (parentDoc.selectFirst("h1.post__name")?.text()
-                ?: parentDoc.selectFirst("meta[property=og:title]")?.attr("content")
-                ?: extractSeriesBaseTitle(title))
-                .trim()
-        } else {
-            // إن كانت الصفحة موسم واحد فقط، أزل "الموسم/الحلقة" من العنوان
-            if (episodes.any { it.season != null }) extractSeriesBaseTitle(title) else title
-        }
-
-        // البوستر: قد يكون البوستر في صفحة الأم أوضح
-        val finalPoster = if (parentDoc != null && parentDoc !== doc) {
-            (parentDoc.selectFirst(".poster__single img")?.let { img ->
-                listOf("data-src", "src", "data-image").map { img.attr(it) }
-                    .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
-            }
-                ?: parentDoc.selectFirst("meta[property=og:image]")?.attr("content")
-                )?.fixUrl() ?: posterUrl
-        } else {
-            posterUrl
-        }
-
-        // الـ URL المستخدم في LoadResponse: نستخدم parentUrl إن وُجد ليكون المرجع موحّداً
-        val responseUrl = parentUrl ?: url
-
         // تحديد النوع: الأنمي ← TvType.Anime، مسلسل بدون حلقات لكن العنوان "مسلسل" ← TvSeries
         val isAnime = siteCategory.contains("انمي") || siteCategory.contains("أنمي") ||
                 tags.any { "انمي" in it || "أنمي" in it }
-        val finalSeriesType: TvType = if (isAnime) TvType.Anime else TvType.TvSeries
+        val finalSeriesType = if (isAnime) TvType.Anime else TvType.TvSeries
 
         return if (episodes.isEmpty()) {
-            newMovieLoadResponse(finalTitle, responseUrl, TvType.Movie, responseUrl) {
-                this.posterUrl = finalPoster
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = posterUrl
                 this.year = year
                 this.plot = synopsis
                 this.tags = tags
@@ -805,14 +594,14 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             }
         } else {
             newTvSeriesLoadResponse(
-                finalTitle,
-                responseUrl,
-                finalSeriesType as TvType, // إجبار الكومبايلر على تحويله إلى النوع غير القابل للـ null بشكل قاطع
+                title,
+                url,
+                finalSeriesType,
                 episodes
                     .distinctBy { it.data }
                     .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
             ) {
-                this.posterUrl = finalPoster
+                this.posterUrl = posterUrl
                 this.year = year
                 this.plot = synopsis
                 this.tags = tags
