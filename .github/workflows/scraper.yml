@@ -1,27 +1,43 @@
-name: Scraper
+name: Professional Web Scraper & Cloner
+
+permissions:
+  contents: write
 
 on:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'أدخل رابط الموقع المستهدف (e.g., https://example.com)'
+        required: true
+        type: string
+      scrape_mode:
+        description: 'وضع السحب'
+        required: true
+        type: choice
+        options:
+          - 'Single Page (صفحة واحدة فقط)'
+          - 'Full Website (الموقع بالكامل)'
+        default: 'Single Page (صفحة واحدة فقط)'
+      max_pages:
+        description: 'حد أقصى للصفحات (0 = غير محدود)'
+        required: true
+        type: number
+        default: 0
 
 jobs:
-  scrape:
+  scrape_and_commit:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true
 
-      - name: Fetch website
-        run: |
-          curl -sL \
-            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
-            -H "Accept-Language: en-US,en;q=0.9,ar;q=0.8" \
-            --compressed \
-            -o main.html \
-            -w "Status: %{http_code}\nContent-Type: %{content_type}\nSize: %{size_download} bytes\n" \
-            "https://web61312x.faselhdx.bid/main"
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
     - name: Install Dependencies
       run: |
@@ -29,9 +45,6 @@ jobs:
         pip install beautifulsoup4 cloudscraper lxml playwright httpx brotli
         python -m playwright install chromium
         python -m playwright install-deps chromium
-
-    - name: Clean previous scraped data
-      run: rm -rf scraped_sites/
 
     - name: Run Legendary Scraper
       env:
@@ -361,4 +374,3 @@ jobs:
           git commit -m "🤖 Scraped content from ${{ github.event.inputs.target_url }}"
           git push origin HEAD:${{ github.ref }}
         fi
-
