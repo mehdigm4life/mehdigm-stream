@@ -35,4 +35,5 @@ dependencies {
     implementation("androidx.browser:browser:1.9.0")
     implementation("androidx.room:room-ktx:2.8.0")
     cloudstream("com.lagradost:cloudstream3:pre-release")
+    implementation("org.mozilla:rhino:1.7.14")
 }

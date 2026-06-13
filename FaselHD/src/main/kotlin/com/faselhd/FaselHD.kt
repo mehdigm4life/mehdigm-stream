@@ -1,6 +1,7 @@
 package com.faselhd
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
@@ -341,6 +342,7 @@ class FaselHD : MainAPI() {
         return foundAny
     }
 
+    @OptIn(Prerelease::class)
     private suspend fun extractHlsFromPlayer(playerUrl: String): List<String> {
         return try {
             val response = app.get(playerUrl, headers = baseHeaders, referer = baseUrl(), timeout = 60)
