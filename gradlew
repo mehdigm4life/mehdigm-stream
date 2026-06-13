@@ -204,7 +204,7 @@ set -- \
         -classpath "$CLASSPATH" \
         org.gradle.wrapper.GradleWrapperMain \
         "$@"
- 
+
 # Use "xargs" to parse quoted args.
 #
 # With -n1 it outputs one arg per line, with the quotes and backslashes removed.

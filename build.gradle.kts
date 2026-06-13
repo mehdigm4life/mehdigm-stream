@@ -7,14 +7,13 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
+        maven("https://jitpack.io")
     }
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
-        // التعديل هنا: استخدام الإصدار المستقر المباشر من المكون لتفادي تعارض الأسماء في JitPack
-        classpath("com.github.recloudstream:gradle:2.2.4")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")
+        classpath("com.github.recloudstream:gradle:81b1d424d2")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.21")
     }
 }
 
@@ -22,7 +21,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
+        maven("https://jitpack.io")
     }
 }
 
@@ -63,7 +62,8 @@ subprojects {
                 freeCompilerArgs.addAll(
                     "-Xno-call-assertions",
                     "-Xno-param-assertions",
-                    "-Xno-receiver-assertions"
+                    "-Xno-receiver-assertions",
+                    "-Xskip-metadata-version-check"
                 )
             }
         }

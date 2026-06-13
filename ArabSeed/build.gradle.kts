@@ -9,7 +9,7 @@ repositories {
 }
 
 android {
-    namespace = "com.animezid"
+    namespace = "com.arabseed"
     compileSdk = 34
     defaultConfig {
         minSdk = 21

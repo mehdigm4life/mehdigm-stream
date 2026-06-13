@@ -22,49 +22,5 @@
     "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animezid.cs3",
     "name": "Animezid (انمي زد)",
     "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
-  },
-  {
-    "iconUrl": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/refs/heads/main/images/fav.png",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "Anime",
-      "AnimeMovie",
-      "Cartoon",
-      "TvSeries",
-      "Movie",
-      "OVA"
-    ],
-    "version": 1,
-    "internalName": "FaselHD",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
-    "name": "FaselHD",
-    "description": "موقع FaselHD — مشاهدة وتحميل الأفلام والمسلسلات بجودة عالية."
-  },
-  {
-    "iconUrl": "https://www.google.com/s2/favicons?domain=arabseed.show&sz=128",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "TvSeries",
-      "Movie"
-    ],
-    "version": 1,
-    "internalName": "ArabSeed",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/ArabSeed.cs3",
-    "name": "ArabSeed (عرب سيد)",
-    "description": "موقع عرب سيد — مشاهدة وتحميل الأفلام والمسلسلات العربية والأجنبية."
   }
 ]
