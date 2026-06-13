@@ -29,25 +29,8 @@ class FaselHD : MainAPI() {
         "Upgrade-Insecure-Requests" to "1"
     )
 
-    private val hostDisplayNames = mapOf(
-        "t7meel" to "T7meel",
-        "faselhdcdn" to "FaselHD",
-        "upstream" to "Upstream",
-        "dood" to "DoodStream",
-        "mixdrop" to "MixDrop",
-        "uqload" to "Uqload",
-        "streamtape" to "StreamTape",
-        "streamwish" to "StreamWish",
-        "gounlimited" to "GoUnlimited",
-        "fembed" to "Fembed",
-        "mystream" to "MyStream",
-        "gdrive" to "GoogleDrive",
-        "google" to "Google",
-        "ok.ru" to "OK.ru"
-    )
-
-    private val arabicOrdinals = mapOf(
-        "الاول" to 1, "الأول" to 1, 
+    private val arabicSeasonMap = mapOf(
+        "الاول" to 1, "الأول" to 1,
         "التاني" to 2, "الثاني" to 2, "الثانى" to 2,
         "التالت" to 3, "الثالث" to 3,
         "الرابع" to 4, "الخامس" to 5,
@@ -123,13 +106,7 @@ class FaselHD : MainAPI() {
     }
 
     private fun Document.extractItems(): List<SearchResponse> {
-        val selectors = listOf(
-            "div.postDiv",
-            "div.blockMovie",
-            "div.epDivHome",
-            "div.MovieBlock"
-        )
-        for (selector in selectors) {
+        for (selector in listOf("div.postDiv", "div.blockMovie", "div.epDivHome", "div.MovieBlock")) {
             val items = select(selector).mapNotNull { it.toSearchResponse() }
             if (items.isNotEmpty()) return items.distinctBy { it.url }
         }
@@ -156,18 +133,16 @@ class FaselHD : MainAPI() {
         val pageUrl = if (page > 1) "${request.data}/page/$page" else request.data
         val doc = getPage(pageUrl)
 
-        val isHome = request.data == "/main"
-        if (isHome) {
+        if (request.data == "/main") {
             val lists = mutableListOf<HomePageList>()
 
             val slider = doc.select("#homeSlide .swiper-slide").mapNotNull { slide ->
                 val a = slide.selectFirst("a") ?: return@mapNotNull null
-                val title = slide.select(".post--content--inner .h1 a, .slideContent .h1 a, .h1 a").text().trim()
+                val title = slide.select(".h1 a, .slideContent .h1 a, .post--content--inner .h1 a").text().trim()
                     .ifBlank { slide.selectFirst("img")?.attr("alt")?.trim() ?: return@mapNotNull null }
                 val img = slide.selectFirst(".poster img, img")
                 val poster = img?.let { el ->
-                    listOf("data-src", "src").map { el.attr(it) }
-                        .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
+                    listOf("data-src", "src").map { el.attr(it) }.firstOrNull { it.isNotBlank() }
                 }
                 newMovieSearchResponse(title, a.attr("href").fixUrl(), TvType.Movie) {
                     this.posterUrl = poster
@@ -183,8 +158,7 @@ class FaselHD : MainAPI() {
                     ?: return@forEach
                 val items = block.select(".blockMovie, .postDiv, .epDivHome").mapNotNull { it.toSearchResponse() }
                 if (items.isNotEmpty()) {
-                    val isHorizontal = block.select(".blockMovie").size > 3
-                    lists.add(HomePageList(title, items, isHorizontalImages = isHorizontal))
+                    lists.add(HomePageList(title, items, isHorizontalImages = block.select(".blockMovie").size > 2))
                 }
             }
 
@@ -192,10 +166,9 @@ class FaselHD : MainAPI() {
         }
 
         val items = doc.extractItems()
-        val hasNext = doc.select("a.page-numbers, a.next").any { it.text().contains("»") || it.text().contains("Next") } ||
-            doc.select("a.page-numbers:not(.current)").any {
-                Regex("/page/${page + 1}").containsMatchIn(it.attr("href"))
-            }
+        val hasNext = doc.select("a.page-numbers:not(.current)").any {
+            Regex("/page/${page + 1}").containsMatchIn(it.attr("href"))
+        } || doc.select("a.next, a:contains(»)").any { it.attr("href").isNotBlank() && it.attr("href") != "#" }
         return newHomePageResponse(request.name, items, hasNext)
     }
 
@@ -204,16 +177,14 @@ class FaselHD : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val results = arrayListOf<SearchResponse>()
-
         runCatching { results.addAll(getPage("/?s=$encoded").extractItems()) }
         if (results.isEmpty()) runCatching { results.addAll(getPage("/search/$encoded").extractItems()) }
-
         return results.distinctBy { it.url }
     }
 
     private fun extractSeasonNum(text: String): Int? {
         val clean = java.net.URLDecoder.decode(text, "UTF-8")
-        for ((name, num) in arabicOrdinals) {
+        for ((name, num) in arabicSeasonMap) {
             if (clean.contains(name)) return num
         }
         return Regex("""(?:الموسم|season|s)\s*[-_:]?\s*(\d{1,2})""", RegexOption.IGNORE_CASE)
@@ -243,9 +214,8 @@ class FaselHD : MainAPI() {
                 ?: doc.selectFirst("meta[property=og:description]")?.attr("content")
             )?.trim()
 
-        val tags = doc.select("a[href*='movies_cats'], a[href*='series_genres']")
-            .map { it.text().trim() }
-            .filter { it.isNotBlank() }
+        val tags = doc.select("a[href*=movies_cats], a[href*=series_genres]")
+            .map { it.text().trim() }.filter { it.isNotBlank() }
 
         val year = doc.selectFirst("a[href*=movies_years]")?.text()
             ?.let { Regex("""\d{4}""").find(it)?.value?.toIntOrNull() }
@@ -254,8 +224,8 @@ class FaselHD : MainAPI() {
             ?.let { Regex("""[\d.]+""").find(it)?.value?.toFloatOrNull() }
 
         val episodes = mutableListOf<Episode>()
-
         val epContainer = doc.selectFirst("#epAll")
+
         if (epContainer != null) {
             val seasonNum = extractSeasonNum(url) ?: 1
             epContainer.select("a[href]").forEach { ep ->
@@ -273,10 +243,7 @@ class FaselHD : MainAPI() {
             }
         }
 
-        val isSeries = episodes.isNotEmpty() ||
-            url.contains("/seasons/") ||
-            url.contains("/series/") ||
-            url.contains("/episodes/")
+        val isSeries = episodes.isNotEmpty() || url.contains("/seasons/") || url.contains("/series/") || url.contains("/episodes/")
 
         if (isSeries) {
             val sorted = episodes.distinctBy { it.data }
@@ -309,32 +276,11 @@ class FaselHD : MainAPI() {
         var foundAny = false
         val seen = mutableSetOf<String>()
 
-        suspend fun tryExtractor(url: String, referer: String = data): Boolean {
-            if (url.isBlank() || !url.startsWith("http") || !seen.add(url)) return false
-            return try { loadExtractor(url, referer, subtitleCallback, callback) } catch (_: Exception) { false }
-        }
-
-        suspend fun registerFallback(url: String, name: String, referer: String = data) {
-            if (!seen.add(url)) return
-            runCatching {
-                callback(newExtractorLink(this.name, name, url) {
-                    this.referer = referer
-                    this.quality = Qualities.Unknown.value
-                    this.headers = mapOf("User-Agent" to browserUA)
-                })
-            }
-        }
-
         doc.select("iframe").amap { frame ->
             val src = frame.attr("data-src").ifBlank { frame.attr("src") }
             if (src.isNotBlank()) {
                 val url = src.fixUrl()
-                if (!tryExtractor(url, data)) {
-                    registerFallback(url, "FaselHD Player", data)
-                    foundAny = true
-                } else {
-                    foundAny = true
-                }
+                foundAny = loadExtractor(url, data, subtitleCallback, callback) || foundAny
             }
         }
 
@@ -342,58 +288,14 @@ class FaselHD : MainAPI() {
             val onclick = el.attr("onclick")
             Regex("""(?:player_iframe\.location\.href|location\.href)\s*=\s*['"]([^'"]+)['"]""")
                 .find(onclick)?.groupValues?.get(1)?.let { iframeUrl ->
-                    val url = iframeUrl.fixUrl()
-                    if (!tryExtractor(url, data)) {
-                        registerFallback(url, "FaselHD Player", data)
-                        foundAny = true
-                    } else {
-                        foundAny = true
-                    }
+                    foundAny = loadExtractor(iframeUrl.fixUrl(), data, subtitleCallback, callback) || foundAny
                 }
         }
 
-        doc.select("a[href*='t7meel'], a[href*='/series_quality/'], a.download__item, .downloads__links__list a").amap { anchor ->
+        doc.select("a[href*=t7meel], a[href*=/series_quality/], a.download__item, .downloads__links__list a").amap { anchor ->
             val link = anchor.attr("href").fixUrl()
-            if (link.isNotBlank() && link.startsWith("http")) {
-                val quality = anchor.selectFirst(".quality, .q, span")?.text()?.trim() ?: "1080p"
-                if (!tryExtractor(link, data)) {
-                    val host = try { java.net.URI(link).host?.removePrefix("www.") ?: "Link" } catch (_: Exception) { "Link" }
-                    registerFallback(link, "FaselHD $quality ($host)", data)
-                    foundAny = true
-                } else {
-                    foundAny = true
-                }
-            }
-        }
-
-        if (!foundAny) {
-            val playerUrl = doc.selectFirst("iframe")?.let { frame ->
-                frame.attr("data-src").ifBlank { frame.attr("src") }.fixUrl()
-            }
-            if (playerUrl != null) {
-                try {
-                    val playerText = app.get(playerUrl, referer = data, headers = baseHeaders).text
-                    val videoUrls = mutableListOf<String>()
-
-                    for (pattern in listOf(
-                        Regex("""file["']\s*[:=]\s*["']([^"']+)["']"""),
-                        Regex("""src["']\s*[:=]\s*["']([^"']+)["']"""),
-                        Regex("""https?://[^"'\s<>]*(?:\.mp4|\.m3u8)[^"'\s<>]*"""),
-                        Regex("""["']([^"']*(?:cdn|video|media)[^"']*\.(?:mp4|m3u8))["']""")
-                    )) {
-                        videoUrls.addAll(pattern.findAll(playerText).map { it.groupValues.last() })
-                    }
-
-                    for (url in videoUrls.distinct().take(3)) {
-                        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
-                        if (!tryExtractor(cleanUrl, playerUrl)) {
-                            registerFallback(cleanUrl, "FaselHD Direct", playerUrl)
-                            foundAny = true
-                        } else {
-                            foundAny = true
-                        }
-                    }
-                } catch (_: Exception) {}
+            if (link.isNotBlank() && link.startsWith("http") && seen.add(link)) {
+                foundAny = loadExtractor(link, data, subtitleCallback, callback) || foundAny
             }
         }
 
