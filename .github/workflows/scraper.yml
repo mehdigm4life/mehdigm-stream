@@ -11,18 +11,23 @@ on:
         required: true
         type: string
       scrape_mode:
-        description: 'وضع السحب (اختر صفحة واحدة أو الموقع بالكامل)'
+        description: 'وضع السحب'
         required: true
         type: choice
         options:
           - 'Single Page (صفحة واحدة فقط)'
           - 'Full Website (الموقع بالكامل)'
         default: 'Single Page (صفحة واحدة فقط)'
+      max_pages:
+        description: 'حد أقصى للصفحات (0 = غير محدود)'
+        required: true
+        type: number
+        default: 0
 
 jobs:
   scrape_and_commit:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -32,114 +37,347 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
 
-    # تثبيت الأدوات والمكتبات المتطورة لتخطي الحظر وحل شفرات التشفير الحديثة
-    - name: Install Advanced Anti-Bot Bypass Dependencies
+    - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install beautifulsoup4 cloudscraper dynamic-yaml
+        pip install beautifulsoup4 cloudscraper lxml playwright httpx
+        python -m playwright install chromium
+        python -m playwright install-deps chromium
 
-    - name: Run Anti-Bot Scraper Script
+    - name: Run Legendary Scraper
       env:
         TARGET_URL: ${{ github.event.inputs.target_url }}
         SCRAPE_MODE: ${{ github.event.inputs.scrape_mode }}
+        MAX_PAGES: ${{ github.event.inputs.max_pages }}
       run: |
-        python - << 'EOF'
+        python - << 'PYEOF'
+        import asyncio
         import os
         import sys
         import time
-        import cloudscraper
+        import random
+        import re
+        import json
+        from urllib.parse import urlparse, urljoin, urlunparse
+        from pathlib import Path
+
         from bs4 import BeautifulSoup
-        from urllib.parse import urlparse, urljoin
+        import cloudscraper
 
-        target_url = os.environ.get("TARGET_URL").strip()
-        scrape_mode = os.environ.get("SCRAPE_MODE")
-        
-        parsed_url = urlparse(target_url)
-        domain = parsed_url.netloc
-        if not domain:
-            print("❌ الرابط غير صحيح")
+        from playwright.async_api import async_playwright
+
+        # ─────────────────────────────────────────────
+        # تهيئة
+        # ─────────────────────────────────────────────
+        TARGET_URL = os.environ["TARGET_URL"].strip()
+        SCRAPE_MODE = os.environ.get("SCRAPE_MODE", "")
+        MAX_PAGES = int(os.environ.get("MAX_PAGES", "0"))
+        MAX_PAGES = MAX_PAGES if MAX_PAGES > 0 else 999999
+
+        parsed = urlparse(TARGET_URL)
+        DOMAIN = parsed.netloc
+        SCHEME = parsed.scheme or "https"
+        if not DOMAIN:
+            print("❌ رابط غير صحيح")
             sys.exit(1)
-            
-        output_dir = os.path.join("scraped_sites", domain)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # إنشاء مفسر وجامع كود متطور يحاكي متصفح متكامل (Chrome على ويندوز)
-        # هذا المحرك يقوم بفك شفرات Cloudflare تلقائياً في الخلفية
-        scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
 
-        visited_urls = set()
+        OUTPUT_DIR = Path("scraped_sites") / DOMAIN
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        def download_page(url):
-            if url in visited_urls:
+        # دليل للكوكيز والجلسات
+        STATE_DIR = Path("/tmp/scraper_state")
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+        USER_AGENTS = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+        ]
+
+        # ─────────────────────────────────────────────
+        # Cloudscraper (الطبقة الأولى — سريع، بدون متصفح)
+        # ─────────────────────────────────────────────
+        def make_cloudscraper():
+            ua = random.choice(USER_AGENTS)
+            sess = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "desktop": True},
+                delay=random.randint(1, 5),
+            )
+            sess.headers.update({
+                "User-Agent": ua,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ar,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            })
+            return sess
+
+        def is_cf_challenge(text: str) -> bool:
+            return "Just a moment" in text or "checking your browser" in text.lower() or "cf-browser-verification" in text or "challenges.cloudflare.com" in text
+
+        def try_cloudscraper(scraper, url: str, retries: int = 3) -> tuple:
+            """ترجع (status, text, headers) أو (None, None, None) لو فشل."""
+            for attempt in range(retries):
+                try:
+                    ua = random.choice(USER_AGENTS)
+                    scraper.headers.update({"User-Agent": ua})
+                    delay = random.uniform(2.0, 5.0)
+                    time.sleep(delay)
+                    resp = scraper.get(url, timeout=45)
+                    if resp.status_code == 403 and is_cf_challenge(resp.text):
+                        print(f"  ⚠️ Cloudflare block (المحاولة {attempt+1}/{retries})")
+                        if attempt < retries - 1:
+                            time.sleep(3 * (attempt + 1))
+                        continue
+                    if resp.status_code == 429:
+                        wait = 10 * (attempt + 1)
+                        print(f"  ⚠️ 429 Rate limited, انتظار {wait}ث")
+                        time.sleep(wait)
+                        continue
+                    if resp.status_code == 200:
+                        return (resp.status_code, resp.text, dict(resp.headers))
+                    if resp.status_code == 404:
+                        return (404, resp.text, dict(resp.headers))
+                    print(f"  ⚠️ HTTP {resp.status_code}, المحاولة {attempt+1}/{retries}")
+                except Exception as e:
+                    print(f"  ❌ استثناء: {e}, المحاولة {attempt+1}/{retries}")
+                    time.sleep(3 * (attempt + 1))
+            return (None, None, None)
+
+        # ─────────────────────────────────────────────
+        # Playwright (الطبقة الثانية — متصفح حقيقي لـ JS)
+        # ─────────────────────────────────────────────
+        async def try_playwright(url: str, retries: int = 2) -> tuple:
+            """يفتح متصفح Chromium حقيقي، ينتظر رفع Cloudflare، ويسحب المحتوى."""
+            for attempt in range(retries):
+                browser = None
+                try:
+                    p = await async_playwright().start()
+                    ua = random.choice(USER_AGENTS)
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--disable-web-security",
+                            "--disable-features=IsolateOrigins,site-per-process",
+                        ],
+                    )
+                    ctx = await browser.new_context(
+                        user_agent=ua,
+                        viewport={"width": 1920, "height": 1080},
+                        locale="ar",
+                        timezone_id="Asia/Riyadh",
+                        device_scale_factor=1,
+                        has_touch=False,
+                        java_script_enabled=True,
+                        ignore_https_errors=True,
+                        extra_http_headers={
+                            "Accept-Language": "ar,en;q=0.9",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        },
+                    )
+                    # إخفاء تتبع المتصفح
+                    await ctx.add_init_script("""
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+                        Object.defineProperty(navigator, 'languages', {get: () => ['ar','en']});
+                        Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                        window.chrome = {runtime: {}};
+                        Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                        Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+                        delete navigator.__proto__.webdriver;
+                    """)
+                    page = await ctx.new_page()
+                    page.set_default_timeout(60000)
+
+                    print(f"  🚀 Playwright يفتح: {url}")
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+                    # انتظار لرفع Cloudflare (حتى يختفي "Just a moment" أو تظهر الصفحة الحقيقية)
+                    try:
+                        await page.wait_for_function(
+                            "() => !document.title.includes('Just a moment') && document.title.length > 0",
+                            timeout=45000,
+                        )
+                    except Exception:
+                        pass
+
+                    # انتظار إضافي للـ JS
+                    await asyncio.sleep(3)
+
+                    # انتظار اختفاء شاشة التحميل إن وجدت
+                    try:
+                        await page.wait_for_function(
+                            "() => document.querySelector('.cf-browser-verification, #cf-please-wait') === null",
+                            timeout=10000,
+                        )
+                    except Exception:
+                        pass
+
+                    html = await page.content()
+                    final_url = page.url
+                    status = 200
+                    cookies = await ctx.cookies()
+
+                    await browser.close()
+                    await p.stop()
+
+                    if is_cf_challenge(html):
+                        print(f"  ⚠️ Playwright لم يستطع تخطي Cloudflare (المحاولة {attempt+1})")
+                        if attempt < retries - 1:
+                            await asyncio.sleep(5 * (attempt + 1))
+                        continue
+
+                    return (status, html, final_url, cookies)
+
+                except Exception as e:
+                    print(f"  ❌ Playwright خطأ: {e}")
+                    if browser:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
+                    try:
+                        await p.stop()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(5 * (attempt + 1))
+
+            return (None, None, None, None)
+
+        # ─────────────────────────────────────────────
+        # إدارة الزيارات
+        # ─────────────────────────────────────────────
+        visited = set()
+        queue = []
+        cs_scraper = make_cloudscraper()
+
+        def normalize_url(url: str) -> str:
+            u = urlparse(url)
+            return urlunparse((u.scheme, u.netloc, u.path.rstrip("/") or "/", "", "", ""))
+
+        pages_fetched = 0
+        pages_with_playwright = 0
+
+        async def fetch_page(url: str):
+            nonlocal pages_fetched, pages_with_playwright
+
+            url = normalize_url(url)
+            if url in visited:
                 return
-            if urlparse(url).netloc != domain:
+            parsed_url = urlparse(url)
+            if parsed_url.netloc != DOMAIN:
                 return
 
-            print(f"📥 [Anti-Bot Mode] جاري محاولة سحب: {url}")
-            visited_urls.add(url)
-            
-            # تأخير ذكي عشوائي لتجنب كشف النمط التكراري
-            time.sleep(2)
-            
-            try:
-                response = scraper.get(url, timeout=30)
-                
-                if response.status_code == 403:
-                    print(f"⚠️ خطأ 403: الحماية قوية جداً على هذا المسار المحدد.")
-                    # طباعة جزء من المحتوى لمعاينته في الـ Logs وفهم الحظر
-                    print(response.text[:500])
-                    return
-                elif response.status_code != 200:
-                    print(f"⚠️ فشل تحميل الصفحة، رمز الحالة: {response.status_code}")
-                    return
-                
-                local_path = urlparse(url).path
-                if local_path.endswith('/') or not local_path:
-                    local_path += "index.html"
-                elif not os.path.splitext(local_path)[1]:
+            visited.add(url)
+            print(f"\n📥 [{pages_fetched+1}] {url}")
+
+            # ── Tier 1: Cloudscraper ──
+            status, html, headers = try_cloudscraper(cs_scraper, url)
+
+            # ── Tier 2: Playwright إذا فشل Cloudscraper ──
+            used_playwright = False
+            cookies = []
+            final_url = url
+            if (status is None or status == 403) and (html is None or is_cf_challenge(html or "")):
+                print(f"  🔄 التبديل إلى Playwright (متصفح حقيقي)...")
+                status, html, final_url, cookies = await try_playwright(url)
+                used_playwright = True
+                if used_playwright:
+                    pages_with_playwright += 1
+                    # مزامنة الكوكيز مع cloudscraper
+                    if cookies:
+                        for c in cookies:
+                            cs_scraper.cookies.set(c["name"], c["value"], domain=c.get("domain", DOMAIN))
+
+            if status != 200 or not html:
+                print(f"  ❌ فشل تحميل الصفحة بعد جميع المحاولات")
+                return
+
+            # ── حفظ الصفحة ──
+            local_path = parsed_url.path
+            if local_path.endswith("/") or not local_path:
+                local_path = "index.html"
+            else:
+                ext = os.path.splitext(local_path)[1].lower()
+                if ext not in (".html", ".htm", ".php", ".asp", ".aspx", ".jsp"):
                     local_path += ".html"
-                    
-                file_path = os.path.join(output_dir, local_path.lstrip('/'))
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(response.text)
-                print(f"💾 تم بنجاح وتجاوز الحظر! الحفظ في: {file_path}")
+            file_path = OUTPUT_DIR / local_path.lstrip("/")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(html)
+            mode_str = "🎭 Playwright" if used_playwright else "⚡ Cloudscraper"
+            print(f"  💾 {mode_str} → {file_path}")
 
-                if "Full Website" in scrape_mode:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    for anchor in soup.find_all('a', href=True):
-                        href = anchor['href']
-                        full_url = urljoin(url, href)
-                        full_url = urlparse(full_url)._replace(fragment='', query='').geturl()
-                        if domain in full_url:
-                            download_page(full_url)
-                            
-            except Exception as e:
-                print(f"❌ خطأ أثناء معالجة {url}: {e}")
+            pages_fetched += 1
 
-        download_page(target_url)
-        print("✅ انتهت العملية!")
-        EOF
+            # ── Full Website: استخراج الروابط ──
+            if "Full Website" in SCRAPE_MODE and pages_fetched < MAX_PAGES:
+                soup = BeautifulSoup(html, "lxml")
+                for anchor in soup.find_all("a", href=True):
+                    href = anchor["href"]
+                    full = urljoin(final_url, href)
+                    full = normalize_url(full)
+                    if DOMAIN in full and full not in visited and full not in queue:
+                        modes = anchor.get("target", "")
+                        # تجاهل روابط البريد والتطبيقات
+                        if full.startswith("mailto:") or full.startswith("tel:"):
+                            continue
+                        queue.append(full)
+
+        async def main():
+            nonlocal pages_fetched
+
+            start_url = normalize_url(TARGET_URL)
+            queue.append(start_url)
+
+            while queue and pages_fetched < MAX_PAGES:
+                # أخذ دفعة من الرابط (لتجنب التكرار)
+                batch = []
+                while queue and len(batch) < 5:
+                    u = queue.pop(0)
+                    if u not in visited:
+                        batch.append(u)
+
+                for u in batch:
+                    if pages_fetched >= MAX_PAGES:
+                        break
+                    await fetch_page(u)
+                    # تأخير عشوائي بين الطلبات
+                    await asyncio.sleep(random.uniform(1.5, 4.0))
+
+            # ملخص
+            print("\n" + "=" * 60)
+            print(f"✅ انتهى!")
+            print(f"📄 إجمالي الصفحات: {pages_fetched}")
+            print(f"🎭 عبر Playwright (متصفح): {pages_with_playwright}")
+            print(f"⚡ عبر Cloudscraper: {pages_fetched - pages_with_playwright}")
+            print("=" * 60)
+
+        asyncio.run(main())
+        PYEOF
 
     - name: Commit and Push Scraped Data
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        
+
         git add scraped_sites/
-        
+
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "🤖 Auto Bypass: Scraped content from ${{ github.event.inputs.target_url }}"
+          git commit -m "🤖 Scraped content from ${{ github.event.inputs.target_url }}"
           git push origin HEAD:${{ github.ref }}
         fi
