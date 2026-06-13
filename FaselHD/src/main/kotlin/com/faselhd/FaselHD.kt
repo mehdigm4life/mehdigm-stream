@@ -230,7 +230,7 @@ class FaselHD : MainAPI() {
         val year = doc.selectFirst(".singleInfo a[href*='/movies_years/']")?.text()
             ?.let { Regex("""\d{4}""").find(it)?.value?.toIntOrNull() }
 
-        val rating = doc.selectFirst(".singleInfo .imdb span, .singleInfo .rating")?.text()
+        val score = doc.selectFirst(".singleInfo .imdb span, .singleInfo .rating")?.text()
             ?.let { Regex("""[\d.]+""").find(it)?.value?.toFloatOrNull() }
 
         val episodes = mutableListOf<Episode>()
@@ -291,7 +291,7 @@ class FaselHD : MainAPI() {
                 this.plot = synopsis
                 this.tags = tags
                 this.year = year
-                this.rating = rating
+                this.score = score
             }
         } else {
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -299,7 +299,7 @@ class FaselHD : MainAPI() {
                 this.plot = synopsis
                 this.tags = tags
                 this.year = year
-                this.rating = rating
+                this.score = score
             }
         }
     }
