@@ -50,9 +50,20 @@ class FaselHD : MainAPI() {
         }
     }
 
+    private fun String.fixUrl(): String {
+        if (isBlank()) return this
+        val base = _baseUrl ?: mainUrl
+        return when {
+            startsWith("http") -> this
+            startsWith("//") -> "https:$this"
+            startsWith("/") -> "$base$this"
+            else -> "$base/$this"
+        }
+    }
+
     private suspend fun getPage(url: String, referer: String? = null): Document {
         val base = baseUrl()
-        val cleanUrl = fixUrl(url, base)
+        val cleanUrl = url.fixUrl()
         var response = app.get(cleanUrl, headers = baseHeaders, referer = referer ?: base, timeout = 120)
         val doc = response.document
         val title = doc.select("title").text()
@@ -64,16 +75,6 @@ class FaselHD : MainAPI() {
             response = app.get(cleanUrl, headers = baseHeaders, referer = referer ?: base, interceptor = cfKiller, timeout = 120)
         }
         return response.document
-    }
-
-    private fun fixUrl(url: String, base: String = _baseUrl ?: mainUrl): String {
-        if (url.isBlank()) return url
-        return when {
-            url.startsWith("http") -> url
-            url.startsWith("//") -> "https:$url"
-            url.startsWith("/") -> "$base$url"
-            else -> "$base/$url"
-        }
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
@@ -129,7 +130,6 @@ class FaselHD : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val base = baseUrl()
         val pageUrl = if (page > 1) "${request.data}/page/$page" else request.data
         val doc = getPage(pageUrl)
 
@@ -234,12 +234,13 @@ class FaselHD : MainAPI() {
                 val epText = ep.text().trim()
                 if (epText.contains("باقي") || epText.contains("المزيد")) return@forEach
                 val epNum = Regex("""\d+""").find(epText)?.value?.toIntOrNull()
-                episodes.add(newEpisode(epUrl) {
-                    this.name = epText
-                    this.season = seasonNum
-                    this.episode = epNum
-                    this.posterUrl = poster
-                })
+                episodes.add(
+                    newEpisode(epUrl, episodeCallback = {
+                        this.name = epText
+                        this.season = seasonNum
+                        this.episode = epNum
+                    })
+                )
             }
         }
 
