@@ -488,37 +488,41 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         // ============= جمع الحلقات =============
         val episodes = arrayListOf<Episode>()
 
-        // 1) قائمة المواسم القديمة (إن وجدت)
+        // 1) قائمة المواسم: نجلب الحلقات تتابعياً (طلب AJAX واحد لكل موسم)
+        //    بدلاً من amap المتزامن الذي يسبب timeout مع المواسم الكثيرة
         val seasonList = doc.select("div.SeasonsListHolder ul > li, #seasons__list li[data-term]")
         if (seasonList.isNotEmpty()) {
-            seasonList.amap { seasonElement ->
+            for (seasonElement in seasonList) {
                 val seasonNumber = seasonElement.attr("data-season").getIntFromText()
                     ?: parseArabicSeasonNumber(seasonElement.text())
-                    ?: return@amap
+                    ?: continue
+                if (seasonNumber > 30) continue // حماية: تجاهل القيم غير المنطقية
                 val postId = seasonElement.attr("data-id")
                     .ifBlank { seasonElement.attr("data-term") }
-                if (postId.isBlank()) return@amap
+                if (postId.isBlank()) continue
                 runCatching {
-                    postPage(
+                    val resp = app.post(
                         "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
-                        mapOf(
-                            "season" to postId,
-                            "post_id" to postId
-                        ),
-                        referer = url
-                    ).select("a[href]").forEach { ep ->
-                        val href = ep.attr("href").fixUrl()
-                        if (href.isNotBlank() && href.startsWith("http")) {
-                            val epNum = ep.text().getIntFromText()
-                            synchronized(episodes) {
-                                episodes.add(
-                                    newEpisode(href) {
-                                        this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
-                                        this.season = seasonNumber
-                                        this.episode = epNum
-                                    }
-                                )
-                            }
+                        data = mapOf("season" to postId, "post_id" to postId),
+                        headers = baseHeaders,
+                        referer = url,
+                        timeout = 25
+                    )
+                    if (resp.code in listOf(403, 503)) {
+                        val resp2 = app.post(
+                            "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
+                            data = mapOf("season" to postId, "post_id" to postId),
+                            headers = baseHeaders,
+                            referer = url,
+                            interceptor = cfKiller,
+                            timeout = 25
+                        )
+                        resp2.document.select("a[href]").forEach { ep ->
+                            extractAjaxEpisode(ep, seasonNumber, episodes)
+                        }
+                    } else {
+                        resp.document.select("a[href]").forEach { ep ->
+                            extractAjaxEpisode(ep, seasonNumber, episodes)
                         }
                     }
                 }
