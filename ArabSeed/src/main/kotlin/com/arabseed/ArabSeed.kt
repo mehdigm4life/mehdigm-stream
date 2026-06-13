@@ -460,19 +460,22 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
      * يعود List<Pair<seasonNumber, seasonUrl>> مرتبة تصاعدياً.
      */
     private fun Document.extractSeasonsFromParent(): List<Pair<Int, String>> {
-        // كل روابط /selary/...الموسم...
-        val anchors = select("a[href*=/selary/]")
-            .filter { a ->
-                val href = a.attr("href")
+        // 1) أزرار المواسم (a.season__btn) - الأحدث
+        var anchors = select("a.season__btn")
+
+        if (anchors.isEmpty()) {
+            // 2) fallback: روابط /selary/ تحتوي "الموسم"
+            anchors = select("a[href*=/selary/]").filter { a ->
                 val text = a.text()
                 val decoded = try {
-                    java.net.URLDecoder.decode(href, "UTF-8")
+                    java.net.URLDecoder.decode(a.attr("href"), "UTF-8")
                 } catch (_: Throwable) {
-                    href
+                    a.attr("href")
                 }
-                (decoded.contains("الموسم") || text.contains("الموسم") ||
-                        Regex("""-s\d+""", RegexOption.IGNORE_CASE).containsMatchIn(decoded))
+                decoded.contains("الموسم") || text.contains("الموسم") ||
+                        Regex("""-s\d+""", RegexOption.IGNORE_CASE).containsMatchIn(decoded)
             }
+        }
 
         val list = anchors.mapNotNull { a ->
             val href = a.attr("href").fixUrl()
@@ -488,10 +491,23 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             seasonNum to href
         }
 
-        // إزالة التكرار والترتيب
-        return list
-            .distinctBy { it.first }
-            .sortedBy { it.first }
+        if (list.isNotEmpty()) {
+            return list.distinctBy { it.first }.sortedBy { it.first }
+        }
+
+        // 3) fallback: قائمة المواسم عبر data-term (للحصول على الروابط من AJAX)
+        val termIds = select("#seasons__list li[data-term]").mapNotNull { li ->
+            val term = li.attr("data-term").toIntOrNull() ?: return@mapNotNull null
+            val seasonNum = parseArabicSeasonNumber(li.text()) ?: return@mapNotNull null
+            seasonNum to term
+        }
+        if (termIds.isNotEmpty()) {
+            return termIds.sortedBy { it.first }.map { (num, termId) ->
+                num to "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php?term=$termId"
+            }
+        }
+
+        return emptyList()
     }
 
     /**
@@ -517,7 +533,36 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
             )
         }
 
-        // 2) قائمة المواسم القديمة (AJAX) - تم تركها كاحتياط
+        // 2) تحميل الحلقات الإضافية عبر AJAX (load__more__episodes)
+        val loadMore = selectFirst(".load__more__episodes")
+        if (loadMore != null) {
+            val termId = loadMore.attr("data-id")
+            val currentCount = episodes.size
+            runCatching {
+                val ajaxDoc = postPage(
+                    "$mainUrl/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php",
+                    mapOf("id" to termId, "count" to "$currentCount"),
+                    referer = ""
+                )
+                ajaxDoc.select("a[href]").forEach { ep ->
+                    val href = ep.attr("href").fixUrl()
+                    if (href.isNotBlank() && href.startsWith("http")) {
+                        val epNum = ep.text().getIntFromText()
+                        if (episodes.none { it.data == href }) {
+                            episodes.add(
+                                newEpisode(href) {
+                                    this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                                    this.season = seasonNumber
+                                    this.episode = epNum
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3) قائمة المواسم القديمة (AJAX) - تم تركها كاحتياط
         if (episodes.isEmpty()) {
             select(
                 "div.ContainerEpisodesList > a, div.EpisodesList > a, " +
