@@ -494,12 +494,31 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
         // ============= جمع الحلقات =============
         val episodes = arrayListOf<Episode>()
 
+        // الانتقال إلى صفحة المسلسل الأم (selary) للحصول على قائمة كاملة بالمواسم
+        // بدلاً من الاعتماد على الصفحة الحالية التي قد تكون لموسم محدد
+        val seriesUrl = doc.select(".bread__crumbs li a[href*='/selary/']")
+            .lastOrNull {
+                val href = it.attr("href")
+                !href.contains("/%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-") &&
+                !href.contains("/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-")
+            }
+            ?.attr("href")?.fixUrl()
+            ?: url.substringBefore("/%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-")
+                .substringBefore("/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-")
+                .fixUrl()
+
+        val seriesDoc = if (seriesUrl != url && seriesUrl.isNotBlank()) {
+            getPage(seriesUrl)
+        } else {
+            doc
+        }
+
         // 1) قائمة المواسم عبر #seasons__list li[data-term]
         //    كل موسم يُجلب عبر AJAX مع pagination (offset + hasmore)
         //    نستخدم index + 1 لترقيم المواسم بدلاً من parseArabicSeasonNumber (أكثر موثوقية)
-        val seasonElements = doc.select("#seasons__list li[data-term]")
+        val seasonElements = seriesDoc.select("#seasons__list li[data-term]")
         if (seasonElements.isNotEmpty()) {
-            val pageHtml = doc.html()
+            val pageHtml = seriesDoc.html()
             val csrfToken = Regex("""csrf__token['"]?\s*:\s*['"]([^'"]+)['"]""")
                 .find(pageHtml)?.groupValues?.getOrNull(1)
 
@@ -527,7 +546,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                             "$mainUrl/season__episodes/",
                             data = postData,
                             headers = ajaxHeaders,
-                            referer = url,
+                            referer = seriesUrl,
                             timeout = 25
                         )
                         val bodyText = if (resp.code in listOf(403, 503)) {
@@ -535,7 +554,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                                 "$mainUrl/season__episodes/",
                                 data = postData,
                                 headers = ajaxHeaders,
-                                referer = url,
+                                referer = seriesUrl,
                                 interceptor = cfKiller,
                                 timeout = 25
                             ).text
