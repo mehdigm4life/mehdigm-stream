@@ -3,6 +3,7 @@ package com.faselhd
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -278,7 +279,25 @@ class FaselHD : MainAPI() {
 
         doc.select("iframe").amap { frame ->
             val src = frame.attr("data-src").ifBlank { frame.attr("src") }
-            if (src.isNotBlank()) {
+            if (src.isNotBlank() && src.contains("video_player")) {
+                val playerUrl = src.fixUrl()
+                val urls = extractHlsFromPlayer(playerUrl)
+                for ((i, hlsUrl) in urls.withIndex()) {
+                    val quality = when {
+                        hlsUrl.contains("_hd1080") || hlsUrl.contains("master") -> Qualities.P1080.value
+                        hlsUrl.contains("_hd720") -> Qualities.P720.value
+                        hlsUrl.contains("_sd360") -> Qualities.P360.value
+                        else -> Qualities.P1080.value
+                    }
+                    callback(
+                        newExtractorLink("FaselHD", "FaselHD ${if (i == 0) "HD" else "SD $i"}", hlsUrl) {
+                            this.referer = playerUrl
+                            this.quality = quality
+                        }
+                    )
+                    foundAny = true
+                }
+            } else if (src.isNotBlank()) {
                 val url = src.fixUrl()
                 foundAny = loadExtractor(url, data, subtitleCallback, callback) || foundAny
             }
@@ -288,7 +307,27 @@ class FaselHD : MainAPI() {
             val onclick = el.attr("onclick")
             Regex("""(?:player_iframe\.location\.href|location\.href)\s*=\s*['"]([^'"]+)['"]""")
                 .find(onclick)?.groupValues?.get(1)?.let { iframeUrl ->
-                    foundAny = loadExtractor(iframeUrl.fixUrl(), data, subtitleCallback, callback) || foundAny
+                    val playerUrl = iframeUrl.fixUrl()
+                    if (playerUrl.contains("video_player")) {
+                        val urls = extractHlsFromPlayer(playerUrl)
+                        for ((i, hlsUrl) in urls.withIndex()) {
+                            val quality = when {
+                                hlsUrl.contains("master") || hlsUrl.contains("_hd1080") -> Qualities.P1080.value
+                                hlsUrl.contains("_hd720") -> Qualities.P720.value
+                                hlsUrl.contains("_sd360") -> Qualities.P360.value
+                                else -> Qualities.P1080.value
+                            }
+                            callback(
+                                newExtractorLink("FaselHD", "FaselHD ${if (i == 0) "HD" else "SD $i"}", hlsUrl) {
+                                    this.referer = playerUrl
+                                    this.quality = quality
+                                }
+                            )
+                            foundAny = true
+                        }
+                    } else {
+                        foundAny = loadExtractor(playerUrl, data, subtitleCallback, callback) || foundAny
+                    }
                 }
         }
 
@@ -300,5 +339,60 @@ class FaselHD : MainAPI() {
         }
 
         return foundAny
+    }
+
+    private suspend fun extractHlsFromPlayer(playerUrl: String): List<String> {
+        return try {
+            val response = app.get(playerUrl, headers = baseHeaders, referer = baseUrl(), timeout = 60)
+            val doc = Jsoup.parse(response.text)
+
+            val obfuscatedScript = doc.select("script:not([src])").mapNotNull { it.data().takeIf { d -> d.isNotBlank() } }
+                .firstOrNull { it.contains("function(_0x") && it.contains("while(!![])") }
+                ?: return emptyList()
+
+            val safeUrl = playerUrl.replace("'", "\\'").replace("\\", "\\\\").replace("\n", "\\n")
+
+            val wrapper = """
+var document = {
+    _output: '',
+    write: function(html) { this._output += html; },
+    writeln: function(html) { this._output += html + '\n'; },
+    getElementById: function() { return null; },
+    querySelector: function() { return null; },
+    querySelectorAll: function() { return []; },
+    createElement: function() { return { innerHTML: '', setAttribute: function() {}, addEventListener: function() {}, className: '', style: {} }; },
+    createTextNode: function() { return {}; },
+    body: { appendChild: function() {}, insertAdjacentHTML: function() {}, innerHTML: '' },
+    documentElement: { outerHTML: '' },
+    cookie: ''
+};
+var window = this;
+var location = { href: '$safeUrl', host: 'www.fasel-hd.cam', protocol: 'https:' };
+var navigator = { userAgent: 'Mozilla/5.0', platform: 'Win32', language: 'en-US' };
+var setTimeout = function(fn) { try { if (typeof fn === 'function') fn(); } catch(e) {} };
+var setInterval = function() { return 0; };
+var clearInterval = function() {};
+var clearTimeout = function() {};
+var console = { log: function() {}, warn: function() {}, error: function() {} };
+var screen = { width: 1920, height: 1080 };
+try {
+    $obfuscatedScript
+} catch(e) {}
+document._output;
+""".trimIndent().replace("$obfuscatedScript", obfuscatedScript)
+
+            val rhino = getRhinoContext()
+            val scope = rhino.initSafeStandardObjects()
+            val result = rhino.evaluateString(scope, wrapper, "player.js", 1, null)
+            val output = result?.toString() ?: return emptyList()
+
+            Regex("""https://[^\s"'<>]+\.m3u8""").findAll(output)
+                .map { it.value }
+                .distinct()
+                .toList()
+        } catch (e: Exception) {
+            logError(e)
+            emptyList()
+        }
     }
 }
