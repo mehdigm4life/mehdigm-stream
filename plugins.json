@@ -22,5 +22,26 @@
     "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animezid.cs3",
     "name": "Animezid (انمي زد)",
     "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
+  },
+  {
+    "iconUrl": "https://m.arabseed.show/favicon.ico",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 0,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "mehdigm4life"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "ArabSeed",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/ArabSeed.cs3",
+    "name": "عرب سيد (ArabSeed)",
+    "description": "مشاهدة وتحميل الأفلام والمسلسلات العربية والأجنبية والمترجمة."
   }
 ]
