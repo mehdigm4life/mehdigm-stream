@@ -500,12 +500,15 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
                 .find(pageHtml)?.groupValues?.getOrNull(1)
 
             // الحلقات المحملة مسبقاً (الموسم النشط)
+            val activeSeasonNum = seasonElements.firstOrNull { it.hasClass("selected") }
+                ?.let { parseArabicSeasonNumber(it.text()) }
             doc.select(".episodes__list > li > a").forEach { ep ->
                 val href = ep.attr("href").fixUrl()
                 if (href.isNotBlank() && href.startsWith("http")) {
                     val epNum = ep.selectFirst(".epi__num b")?.text()?.getIntFromText()
                     episodes.add(newEpisode(href) {
                         this.name = if (epNum != null) "الحلقة $epNum" else ep.text()
+                        this.season = activeSeasonNum
                         this.episode = epNum
                     })
                 }
