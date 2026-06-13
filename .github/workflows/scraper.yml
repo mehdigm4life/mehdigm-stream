@@ -46,6 +46,9 @@ jobs:
         python -m playwright install chromium
         python -m playwright install-deps chromium
 
+    - name: Clean previous scraped data
+      run: rm -rf scraped_sites/
+
     - name: Run Legendary Scraper
       env:
         TARGET_URL: ${{ github.event.inputs.target_url }}
@@ -255,7 +258,7 @@ jobs:
 
         def is_same_site(url: str) -> bool:
             host = urlparse(url).netloc
-            return any(d in host or host in d for d in tracked_domains)
+            return any(host == d or host.endswith('.' + d) or d.endswith('.' + host) for d in tracked_domains)
 
         async def fetch_page(url: str):
             global pages_fetched, pages_pw
