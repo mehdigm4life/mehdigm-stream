@@ -291,7 +291,7 @@ class FaselHD : MainAPI() {
                 this.plot = synopsis
                 this.tags = tags
                 this.year = year
-                this.score = score
+                this.score = Score.from10(score)
             }
         } else {
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -299,7 +299,7 @@ class FaselHD : MainAPI() {
                 this.plot = synopsis
                 this.tags = tags
                 this.year = year
-                this.score = score
+                this.score = Score.from10(score)
             }
         }
     }
