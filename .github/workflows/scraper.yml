@@ -271,7 +271,7 @@ jobs:
         pages_with_playwright = 0
 
         async def fetch_page(url: str):
-            nonlocal pages_fetched, pages_with_playwright
+            global pages_fetched, pages_with_playwright
 
             url = normalize_url(url)
             if url in visited:
@@ -337,7 +337,7 @@ jobs:
                         queue.append(full)
 
         async def main():
-            nonlocal pages_fetched
+            global pages_fetched
 
             start_url = normalize_url(TARGET_URL)
             queue.append(start_url)
