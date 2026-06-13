@@ -338,7 +338,7 @@ class ArabSeed : MainAPI() {
             // نُنظّف العنوان من "الموسم X"
             val type = chosen.type ?: TvType.Movie
 
-val unified = newMovieSearchResponse(cleanName, chosen.url, type) {
+val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen.url, type) {
     this.posterUrl = chosen.posterUrl
 }
             collapsed.add(unified)
