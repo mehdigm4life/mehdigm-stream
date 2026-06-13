@@ -1,6 +1,5 @@
 name: Professional Web Scraper & Cloner
 
-# منح صلاحيات الكتابة للروبوت ليعمل في أي مستودع تلقائياً بدون تعديل إعدادات
 permissions:
   contents: write
 
@@ -25,13 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. جلب ملفات المستودع الحالية مع تفعيل التمرير التلقائي لتوكن الصلاحيات
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
         persist-credentials: true
 
-    # 2. إعداد بيئة بايثون وتثبيت المكتبات اللازمة
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -42,7 +39,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    # 3. تشغيل سكربت السحب الذكي
     - name: Run Intelligent Scraper Script
       env:
         TARGET_URL: ${{ github.event.inputs.target_url }}
@@ -52,53 +48,73 @@ jobs:
         import os
         import sys
         import requests
+        import time
         from bs4 import BeautifulSoup
         from urllib.parse import urlparse, urljoin
 
         target_url = os.environ.get("TARGET_URL").strip()
         scrape_mode = os.environ.get("SCRAPE_MODE")
         
-        # استخراج اسم الدومين لإنشاء مجلد خاص به وتنظيف الرابط
         parsed_url = urlparse(target_url)
         domain = parsed_url.netloc
         if not domain:
-            print("❌ الرابط غير صحيح، يرجى التأكد من كتابته بشكل كامل (يحتوي على http أو https)")
+            print("❌ الرابط غير صحيح")
             sys.exit(1)
             
         output_dir = os.path.join("scraped_sites", domain)
         os.makedirs(output_dir, exist_ok=True)
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        # إنشاء جلسة للحفاظ على الكوكيز ومحاكاة متصفح Chrome حقيقي بدقة عالية
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
+        })
 
         visited_urls = set()
 
         def download_page(url):
             if url in visited_urls:
                 return
-            
-            # التأكد من أن الرابط يتبع لنفس الدومين لمنع الخروج لمواقع خارجية
             if urlparse(url).netloc != domain:
                 return
 
             print(f"📥 جاري سحب: {url}")
             visited_urls.add(url)
             
+            # إضافة تأخير زمني بسيط (1 إلى 2 ثانية) حتى لا تكتشف الحماية التدفق السريع
+            time.sleep(1.5)
+            
             try:
-                response = requests.get(url, headers=headers, timeout=15)
-                if response.status_code != 200:
+                # تحديث الـ Referer ديناميكياً ليبدو التنقل طبيعياً داخل الموقع
+                session.headers.update({'Referer': target_url})
+                
+                response = session.get(url, timeout=20)
+                
+                if response.status_code == 403:
+                    print(f"⚠️ فشل تحميل الصفحة، رمز الحالة: 403 (الموقع محمي بقفل قوي ضد الروبوتات)")
+                    return
+                elif response.status_code != 200:
                     print(f"⚠️ فشل تحميل الصفحة، رمز الحالة: {response.status_code}")
                     return
                 
-                # تحديد مسار حفظ الملف
                 local_path = urlparse(url).path
                 if local_path.endswith('/') or not local_path:
                     local_path += "index.html"
                 elif not os.path.splitext(local_path)[1]:
                     local_path += ".html"
                     
-                # تنظيف المسار وحفظ الملف داخل مجلد الدومين
                 file_path = os.path.join(output_dir, local_path.lstrip('/'))
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 
@@ -106,13 +122,11 @@ jobs:
                     f.write(response.text)
                 print(f"💾 تم الحفظ في: {file_path}")
 
-                # إذا كان الوضع "موقع كامل"، نقوم باستخراج الروابط الداخلية واستدعاء الدالة تكرارياً (Recursive)
                 if "Full Website" in scrape_mode:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     for anchor in soup.find_all('a', href=True):
                         href = anchor['href']
                         full_url = urljoin(url, href)
-                        # إزالة الـ fragments والـ query strings لتوحيد الروابط
                         full_url = urlparse(full_url)._replace(fragment='', query='').geturl()
                         if domain in full_url:
                             download_page(full_url)
@@ -120,21 +134,17 @@ jobs:
             except Exception as e:
                 print(f"❌ خطأ أثناء معالجة {url}: {e}")
 
-        # بدء عملية السحب
         download_page(target_url)
         print("✅ انتهت عملية السحب بنجاح!")
         EOF
 
-    # 4. رفع الملفات تلقائياً بعمل Commit و Push للمستودع باستخدام صلاحيات التوكن الممررة
     - name: Commit and Push Scraped Data
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         
-        # إضافة المجلد المستخرج
         git add scraped_sites/
         
-        # التحقق من وجود تغييرات لتجنب فشل الـ Workflow إذا تم سحب نفس الموقع بدون جديد
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
