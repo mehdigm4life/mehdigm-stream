@@ -461,7 +461,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
      */
     private fun Document.extractSeasonsFromParent(): List<Pair<Int, String>> {
         // 1) أزرار المواسم (a.season__btn) - الأحدث
-        var anchors = select("a.season__btn")
+        var anchors: List<Element> = select("a.season__btn")
 
         if (anchors.isEmpty()) {
             // 2) fallback: روابط /selary/ تحتوي "الموسم"
@@ -513,7 +513,7 @@ val unified = newMovieSearchResponse(extractSeriesBaseTitle(chosen.name), chosen
     /**
      * يستخرج حلقات صفحة موسم/حلقة من الـ DOM.
      */
-    private fun Document.extractEpisodesFromSeasonPage(seasonNumber: Int?): List<Episode> {
+    private suspend fun Document.extractEpisodesFromSeasonPage(seasonNumber: Int?): List<Episode> {
         val episodes = arrayListOf<Episode>()
 
         // 1) القالب الحالي: ul.episodes__list (صفحات الحلقات/المواسم الجديدة)
