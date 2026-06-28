@@ -7,6 +7,7 @@ import android.content.Context
 @CloudstreamPlugin
 class AnimezidPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(Animezid())
+        // All providers should be added in this manner. Please don't edit the providers list directly.
+        registerMainAPI(AnimezidProvider())
     }
 }
