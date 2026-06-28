@@ -1,0 +1,56 @@
+name: Build Animezid Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Animezid/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Animezid plugin
+        run: ./gradlew :Animezid:make
+
+      - name: Upload Animezid.cs3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Animezid
+          path: Animezid/build/Animezid.cs3
+
+      - name: Commit and push built cs3 to build/
+        run: |
+          if [ -f "Animezid/build/Animezid.cs3" ]; then
+            cp Animezid/build/Animezid.cs3 build/Animezid.cs3
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/Animezid.cs3
+            if ! git diff --staged --quiet; then
+              git commit -m "🤖 Build Animezid.cs3"
+              git push
+            else
+              echo "No changes to commit"
+            fi
+          else
+            echo "Animezid.cs3 not found!"
+          fi
