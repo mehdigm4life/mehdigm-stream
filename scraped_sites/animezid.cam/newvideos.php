@@ -218,277 +218,277 @@ var _LOGGEDIN_ =  false ;
 		</div>
 		</div>
 				<div id="movies" class="movies">
-						<a href="https://animezid.cam/watch.php?vid=e9fc577ea" class="movie" title="انمي السلايم الموسم الرابع الحلقة 7 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/e9fc577ea-1.jpg">
-		<span class="title">انمي السلايم الموسم الرابع الحلقة 7 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=33382c527" class="movie" title="إيرين الأعسر الحلقة 7 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/33382c527-1.jpg">
-		<span class="title">إيرين الأعسر الحلقة 7 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=a665c564e" class="movie" title="انمي دكتور ستون الموسم الرابع الحلقة 35 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.7</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/a665c564e-1.jpg">
-		<span class="title">انمي دكتور ستون الموسم الرابع الحلقة 35...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=ebcec35c0" class="movie" title="دورايمون الموسم الثالث الحلقة 33 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/ebcec35c0-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 33 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=644936ef2" class="movie" title="دورايمون الموسم الثالث الحلقة 32 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/644936ef2-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 32 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=024cca71c" class="movie" title="دورايمون الموسم الثالث الحلقة 31 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/024cca71c-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 31 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=b89351582" class="movie" title="دورايمون الموسم الثالث الحلقة 30 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b89351582-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 30 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=75a49d071" class="movie" title="دورايمون الموسم الثالث الحلقة 29 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/75a49d071-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 29 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=b532c50d3" class="movie" title="دورايمون الموسم الثالث الحلقة 28 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b532c50d3-1.jpg">
-		<span class="title">دورايمون الموسم الثالث الحلقة 28 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=4a43796b8" class="movie" title="أبطال الكرة فرسان المجرة الحلقة 24 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/4a43796b8-1.jpg">
-		<span class="title">أبطال الكرة فرسان المجرة الحلقة 24 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=60f936143" class="movie" title="أبطال الكرة فرسان المجرة الحلقة 23 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/60f936143-1.jpg">
-		<span class="title">أبطال الكرة فرسان المجرة الحلقة 23 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=b864ebc68" class="movie" title="أبطال الكرة فرسان المجرة الحلقة 22 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b864ebc68-1.jpg">
-		<span class="title">أبطال الكرة فرسان المجرة الحلقة 22 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=f37e36af1" class="movie" title="أبطال الكرة فرسان المجرة الحلقة 21 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f37e36af1-1.jpg">
-		<span class="title">أبطال الكرة فرسان المجرة الحلقة 21 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=0756952c7" class="movie" title="انمي Mata Korosarete Shimatta no desu ne, Tantei-sama الحلقة 10 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/0756952c7-1.jpg">
-		<span class="title">انمي Mata Korosarete Shimatta no desu ne, Tantei-sama الحلقة 10...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=c7b7043c2" class="movie" title="انمي Mata Korosarete Shimatta no desu ne, Tantei-sama الحلقة 9 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/c7b7043c2-1.jpg">
-		<span class="title">انمي Mata Korosarete Shimatta no desu ne, Tantei-sama الحلقة 9...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=ef5e0e238" class="movie" title="بي بليد إكس الحلقة 56 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/ef5e0e238-1.jpg">
-		<span class="title">بي بليد إكس الحلقة 56 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=8e307d9e7" class="movie" title="انمي أمير التنس الحلقة 150 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>7.8</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/8e307d9e7-1.jpg">
-		<span class="title">انمي أمير التنس الحلقة 150 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=8644d139a" class="movie" title="انمي أمير التنس الحلقة 149 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>7.8</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/8644d139a-1.jpg">
-		<span class="title">انمي أمير التنس الحلقة 149 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=86910f404" class="movie" title="مسلسل الدراج المقنع الحلقة 30 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/86910f404-1.jpg">
-		<span class="title">مسلسل الدراج المقنع الحلقة 30 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=79ffe2277" class="movie" title="انمي هايكيوو!! الحلقة 3 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.1</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/79ffe2277-1.jpg">
-		<span class="title">انمي هايكيوو!! الحلقة 3 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=f8cfce985" class="movie" title="ورشة قبعة الساحرة الحلقة 11 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>9.0</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f8cfce985-1.jpg">
-		<span class="title">ورشة قبعة الساحرة الحلقة 11 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=15c01bbe0" class="movie" title="انمي Tongari Boushi no Atelier الحلقة 11 مترجمة">
-				<span class="r"><i class="i-fav rating"><i>8.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/15c01bbe0-1.jpg">
-		<span class="title">انمي Tongari Boushi no Atelier الحلقة 11 مترجمة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=2908150da" class="movie" title="انمي Tongari Boushi no Atelier الحلقة 10 مترجمة">
-				<span class="r"><i class="i-fav rating"><i>8.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2908150da-1.jpg">
-		<span class="title">انمي Tongari Boushi no Atelier الحلقة 10 مترجمة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=f8e393075" class="movie" title="مسلسل نزال الأبطال الحلقة 21 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f8e393075-1.jpg">
-		<span class="title">مسلسل نزال الأبطال الحلقة 21 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=169b90104" class="movie" title="مسلسل نزال الأبطال الحلقة 20 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/169b90104-1.jpg">
-		<span class="title">مسلسل نزال الأبطال الحلقة 20 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=fee3f9118" class="movie" title="مسلسل نزال الأبطال الحلقة 19 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/fee3f9118-1.jpg">
-		<span class="title">مسلسل نزال الأبطال الحلقة 19 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=7c75935e4" class="movie" title="انمي عملاء الفصول الأربعة : رقصة الربيع الحلقة 8 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/7c75935e4-1.jpg">
-		<span class="title">انمي عملاء الفصول الأربعة : رقصة الربيع...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=b175632c7" class="movie" title="المحقق كونان  الجزء 11 الحلقة 574 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b175632c7-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 574 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=2c2aca17a" class="movie" title="المحقق كونان  الجزء 11 الحلقة 573 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2c2aca17a-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 573 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=5ee48d275" class="movie" title="المحقق كونان  الجزء 11 الحلقة 572 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/5ee48d275-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 572 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=87992b1cb" class="movie" title="المحقق كونان  الجزء 11 الحلقة 571 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/87992b1cb-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 571 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=58bcf8bfa" class="movie" title="المحقق كونان  الجزء 11 الحلقة 570 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/58bcf8bfa-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 570 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=852234c36" class="movie" title="المحقق كونان  الجزء 11 الحلقة 569 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/852234c36-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 569 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=006fc7691" class="movie" title="المحقق كونان الحلقة 1203 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/006fc7691-1.jpg">
-		<span class="title">المحقق كونان الحلقة 1203 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=495a7697c" class="movie" title="المحقق كونان  الجزء 11 الحلقة 567 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/495a7697c-1.jpg">
-		<span class="title">المحقق كونان  الجزء 11 الحلقة 567 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=08f519f0e" class="movie" title="فيلم المحقق كونان 11 : كنز في أعماق البحار | Detective Conan: Jolly Roger in the Deep Azure 2007 مدبلج">
-				<span class="r"><i class="i-fav rating"><i>6.3</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/08f519f0e-1.jpg">
-		<span class="title">فيلم المحقق كونان 11 : كنز في أعماق البحار |...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=e47c6b578" class="movie" title="أحجار الضياء الحلقة 1 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/e47c6b578-1.jpg">
-		<span class="title">أحجار الضياء الحلقة 1 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=07ce80f29" class="movie" title="المحقق كونان الحلقة 1202 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/07ce80f29-1.jpg">
-		<span class="title">المحقق كونان الحلقة 1202 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=a50b10725" class="movie" title="كوكو تاما الحلقة 127 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>4.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/a50b10725-1.jpg">
-		<span class="title">كوكو تاما الحلقة 127 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=901dee095" class="movie" title="كوكو تاما الحلقة 126 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>4.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/901dee095-1.jpg">
-		<span class="title">كوكو تاما الحلقة 126 مدبلجة</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=1e8608a61" class="movie" title="انمي Jishou Akuyaku Reijou na Konyakusha no Kansatsu Kiroku الحلقة 10 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/1e8608a61-1.jpg">
-		<span class="title">انمي Jishou Akuyaku Reijou na Konyakusha no Kansatsu Kiroku الحلقة...</span>
-				<span class="ribbon r3"><span>WEB-DL</span></span>
-				</a>
-						<a href="https://animezid.cam/watch.php?vid=e96e48611" class="movie" title="انمي Dr. Stone: Science Future الحلقة 34 مترجمة">
+						<a href="https://animezid.cam/watch.php?vid=359d66022" class="movie" title="انمي Dr. Stone: Science Future الحلقة 35 مترجمة">
 				<span class="r"><i class="i-fav rating"><i>6.7</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/e96e48611-1.jpg">
-		<span class="title">انمي Dr. Stone: Science Future الحلقة 34 مترجمة</span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/359d66022-1.jpg">
+		<span class="title">انمي Dr. Stone: Science Future الحلقة 35 مترجمة</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=20c2b1752" class="movie" title="انمي Tensei shitara Slime Datta Ken الموسم الرابع الحلقة 9 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/20c2b1752-1.jpg">
+						<a href="https://animezid.cam/watch.php?vid=ba55c14f9" class="movie" title="انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 12 والأخيرة مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/ba55c14f9-1.jpg">
+		<span class="title">انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 12...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=dd674ae58" class="movie" title="انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 11 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/dd674ae58-1.jpg">
+		<span class="title">انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 11 مترجمة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=70e98ba48" class="movie" title="انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 10 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/70e98ba48-1.jpg">
+		<span class="title">انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 10 مترجمة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=19444c385" class="movie" title="انمي Tensei shitara Slime Datta Ken الموسم الرابع الحلقة 12 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/19444c385-1.jpg">
 		<span class="title">انمي Tensei shitara Slime Datta Ken الموسم الرابع...</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=4e1bc7185" class="movie" title="انمي السلايم الموسم الرابع الحلقة 6 مدبلجة">
-				<span class="r"><i class="i-fav rating"><i>8.2</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/4e1bc7185-1.jpg">
-		<span class="title">انمي السلايم الموسم الرابع الحلقة 6 مدبلجة</span>
+						<a href="https://animezid.cam/watch.php?vid=b7d7af634" class="movie" title="انمي Tensei shitara Slime Datta Ken الموسم الرابع الحلقة 11 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b7d7af634-1.jpg">
+		<span class="title">انمي Tensei shitara Slime Datta Ken الموسم الرابع...</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=d23dc9d19" class="movie" title="انمي دكتور ستون الموسم الرابع الحلقة 34 مدبلجة">
+						<a href="https://animezid.cam/watch.php?vid=d59887cec" class="movie" title="انمي Tensei shitara Slime Datta Ken الموسم الرابع الحلقة 10 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/d59887cec-1.jpg">
+		<span class="title">انمي Tensei shitara Slime Datta Ken الموسم الرابع...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=650a09381" class="movie" title="انمي Needy Girl Overdose الحلقة 12 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/650a09381-1.jpg">
+		<span class="title">انمي Needy Girl Overdose الحلقة 12 مترجمة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=da55f17d9" class="movie" title="انمي Needy Girl Overdose الحلقة 11 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/da55f17d9-1.jpg">
+		<span class="title">انمي Needy Girl Overdose الحلقة 11 مترجمة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=ec7ad70cc" class="movie" title="انمي Needy Girl Overdose الحلقة 10 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/ec7ad70cc-1.jpg">
+		<span class="title">انمي Needy Girl Overdose الحلقة 10 مترجمة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=b8a810dd0" class="movie" title="المحقق كونان  الجزء 11 الحلقة 577 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>8.5</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b8a810dd0-1.jpg">
+		<span class="title">المحقق كونان  الجزء 11 الحلقة 577 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=07785be6d" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 7 والأخيرة مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/07785be6d-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r2"><span>الأخيرة</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=a632ec752" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 6 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/a632ec752-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=864c538bb" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 5 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/864c538bb-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=2dc6385f3" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 4 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2dc6385f3-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=19111c322" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 3 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/19111c322-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=250117e8a" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 2 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/250117e8a-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=42cd9e4a9" class="movie" title="مسلسل أفاتار: مسخر الهواء الواقعي الموسم الثاني الحلقة 1 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>9.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/42cd9e4a9-1.jpg">
+		<span class="title">مسلسل أفاتار: مسخر الهواء الواقعي الموسم...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=79471e9ac" class="movie" title="انمي بلاك كلوفر الحلقة 104 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>7.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/79471e9ac-1.jpg">
+		<span class="title">انمي بلاك كلوفر الحلقة 104 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=593672b1b" class="movie" title="انمي بلاك كلوفر الحلقة 103 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>7.6</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/593672b1b-1.jpg">
+		<span class="title">انمي بلاك كلوفر الحلقة 103 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=52e7da594" class="movie" title="أبطال الكرة فرسان المجرة الحلقة 25 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/52e7da594-1.jpg">
+		<span class="title">أبطال الكرة فرسان المجرة الحلقة 25 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=4ab405fad" class="movie" title="انمي هايكيوو!! الحلقة 5 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>8.1</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/4ab405fad-1.jpg">
+		<span class="title">انمي هايكيوو!! الحلقة 5 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=ab596cdd0" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 12 والأخيرة مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/ab596cdd0-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r2"><span>الأخيرة</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=720fb6291" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 11 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/720fb6291-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=2f0aa9e0a" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 10 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2f0aa9e0a-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=2f7b14970" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 9 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2f7b14970-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=f3b7f01b7" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 8 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f3b7f01b7-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=66ed8aa43" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 7 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/66ed8aa43-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=2490a90fc" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 6 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/2490a90fc-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=bd8f29dd1" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 5 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/bd8f29dd1-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=62c79f411" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 4 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/62c79f411-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=7eb5d1639" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 3 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/7eb5d1639-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=d1db73baa" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 2 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/d1db73baa-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=f090b22bb" class="movie" title="انمي باكي دو: الساموراي الذي لا يقهر الموسم الثاني الحلقة 1 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f090b22bb-1.jpg">
+		<span class="title">انمي باكي دو: الساموراي الذي لا يقهر...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=e5fa9cd30" class="movie" title="انمي دكتور ستون الموسم الرابع الحلقة 37 والأخيرة مدبلجة">
 				<span class="r"><i class="i-fav rating"><i>8.7</i></i></span>
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/d23dc9d19-1.jpg">
-		<span class="title">انمي دكتور ستون الموسم الرابع الحلقة 34...</span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/e5fa9cd30-1.jpg">
+		<span class="title">انمي دكتور ستون الموسم الرابع الحلقة 37...</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=1bcf495a1" class="movie" title="انمي Jidou Hanbaiki ni Umarekawatta Ore wa Meikyuu wo Samayou الموسم الثالث الحلقة 10 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/1bcf495a1-1.jpg">
-		<span class="title">انمي Jidou Hanbaiki ni Umarekawatta Ore wa Meikyuu wo Samayou...</span>
+						<a href="https://animezid.cam/watch.php?vid=4332ca36c" class="movie" title="انمي دكتور ستون الموسم الرابع الحلقة 36 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>8.7</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/4332ca36c-1.jpg">
+		<span class="title">انمي دكتور ستون الموسم الرابع الحلقة 36...</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=c05cab673" class="movie" title="انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 9 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/c05cab673-1.jpg">
-		<span class="title">انمي Haibara-kun no Tsuyokute Seishun New Game الحلقة 9 مترجمة</span>
+						<a href="https://animezid.cam/watch.php?vid=379fc4a36" class="movie" title="إيرين الأعسر الحلقة 9 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/379fc4a36-1.jpg">
+		<span class="title">إيرين الأعسر الحلقة 9 مدبلجة</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=32efe158a" class="movie" title="مسلسل الدراج المقنع الحلقة 29 مدبلجة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/32efe158a-1.jpg">
-		<span class="title">مسلسل الدراج المقنع الحلقة 29 مدبلجة</span>
+						<a href="https://animezid.cam/watch.php?vid=32488b4ec" class="movie" title="إيرين الأعسر الحلقة 8 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/32488b4ec-1.jpg">
+		<span class="title">إيرين الأعسر الحلقة 8 مدبلجة</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=f10a9b851" class="movie" title="انمي Re:Zero kara Hajimeru Isekai Seikatsu الموسم الرابع الحلقة 9 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/f10a9b851-1.jpg">
-		<span class="title">انمي Re:Zero kara Hajimeru Isekai Seikatsu الموسم الرابع...</span>
+						<a href="https://animezid.cam/watch.php?vid=81d213ac9" class="movie" title="انمي أمير التنس الحلقة 152 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>7.8</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/81d213ac9-1.jpg">
+		<span class="title">انمي أمير التنس الحلقة 152 مدبلجة</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
-						<a href="https://animezid.cam/watch.php?vid=a38b9e5fe" class="movie" title="انمي Re:Zero kara Hajimeru Isekai Seikatsu الموسم الرابع الحلقة 8 مترجمة">
-				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/a38b9e5fe-1.jpg">
-		<span class="title">انمي Re:Zero kara Hajimeru Isekai Seikatsu الموسم الرابع...</span>
+						<a href="https://animezid.cam/watch.php?vid=c70dd0fdc" class="movie" title="انمي The Beginning After the End الموسم الثاني الحلقة 12 والأخيرة مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/c70dd0fdc-1.jpg">
+		<span class="title">انمي The Beginning After the End الموسم الثاني الحلقة...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=d4ac18315" class="movie" title="انمي The Beginning After the End الموسم الثاني الحلقة 11 مترجمة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/d4ac18315-1.jpg">
+		<span class="title">انمي The Beginning After the End الموسم الثاني الحلقة...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=4dec09fec" class="movie" title="مسلسل الدراج المقنع الحلقة 32 مدبلجة">
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/4dec09fec-1.jpg">
+		<span class="title">مسلسل الدراج المقنع الحلقة 32 مدبلجة</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=1d52d1dc8" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 25 والأخيرة مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/1d52d1dc8-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 25...</span>
+				<span class="ribbon r2"><span>الأخيرة</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=d3c739a6f" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 24 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/d3c739a6f-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 24...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=07334688c" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 23 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/07334688c-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 23...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=8272f3188" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 22 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/8272f3188-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 22...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=b19322e3e" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 21 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b19322e3e-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 21...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=0c7a80c3d" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 20 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/0c7a80c3d-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 20...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=5f6e11bf3" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 19 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/5f6e11bf3-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 19...</span>
+				<span class="ribbon r3"><span>WEB-DL</span></span>
+				</a>
+						<a href="https://animezid.cam/watch.php?vid=b8dc32160" class="movie" title="انمي فاير فورس الموسم الثالث الحلقة 18 مدبلجة">
+				<span class="r"><i class="i-fav rating"><i>5.9</i></i></span>
+				<img class="lazy" data-src="https://animezid.cam/uploads/thumbs/b8dc32160-1.jpg">
+		<span class="title">انمي فاير فورس الموسم الثالث الحلقة 18...</span>
 				<span class="ribbon r3"><span>WEB-DL</span></span>
 				</a>
 				</div>
@@ -518,10 +518,10 @@ var _LOGGEDIN_ =  false ;
 			<a href="#" onclick="return false;">...</a>
 		</li>
 				<li class="">
-			<a href="newvideos.php?&page=710">710</a>
+			<a href="newvideos.php?&page=713">713</a>
 		</li>
 				<li class="">
-			<a href="newvideos.php?&page=711">711</a>
+			<a href="newvideos.php?&page=714">714</a>
 		</li>
 				<li class="">
 			<a href="newvideos.php?&page=2">&raquo;</a>
@@ -557,7 +557,7 @@ var _LOGGEDIN_ =  false ;
 <!--<div class="mgb ad_box ad_box_auto"></div>-->
 <div class="mbox">
 <div class="tam pda bdb"><strong>شارك مع اصدقائك</strong></div>
-<div id="share" class="jssocials"><div class="jssocials-shares"><div class="jssocials-share jssocials-share-twitter"><a target="_blank" href="https://twitter.com/share?url=https://animezid.cam&amp;text=%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9+" class="jssocials-share-link"><i class="fab fa-twitter jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-facebook"><a target="_blank" href="https://facebook.com/sharer/sharer.php?u=https://animezid.cam" class="jssocials-share-link"><i class="fab fa-facebook-f jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-email"><a target="_self" href="/cdn-cgi/l/email-protection#ccf3bfb9aea6a9afb8f1e988f5e9f4f9e988f5e9f4f4e988f5e9f4fee988f4e98ef5e7e988f4e98dfbe988f5e9f4fae988f5e9f4f9e988f5e9f48de7e988f4e98efee988f4e98d8ae78da2a5a1a996a5a8e7e9fb8fe7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f5e9f4f4e988f5e9f4fee988f4e98ef5e7e988f4e98dfbe988f5e9f4f8e988f4e98ef5e988f4e98efde988f4e98df4e988f5e9f48de7e988f4e98dfbe988f5e9f4f8e988f4e98dfbe988f5e9f4f4e988f5e9f4f8e7e988f5e9f4f8e988f5e9f4f9e988f4e98ef8e988f4e98dfbe988f5e9f4fbe988f4e98d8ae988f4e98df5e7e988f4e98dffe988f5e9f4fde988f5e9f4f8e988f4e98dfbe988f5e9f4f9e7e988f5e9f4f4e988f5e9f4f9e988f4e98effe988f5e9f4f8e988f4e98effe988f5e9f4f8e988f4e98dfbe988f4e98d8de7e988f4e98dfbe988f5e9f4f8e988f4e98dfbe988f5e9f4fae988f5e9f4f9e988f5e9f48de7e988f5e9f4f4e988f4e98dfbe988f5e9f4f8e988f5e9f4ffe988f4e98efde988f4e98d8de988f5e9f4f4e988f5e9f4fae7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98d8ae988f4e98df4e988f5e9f4f8e988f4e98d8fe988f4e98df5e7e988f5e9f4f4e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98d8de988f4e98efde988f4e98d8fe988f5e9f4f9e988f4e98df5e7e988f4e98df4e988f4e98dfbe988f4e98effe988f4e98efde988f4e98ef5e7e988f4e98efde988f5e9f4f4e988f4e98dfbe988f4e98df4e988f4e98efbe7e988f4e98dfbe988f5e9f4f8e988f4e98d8de988f4e98d88e988f5e9f4f9e988f5e9f48de988f5e9f4f8e7e988f5e9f4f4e988f4e98dfbe988f4e98effe988f4e98efde988f4e98ef5e7e988f4e98effe988f5e9f48de988f4e98efde988f5e9f4fde988f4e98efde988f4e98dfbe988f4e98d8de7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98ef8e988f4e98dfbe988f5e9f4fbe988f4e98d8ae988f4e98df5e7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98df4e988f4e98dfbe988f4e98ef8e988f4e98efde988f4e98df5e7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f5e9f4f4e988f4e98d8fe988f5e9f4f4e988f4e98d8ae988f4e98df5e7e988f4e98dfbe988f5e9f4fae988f4e98efae988f5e9f4f9e7e988f4e98dfbe988f5e9f4f8e988f5e9f48de988f5e9f4fae988f4e98dfbe7e988f5e9f4f8e988f5e9f4f9e988f4e98ef8e988f4e98dfbe988f5e9f4fbe988f4e98d8ae988f4e98df5e7e988f4e98dfbe988f4e98d88e988f4e98d8ae988f4e98d8ee7e988f4e98dfbe988f5e9f4fae988f4e98d8de988f4e98dfbe988f4e98d8fe988f4e98dfbe988f4e98d8de7e988f4e98d8ae988f5e9f48de988f4e98efee988f5e9f4fae988f5e9f48de7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98d8ae988f4e98df4e988f5e9f4f8e988f4e98d8fe988f4e98df5e7e988f4e98df4e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98ef9e988f4e98efde988f5e9f48de988f4e98df5e7e988f5e9f4f4e988f4e98e8de988f5e9f48de988f4e98efde988f5e9f4fbe988f4e98dfbe7e988f5e9f4f9e988f5e9f4fae7e988f4e98dfbe988f5e9f4f8e988f4e98dfbe988f4e98ef5e988f5e9f4f9e988f4e98dfbe988f5e9f4f8e7e988f4e98dfbe988f5e9f4f8e988f5e9f4f9e988f4e98d8ae988f4e98df4e988f5e9f4f8e988f4e98d8fe988f4e98df5e7e988f4e98dfbe988f5e9f4f8e988f4e98ef5e988f4e98d8ae988f5e9f48de988f4e98d8ae988f4e98df5e2e7eaada1bcf7aea3a8b5f1a4b8b8bcbff6e3e3ada2a5a1a9b6a5a8e2afada1" class="jssocials-share-link"><i class="far fa-envelope jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-whatsapp"><a target="_self" href="whatsapp://send?text=https://animezid.cam %D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9.+" class="jssocials-share-link"><i class="fab fa-whatsapp jssocials-share-logo"></i></a></div></div></div>
+<div id="share" class="jssocials"><div class="jssocials-shares"><div class="jssocials-share jssocials-share-twitter"><a target="_blank" href="https://twitter.com/share?url=https://animezid.cam&amp;text=%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9+" class="jssocials-share-link"><i class="fab fa-twitter jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-facebook"><a target="_blank" href="https://facebook.com/sharer/sharer.php?u=https://animezid.cam" class="jssocials-share-link"><i class="fab fa-facebook-f jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-email"><a target="_self" href="/cdn-cgi/l/email-protection#1e216d6b7c747b7d6a233b5a273b262b3b5a273b26263b5a273b262c3b5a263b5c27353b5a263b5f293b5a273b26283b5a273b262b3b5a273b265f353b5a263b5c2c3b5a263b5f58355f7077737b44777a353b295d353b5a263b5f293b5a273b262a3b5a273b262b3b5a273b26263b5a273b262c3b5a263b5c27353b5a263b5f293b5a273b262a3b5a263b5c273b5a263b5c2f3b5a263b5f263b5a273b265f353b5a263b5f293b5a273b262a3b5a263b5f293b5a273b26263b5a273b262a353b5a273b262a3b5a273b262b3b5a263b5c2a3b5a263b5f293b5a273b26293b5a263b5f583b5a263b5f27353b5a263b5f2d3b5a273b262f3b5a273b262a3b5a263b5f293b5a273b262b353b5a273b26263b5a273b262b3b5a263b5c2d3b5a273b262a3b5a263b5c2d3b5a273b262a3b5a263b5f293b5a263b5f5f353b5a263b5f293b5a273b262a3b5a263b5f293b5a273b26283b5a273b262b3b5a273b265f353b5a273b26263b5a263b5f293b5a273b262a3b5a273b262d3b5a263b5c2f3b5a263b5f5f3b5a273b26263b5a273b2628353b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5f583b5a263b5f263b5a273b262a3b5a263b5f5d3b5a263b5f27353b5a273b26263b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5f5f3b5a263b5c2f3b5a263b5f5d3b5a273b262b3b5a263b5f27353b5a263b5f263b5a263b5f293b5a263b5c2d3b5a263b5c2f3b5a263b5c27353b5a263b5c2f3b5a273b26263b5a263b5f293b5a263b5f263b5a263b5c29353b5a263b5f293b5a273b262a3b5a263b5f5f3b5a263b5f5a3b5a273b262b3b5a273b265f3b5a273b262a353b5a273b26263b5a263b5f293b5a263b5c2d3b5a263b5c2f3b5a263b5c27353b5a263b5c2d3b5a273b265f3b5a263b5c2f3b5a273b262f3b5a263b5c2f3b5a263b5f293b5a263b5f5f353b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5c2a3b5a263b5f293b5a273b26293b5a263b5f583b5a263b5f27353b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5f263b5a263b5f293b5a263b5c2a3b5a263b5c2f3b5a263b5f27353b5a263b5f293b5a273b262a3b5a273b262b3b5a273b26263b5a263b5f5d3b5a273b26263b5a263b5f583b5a263b5f27353b5a263b5f293b5a273b26283b5a263b5c283b5a273b262b353b5a263b5f293b5a273b262a3b5a273b265f3b5a273b26283b5a263b5f29353b5a273b262a3b5a273b262b3b5a263b5c2a3b5a263b5f293b5a273b26293b5a263b5f583b5a263b5f27353b5a263b5f293b5a263b5f5a3b5a263b5f583b5a263b5f5c353b5a263b5f293b5a273b26283b5a263b5f5f3b5a263b5f293b5a263b5f5d3b5a263b5f293b5a263b5f5f353b5a263b5f583b5a273b265f3b5a263b5c2c3b5a273b26283b5a273b265f353b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5f583b5a263b5f263b5a273b262a3b5a263b5f5d3b5a263b5f27353b5a263b5f263b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5c2b3b5a263b5c2f3b5a273b265f3b5a263b5f27353b5a273b26263b5a263b5c5f3b5a273b265f3b5a263b5c2f3b5a273b26293b5a263b5f29353b5a273b262b3b5a273b2628353b5a263b5f293b5a273b262a3b5a263b5f293b5a263b5c273b5a273b262b3b5a263b5f293b5a273b262a353b5a263b5f293b5a273b262a3b5a273b262b3b5a263b5f583b5a263b5f263b5a273b262a3b5a263b5f5d3b5a263b5f27353b5a263b5f293b5a273b262a3b5a263b5c273b5a263b5f583b5a273b265f3b5a263b5f583b5a263b5f273035387f736e257c717a6723766a6a6e6d2431317f7077737b64777a307d7f73" class="jssocials-share-link"><i class="far fa-envelope jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-whatsapp"><a target="_self" href="whatsapp://send?text=https://animezid.cam %D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9.+" class="jssocials-share-link"><i class="fab fa-whatsapp jssocials-share-logo"></i></a></div></div></div>
 </div>
 <div class="mbox">
 <div class="tam pda bdb"><strong>لا تنسي متابعتنا على</strong></div>

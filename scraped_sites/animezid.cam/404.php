@@ -9,13 +9,13 @@
 <meta charset="UTF-8" />
 
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>اتصل بنا - انمي زد | مشاهدة وتحميل أفلام ومسلسلات الانمي والكرتون المدبلج والمترجم اونلاين</title>
+<title>404 Error</title>
 <meta http-equiv="X-UA-Compatible" content="IE=9; IE=8; IE=7; IE=edge,chrome=1">
-<meta name="title" content="اتصل بنا - انمي زد | مشاهدة وتحميل أفلام ومسلسلات الانمي والكرتون المدبلج والمترجم اونلاين" />
+<meta name="title" content="404 Error" />
 <meta name="keywords" content="" />
 <meta name="description" content="" />
 <link rel="shortcut icon" href="https://animezid.cam/templates/egybest-by-mrbrooks/img/favicon.ico">
-<link rel="alternate" type="application/rss+xml" title="اتصل بنا - انمي زد | مشاهدة وتحميل أفلام ومسلسلات الانمي والكرتون المدبلج والمترجم اونلاين" href="https://animezid.cam/rss.php" />
+<link rel="alternate" type="application/rss+xml" title="404 Error" href="https://animezid.cam/rss.php" />
 
 <!--[if lt IE 9]>
 <script src="//html5shim.googlecode.com/svn/trunk/html5.js"></script>
@@ -199,69 +199,16 @@ var _LOGGEDIN_ =  false ;
 </div>	<a id="top"></a>
 
 <!--<div class="main-x">.mastcontent-wrap--> 
-<div id="main" class="">
-  <div class="mbox">
-    <div class="pda row">
-      <div class="col-xs-12 col-sm-12 col-md-12">
-          <h1>اتصل بنا</h1>
-          <hr />
-                                                                      	<form class="form-horizontal" method="post" action="https://animezid.cam/contact_us.php">
-              <div class="form-group">
-                <label for="your_name" class="col-md-2 control-label">الأسم</label>
-                <div class="col-md-10"><input type="text" class="form-control" name="your_name" value=""></div>
-              </div>
-              <div class="form-group">
-                <label for="your_email" class="col-md-2 control-label">البريد الإلكتروني</label>
-                <div class="col-md-10">
-                  <input type="email" class="form-control" name="your_email" value="">
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="importance" class="col-md-2 control-label">الأهمية</label>
-                <div class="col-md-10">
-                  <select name="importance" class="form-control">
-                    <option value="منخفضة">منخفضة</option>
-                    <option value="عادية" selected="selected">عادية</option>
-                    <option value="مهمة">مهمة</option>
-                    <option value="عاجلة">عاجلة</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="select" class="col-md-2 control-label">في ما يتعلق بـ</label>
-                <div class="col-md-10">
-                  <select name="select" class="form-control">
-                    <option selected="selected">اختر واحد</option>
-                    <option>تبليغ عن أخطاء</option>
-                    <option>اقتراحات</option>
-                    <option>أسئلة عامة</option>
-                    <option>أخرى</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="msg" class="col-md-2 control-label">نص الرسالة</label>
-                <div class="col-md-10">
-                  <textarea name="msg" rows="4" class="form-control" placeholder=""></textarea>
-                </div>
-              </div>
-          		          		          		          		<div class="form-group">
-          			<div class="col-md-offset-2 col-md-10">
-          				   <div class="g-recaptcha" data-sitekey="6LdZux4oAAAAACkIhRu-NnJpMMF5fqZX8iTpQUTL"></div>
-			<script type="text/javascript"
-				src="https://www.google.com/recaptcha/api.js">
-			</script>
-          			</div>
-          		</div>
-          		          		              <div class="form-group">
-                <div class="col-md-offset-2 col-md-10">
-                  <button type="submit" name="Submit" value="ارسل رسالة" class="btn btn-success" data-loading-text="ارسل رسالة">ارسل رسالة</button>
-                </div>
-              </div>
-            </form>
-                  </div>
-    </div>
-  </div>
+<div id="main">
+	<div class="mbox">
+		<div class="pda row">
+			<div class="">
+				<h1>404 Error</h1>
+					<h3>Sorry, page not found!</h3>
+<p>The page you are looking for could not be found. Please check the link you followed to get here and try again.</p>
+			</div><!-- #content -->
+		</div><!-- .row -->
+	</div><!-- .container -->
 	<div class="footer">     
       
       
@@ -287,7 +234,7 @@ var _LOGGEDIN_ =  false ;
 <!--<div class="mgb ad_box ad_box_auto"></div>-->
 <div class="mbox">
 <div class="tam pda bdb"><strong>شارك مع اصدقائك</strong></div>
-<div id="share" class="jssocials"><div class="jssocials-shares"><div class="jssocials-share jssocials-share-twitter"><a target="_blank" href="https://twitter.com/share?url=https://animezid.cam&amp;text=%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9+" class="jssocials-share-link"><i class="fab fa-twitter jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-facebook"><a target="_blank" href="https://facebook.com/sharer/sharer.php?u=https://animezid.cam" class="jssocials-share-link"><i class="fab fa-facebook-f jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-email"><a target="_self" href="/cdn-cgi/l/email-protection#48773b3d2a222d2b3c756d0c716d707d6d0c716d70706d0c716d707a6d0c706d0a71636d0c706d097f6d0c716d707e6d0c716d707d6d0c716d7009636d0c706d0a7a6d0c706d090e63092621252d12212c636d7f0b636d0c706d097f6d0c716d707c6d0c716d707d6d0c716d70706d0c716d707a6d0c706d0a71636d0c706d097f6d0c716d707c6d0c706d0a716d0c706d0a796d0c706d09706d0c716d7009636d0c706d097f6d0c716d707c6d0c706d097f6d0c716d70706d0c716d707c636d0c716d707c6d0c716d707d6d0c706d0a7c6d0c706d097f6d0c716d707f6d0c706d090e6d0c706d0971636d0c706d097b6d0c716d70796d0c716d707c6d0c706d097f6d0c716d707d636d0c716d70706d0c716d707d6d0c706d0a7b6d0c716d707c6d0c706d0a7b6d0c716d707c6d0c706d097f6d0c706d0909636d0c706d097f6d0c716d707c6d0c706d097f6d0c716d707e6d0c716d707d6d0c716d7009636d0c716d70706d0c706d097f6d0c716d707c6d0c716d707b6d0c706d0a796d0c706d09096d0c716d70706d0c716d707e636d0c706d097f6d0c716d707c6d0c716d707d6d0c706d090e6d0c706d09706d0c716d707c6d0c706d090b6d0c706d0971636d0c716d70706d0c706d097f6d0c716d707c6d0c716d707d6d0c706d09096d0c706d0a796d0c706d090b6d0c716d707d6d0c706d0971636d0c706d09706d0c706d097f6d0c706d0a7b6d0c706d0a796d0c706d0a71636d0c706d0a796d0c716d70706d0c706d097f6d0c706d09706d0c706d0a7f636d0c706d097f6d0c716d707c6d0c706d09096d0c706d090c6d0c716d707d6d0c716d70096d0c716d707c636d0c716d70706d0c706d097f6d0c706d0a7b6d0c706d0a796d0c706d0a71636d0c706d0a7b6d0c716d70096d0c706d0a796d0c716d70796d0c706d0a796d0c706d097f6d0c706d0909636d0c706d097f6d0c716d707c6d0c716d707d6d0c706d0a7c6d0c706d097f6d0c716d707f6d0c706d090e6d0c706d0971636d0c706d097f6d0c716d707c6d0c716d707d6d0c706d09706d0c706d097f6d0c706d0a7c6d0c706d0a796d0c706d0971636d0c706d097f6d0c716d707c6d0c716d707d6d0c716d70706d0c706d090b6d0c716d70706d0c706d090e6d0c706d0971636d0c706d097f6d0c716d707e6d0c706d0a7e6d0c716d707d636d0c706d097f6d0c716d707c6d0c716d70096d0c716d707e6d0c706d097f636d0c716d707c6d0c716d707d6d0c706d0a7c6d0c706d097f6d0c716d707f6d0c706d090e6d0c706d0971636d0c706d097f6d0c706d090c6d0c706d090e6d0c706d090a636d0c706d097f6d0c716d707e6d0c706d09096d0c706d097f6d0c706d090b6d0c706d097f6d0c706d0909636d0c706d090e6d0c716d70096d0c706d0a7a6d0c716d707e6d0c716d7009636d0c706d097f6d0c716d707c6d0c716d707d6d0c706d090e6d0c706d09706d0c716d707c6d0c706d090b6d0c706d0971636d0c706d09706d0c706d097f6d0c716d707c6d0c716d707d6d0c706d0a7d6d0c706d0a796d0c716d70096d0c706d0971636d0c716d70706d0c706d0a096d0c716d70096d0c706d0a796d0c716d707f6d0c706d097f636d0c716d707d6d0c716d707e636d0c706d097f6d0c716d707c6d0c706d097f6d0c706d0a716d0c716d707d6d0c706d097f6d0c716d707c636d0c706d097f6d0c716d707c6d0c716d707d6d0c706d090e6d0c706d09706d0c716d707c6d0c706d090b6d0c706d0971636d0c706d097f6d0c716d707c6d0c706d0a716d0c706d090e6d0c716d70096d0c706d090e6d0c706d097166636e292538732a272c3175203c3c383b726767292621252d32212c662b2925" class="jssocials-share-link"><i class="far fa-envelope jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-whatsapp"><a target="_self" href="whatsapp://send?text=https://animezid.cam %D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9.+" class="jssocials-share-link"><i class="fab fa-whatsapp jssocials-share-logo"></i></a></div></div></div>
+<div id="share" class="jssocials"><div class="jssocials-shares"><div class="jssocials-share jssocials-share-twitter"><a target="_blank" href="https://twitter.com/share?url=https://animezid.cam&amp;text=%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9+" class="jssocials-share-link"><i class="fab fa-twitter jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-facebook"><a target="_blank" href="https://facebook.com/sharer/sharer.php?u=https://animezid.cam" class="jssocials-share-link"><i class="fab fa-facebook-f jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-email"><a target="_self" href="/cdn-cgi/l/email-protection#635c101601090600175e46275a465b5646275a465b5b46275a465b5146275b46215a4846275b46225446275a465b5546275a465b5646275a465b224846275b46215146275b46222548220d0a0e06390a07484654204846275b46225446275a465b5746275a465b5646275a465b5b46275a465b5146275b46215a4846275b46225446275a465b5746275b46215a46275b46215246275b46225b46275a465b224846275b46225446275a465b5746275b46225446275a465b5b46275a465b574846275a465b5746275a465b5646275b46215746275b46225446275a465b5446275b46222546275b46225a4846275b46225046275a465b5246275a465b5746275b46225446275a465b564846275a465b5b46275a465b5646275b46215046275a465b5746275b46215046275a465b5746275b46225446275b4622224846275b46225446275a465b5746275b46225446275a465b5546275a465b5646275a465b224846275a465b5b46275b46225446275a465b5746275a465b5046275b46215246275b46222246275a465b5b46275a465b554846275b46225446275a465b5746275a465b5646275b46222546275b46225b46275a465b5746275b46222046275b46225a4846275a465b5b46275b46225446275a465b5746275a465b5646275b46222246275b46215246275b46222046275a465b5646275b46225a4846275b46225b46275b46225446275b46215046275b46215246275b46215a4846275b46215246275a465b5b46275b46225446275b46225b46275b4621544846275b46225446275a465b5746275b46222246275b46222746275a465b5646275a465b2246275a465b574846275a465b5b46275b46225446275b46215046275b46215246275b46215a4846275b46215046275a465b2246275b46215246275a465b5246275b46215246275b46225446275b4622224846275b46225446275a465b5746275a465b5646275b46215746275b46225446275a465b5446275b46222546275b46225a4846275b46225446275a465b5746275a465b5646275b46225b46275b46225446275b46215746275b46215246275b46225a4846275b46225446275a465b5746275a465b5646275a465b5b46275b46222046275a465b5b46275b46222546275b46225a4846275b46225446275a465b5546275b46215546275a465b564846275b46225446275a465b5746275a465b2246275a465b5546275b4622544846275a465b5746275a465b5646275b46215746275b46225446275a465b5446275b46222546275b46225a4846275b46225446275b46222746275b46222546275b4622214846275b46225446275a465b5546275b46222246275b46225446275b46222046275b46225446275b4622224846275b46222546275a465b2246275b46215146275a465b5546275a465b224846275b46225446275a465b5746275a465b5646275b46222546275b46225b46275a465b5746275b46222046275b46225a4846275b46225b46275b46225446275a465b5746275a465b5646275b46215646275b46215246275a465b2246275b46225a4846275a465b5b46275b46212246275a465b2246275b46215246275a465b5446275b4622544846275a465b5646275a465b554846275b46225446275a465b5746275b46225446275b46215a46275a465b5646275b46225446275a465b574846275b46225446275a465b5746275a465b5646275b46222546275b46225b46275a465b5746275b46222046275b46225a4846275b46225446275a465b5746275b46215a46275b46222546275a465b2246275b46222546275b46225a4d4845020e1358010c071a5e0b17171310594c4c020d0a0e06190a074d00020e" class="jssocials-share-link"><i class="far fa-envelope jssocials-share-logo"></i></a></div><div class="jssocials-share jssocials-share-whatsapp"><a target="_self" href="whatsapp://send?text=https://animezid.cam %D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%86%D9%85%D9%8A+%D8%B2%D8%AF+AnimeZid+%7C+%D8%A7%D9%84%D9%85%D9%88%D9%82%D8%B9+%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A+%D8%A7%D9%84%D8%A7%D9%88%D9%84+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A3%D9%81%D9%84%D8%A7%D9%85+%D9%88%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA+%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A+%D9%88%D8%A7%D9%84%D9%83%D8%B1%D8%AA%D9%88%D9%86+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D9%88%D8%A7%D9%84%D9%85%D8%AA%D8%B1%D8%AC%D9%85%D8%A9+%D8%A8%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B1%D9%88%D8%A7%D8%A8%D8%B7+%D8%A7%D9%84%D8%AA%D8%AD%D9%85%D9%8A%D9%84+%D9%88%D8%A7%D8%B3%D8%B1%D8%B9+%D8%B3%D9%8A%D8%B1%D9%81%D8%B1%D8%A7%D8%AA+%D8%A7%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D9%84%D9%85%D8%A8%D8%A7%D8%B4%D8%B1%D8%A9+%D8%A7%D9%84%D9%85%D9%88%D8%AC%D9%88%D8%AF%D8%A9+%D8%A7%D9%86%D8%B6%D9%85+%D8%A7%D9%84%D9%8A%D9%86%D8%A7+%D9%84%D9%85%D8%B4%D8%A7%D9%87%D8%AF%D8%A9+%D8%A7%D8%AD%D8%AF%D8%AB+%D8%A7%D9%86%D8%AA%D8%A7%D8%AC%D8%A7%D8%AA+%D8%AF%D9%8A%D8%B2%D9%86%D9%8A+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A8%D8%A7%D9%84%D9%85%D8%B5%D8%B1%D9%8A%D8%A9+%D9%88%D8%BA%D9%8A%D8%B1%D9%87%D8%A7+%D9%85%D9%86+%D8%A7%D9%84%D8%A7%D8%B9%D9%85%D8%A7%D9%84+%D8%A7%D9%84%D9%85%D8%AF%D8%A8%D9%84%D8%AC%D8%A9+%D8%A7%D9%84%D8%B9%D8%AF%D9%8A%D8%AF%D8%A9.+" class="jssocials-share-link"><i class="fab fa-whatsapp jssocials-share-logo"></i></a></div></div></div>
 </div>
 <div class="mbox">
 <div class="tam pda bdb"><strong>لا تنسي متابعتنا على</strong></div>
