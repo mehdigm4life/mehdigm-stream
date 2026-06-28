@@ -7,26 +7,48 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'أدخل رابط الموقع المستهدف (e.g., https://example.com)'
+        description: 'URL'
         required: true
         type: string
       scrape_mode:
-        description: 'وضع السحب'
+        description: 'Mode'
         required: true
         type: choice
         options:
-          - 'Single Page (صفحة واحدة فقط)'
-          - 'Full Website (الموقع بالكامل)'
-        default: 'Single Page (صفحة واحدة فقط)'
+          - 'Single Page'
+          - 'Full Website'
+          - 'Sitemap Only'
+        default: 'Single Page'
       max_pages:
-        description: 'حد أقصى للصفحات (0 = غير محدود)'
+        description: 'Max pages (0=unlimited)'
         required: true
         type: number
         default: 0
+      respect_robots:
+        description: 'Respect robots.txt'
+        required: true
+        type: boolean
+        default: true
+      download_assets:
+        description: 'Download CSS/JS/images'
+        required: true
+        type: boolean
+        default: false
+      max_depth:
+        description: 'Max crawl depth (0=unlimited)'
+        required: true
+        type: number
+        default: 0
+      concurrency:
+        description: 'Concurrent requests'
+        required: true
+        type: number
+        default: 3
 
 jobs:
   scrape_and_commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
     - name: Checkout Repository
@@ -37,151 +59,387 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install beautifulsoup4 cloudscraper lxml playwright httpx brotli
-        python -m playwright install chromium
-        python -m playwright install-deps chromium
+        pip install --quiet --no-cache-dir \
+          beautifulsoup4 cloudscraper lxml httpx brotli aiofiles \
+          cssutils pillow playwright selenium-wire
+        python -m playwright install chromium 2>/dev/null || true
+        python -m playwright install-deps chromium 2>/dev/null || true
 
-    - name: Run Legendary Scraper
+    - name: Run Scraper Engine
       env:
         TARGET_URL: ${{ github.event.inputs.target_url }}
         SCRAPE_MODE: ${{ github.event.inputs.scrape_mode }}
         MAX_PAGES: ${{ github.event.inputs.max_pages }}
+        RESPECT_ROBOTS: ${{ github.event.inputs.respect_robots }}
+        DOWNLOAD_ASSETS: ${{ github.event.inputs.download_assets }}
+        MAX_DEPTH: ${{ github.event.inputs.max_depth }}
+        CONCURRENCY: ${{ github.event.inputs.concurrency }}
       run: |
         python3 - << 'PYEOF'
-        import asyncio, os, sys, time, random, re, json
-        from urllib.parse import urlparse, urljoin, urlunparse
+        import asyncio, os, sys, time, random, re, json, hashlib, mimetypes
+        import sqlite3, pickle, signal, logging, html as html_mod
+        from urllib.parse import urlparse, urljoin, urlunparse, urldefrag
+        from urllib.robotparser import RobotFileParser
         from pathlib import Path
-        from bs4 import BeautifulSoup
-        import cloudscraper
-        import brotli
-        from playwright.async_api import async_playwright
+        from collections import deque
+        from typing import Optional, Set, Dict, List, Tuple
+        from dataclasses import dataclass, field, asdict
+        from concurrent.futures import ThreadPoolExecutor
+        from xml.etree import ElementTree
 
-        TARGET_URL = os.environ["TARGET_URL"].strip()
-        SCRAPE_MODE = os.environ.get("SCRAPE_MODE", "")
-        MAX_PAGES = int(os.environ.get("MAX_PAGES", "0")) or 999999
+        from bs4 import BeautifulSoup, Tag
+        import cloudscraper
+        import httpx
+        import brotli
+
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        log = logging.getLogger("scraper")
+
+        # ─── ENV ──────────────────────────────────────────────────────────
+        TARGET_URL    = os.environ["TARGET_URL"].strip()
+        SCRAPE_MODE   = os.environ.get("SCRAPE_MODE", "Single Page")
+        MAX_PAGES     = int(os.environ.get("MAX_PAGES", "0")) or 2**31
+        RESPECT_ROBOTS= os.environ.get("RESPECT_ROBOTS", "true").lower() == "true"
+        DOWNLOAD_ASSETS = os.environ.get("DOWNLOAD_ASSETS", "false").lower() == "true"
+        MAX_DEPTH     = int(os.environ.get("MAX_DEPTH", "0")) or 2**31
+        CONCURRENCY   = int(os.environ.get("CONCURRENCY", "3"))
 
         parsed = urlparse(TARGET_URL)
         BASE_DOMAIN = parsed.netloc
         if not BASE_DOMAIN:
-            print("خطأ: رابط غير صحيح"); sys.exit(1)
+            log.error("Invalid URL"); sys.exit(1)
 
-        OUTPUT_DIR = Path("scraped_sites") / BASE_DOMAIN
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        BASE_DIR = parsed.scheme + "://" + BASE_DOMAIN
+        OUTPUT   = Path("scraped_sites") / BASE_DOMAIN
+        STATE    = Path("scraped_sites") / (BASE_DOMAIN + ".state")
+        OUTPUT.mkdir(parents=True, exist_ok=True)
+        STATE.parent.mkdir(parents=True, exist_ok=True)
 
+        # ─── USER AGENTS ─────────────────────────────────────────────────
         USER_AGENTS = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5; rv:127.0) Gecko/20100101 Firefox/127.0",
         ]
 
-        tracked_domains = {BASE_DOMAIN}
+        # ─── STATE MANAGEMENT ────────────────────────────────────────────
+        @dataclass
+        class CrawlState:
+            visited: Set[str] = field(default_factory=set)
+            queue: List[str] = field(default_factory=list)
+            failed: Set[str] = field(default_factory=set)
+            pages_fetched: int = 0
+            pages_playwright: int = 0
+            pages_cloudscraper: int = 0
+            total_bytes: int = 0
+            start_time: float = 0.0
+            tracked_domains: Set[str] = field(default_factory=lambda: {BASE_DOMAIN})
+            depth_map: Dict[str, int] = field(default_factory=dict)
 
+        def save_state(state: CrawlState):
+            try:
+                data = {
+                    "visited": list(state.visited),
+                    "queue": state.queue,
+                    "failed": list(state.failed),
+                    "pages_fetched": state.pages_fetched,
+                    "pages_playwright": state.pages_playwright,
+                    "pages_cloudscraper": state.pages_cloudscraper,
+                    "total_bytes": state.total_bytes,
+                    "start_time": state.start_time,
+                    "tracked_domains": list(state.tracked_domains),
+                    "depth_map": state.depth_map,
+                }
+                STATE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+            except Exception as e:
+                log.warning(f"  ⚠️ Save state error: {e}")
+
+        def load_state() -> Optional[CrawlState]:
+            if not STATE.exists():
+                return None
+            try:
+                data = json.loads(STATE.read_text())
+                return CrawlState(
+                    visited=set(data.get("visited", [])),
+                    queue=data.get("queue", []),
+                    failed=set(data.get("failed", [])),
+                    pages_fetched=data.get("pages_fetched", 0),
+                    pages_playwright=data.get("pages_playwright", 0),
+                    pages_cloudscraper=data.get("pages_cloudscraper", 0),
+                    total_bytes=data.get("total_bytes", 0),
+                    start_time=data.get("start_time", time.time()),
+                    tracked_domains=set(data.get("tracked_domains", [BASE_DOMAIN])),
+                    depth_map=data.get("depth_map", {}),
+                )
+            except Exception as e:
+                log.warning(f"  ⚠️ Load state error: {e}")
+                return None
+
+        # ─── ROBOTS.TXT ──────────────────────────────────────────────────
+        rp = RobotFileParser()
+        rp_cached: Optional[str] = None
+
+        def check_robots(url: str) -> bool:
+            if not RESPECT_ROBOTS:
+                return True
+            global rp_cached
+            try:
+                rp_url = urljoin(BASE_DIR, "/robots.txt")
+                if rp_cached is None:
+                    rp.set_url(rp_url)
+                    try:
+                        rp.read()
+                        rp_cached = "loaded"
+                    except Exception:
+                        rp_cached = "missing"
+                return rp.can_fetch("*", url) if rp_cached == "loaded" else True
+            except Exception:
+                return True
+
+        # ─── SITEMAP PARSER ──────────────────────────────────────────────
+        def parse_sitemap(url: str, session) -> List[str]:
+            urls = []
+            try:
+                sitemap_url = urljoin(url, "/sitemap.xml")
+                resp = session.get(sitemap_url, timeout=30)
+                if resp.status_code != 200:
+                    sitemap_url = urljoin(url, "/sitemap_index.xml")
+                    resp = session.get(sitemap_url, timeout=30)
+                if resp.status_code != 200:
+                    return urls
+
+                root = ElementTree.fromstring(resp.content)
+                ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+                for loc in root.findall(".//sm:loc", ns):
+                    loc_text = loc.text.strip()
+                    if loc_text:
+                        urls.append(loc_text)
+                for loc in root.findall("//loc"):
+                    loc_text = loc.text.strip()
+                    if loc_text and loc_text not in urls:
+                        urls.append(loc_text)
+            except Exception as e:
+                log.warning(f"  ⚠️ Sitemap error: {e}")
+            return urls
+
+        # ─── URL NORMALIZATION ───────────────────────────────────────────
+        def normalize_url(url: str) -> str:
+            u = urlparse(url)
+            scheme = u.scheme.lower()
+            netloc = u.netloc.lower()
+            path = u.path.rstrip("/") or "/"
+
+            if path.endswith("/index.html") or path.endswith("/index.htm"):
+                path = path[:path.rfind("/")] or "/"
+            elif path.endswith("/index.php") or path.endswith("/index.aspx"):
+                path = path[:path.rfind("/")] or "/"
+            elif path.endswith("/default.aspx") or path.endswith("/default.asp"):
+                path = path[:path.rfind("/")] or "/"
+
+            ext = Path(path).suffix.lower()
+            if ext in (".php", ".asp", ".aspx", ".jsp", ".cfm"):
+                query = u.query
+            else:
+                query = ""
+
+            frag = ""
+            return urlunparse((scheme, netloc, path, u.params, query, frag))
+
+        def is_same_site(url: str, tracked: Set[str]) -> bool:
+            host = urlparse(url).netloc.lower()
+            return any(host == d or host.endswith("." + d) or d.endswith("." + host) for d in tracked)
+
+        def compute_depth(base: str, url: str) -> int:
+            base_path = urlparse(base).path.rstrip("/").count("/")
+            url_path  = urlparse(url).path.rstrip("/").count("/")
+            return max(0, url_path - base_path)
+
+        # ─── MIME / EXTENSION ────────────────────────────────────────────
+        EXT_MAP = {
+            ".html":  (".html", "text/html"),
+            ".htm":   (".htm",  "text/html"),
+            ".php":   (".php",  "text/html"),
+            ".asp":   (".asp",  "text/html"),
+            ".aspx":  (".aspx", "text/html"),
+            ".jsp":   (".jsp",  "text/html"),
+            ".cfm":   (".cfm",  "text/html"),
+            ".shtml": (".shtml","text/html"),
+        }
+
+        def get_save_path(url: str) -> Path:
+            u = urlparse(url)
+            path = u.path.rstrip("/") or "/"
+            if path == "/":
+                return OUTPUT / "index.html"
+            ext = Path(path).suffix.lower()
+            if ext in EXT_MAP:
+                return OUTPUT / path.lstrip("/")
+            if u.query and not ext:
+                qhash = hashlib.md5(u.query.encode()).hexdigest()[:8]
+                return OUTPUT / f"{path.lstrip('/')}_{qhash}.html"
+            if not ext:
+                return OUTPUT / f"{path.lstrip('/')}.html"
+            return OUTPUT / path.lstrip("/")
+
+        # ─── DETECTORS ───────────────────────────────────────────────────
         def is_valid_html(text: str) -> bool:
             return bool(re.search(r'<!DOCTYPE html|<html[\s>]|<head[\s>]|<body[\s>]', text[:2000], re.I))
 
-        def is_binary(text: str) -> bool:
-            if not text: return True
-            nulls = sum(1 for c in text[:2000] if ord(c) == 0)
-            return nulls > 50
+        def is_binary(content: bytes) -> bool:
+            return sum(1 for b in content[:2000] if b == 0) > 50
 
         def is_cf_challenge(text: str) -> bool:
-            return bool(re.search(r'Just a moment|checking your browser|cf-browser-verification|challenges\.cloudflare\.com', text, re.I))
+            return bool(re.search(
+                r'Just a moment|checking your browser|cf-browser-verification|'
+                r'challenges\.cloudflare\.com|cf-error-detect|_cf_chl_opt',
+                text, re.I))
 
+        def is_api_endpoint(url: str) -> bool:
+            patterns = [r'/api/', r'/graphql', r'/rest/', r'/v\d+/', r'\.json$', r'\.xml$']
+            return any(re.search(p, url, re.I) for p in patterns)
+
+        def is_pagination_link(text: str, href: str) -> bool:
+            pagination_keywords = [
+                'page', 'pg', 'p=', 'offset', 'start', 'limit', 'per_page',
+                'صفحة', 'page=', '?page', '&page',
+            ]
+            return any(k in href.lower() for k in pagination_keywords) or \
+                   any(k in text.lower() for k in pagination_keywords)
+
+        def find_next_page(soup: BeautifulSoup, current_url: str) -> Optional[str]:
+            patterns = [
+                'a[rel=next]', 'link[rel=next]',
+                'a:has(> :matches("التالي|Next|»|›|→|>>|>"))',
+                '.pagination a:last-child', '.pager a:last-child',
+                'a.next', 'button.next', '[class*=next] a',
+            ]
+            for sel in patterns:
+                try:
+                    el = soup.select_one(sel)
+                    if el and el.get("href"):
+                        return urljoin(current_url, el["href"])
+                except Exception:
+                    pass
+            for a in soup.find_all("a", href=True):
+                if is_pagination_link(a.text, a["href"]):
+                    return urljoin(current_url, a["href"])
+            return None
+
+        # ─── HTTP / CLOUDSCRAPER ─────────────────────────────────────────
         def make_cloudscraper():
-            ua = random.choice(USER_AGENTS)
             sess = cloudscraper.create_scraper(
                 browser={"browser": "chrome", "platform": "windows", "desktop": True},
                 delay=random.randint(1, 5),
             )
             sess.headers.update({
-                "User-Agent": ua,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ar,en;q=0.9",
+                "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
                 "Accept-Encoding": "gzip, deflate, br",
                 "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
             })
             return sess
 
-        def try_cloudscraper(scraper, url: str, retries: int = 3):
+        def fetch_cloudscraper(sess, url: str, retries: int = 4) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[Dict]]:
             for attempt in range(retries):
                 try:
-                    scraper.headers.update({"User-Agent": random.choice(USER_AGENTS)})
-                    time.sleep(random.uniform(2.0, 5.0))
-                    resp = scraper.get(url, timeout=45, allow_redirects=True)
+                    sess.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+                    wait = random.uniform(1.5, 4.0) * (attempt + 0.5)
+                    time.sleep(wait)
+                    resp = sess.get(url, timeout=60, allow_redirects=True)
                     final_url = resp.url
-
                     raw = resp.content
-                    content_type = resp.headers.get('Content-Type', '').lower()
+                    content_type = resp.headers.get("Content-Type", "").lower()
 
-                    text = raw.decode("utf-8", errors="replace")
+                    if is_binary(raw):
+                        return (None, None, final_url, None)
 
-                    if raw[:1] == b"\x0b" and is_binary(text):
+                    # Brotli via header
+                    encoding = resp.headers.get("Content-Encoding", "").lower()
+                    if encoding == "br":
                         try:
                             raw = brotli.decompress(raw)
-                            text = raw.decode("utf-8", errors="replace")
-                            print(f"  ✅ فك Brotli (تلقائي - magic byte)")
                         except Exception:
                             pass
 
+                    text = raw.decode("utf-8", errors="replace")
+
                     if resp.status_code == 403 and is_cf_challenge(text):
-                        print(f"  ⚠️ Cloudflare تعطيل (محاولة {attempt+1}/{retries})")
-                        time.sleep(3 * (attempt + 1))
+                        backoff = 3 * (attempt + 1) ** 2
+                        log.info(f"  ⚠️ Cloudflare ({attempt+1}/{retries}) → انتظار {backoff}ث")
+                        time.sleep(backoff)
                         continue
+
                     if resp.status_code == 429:
-                        wait = 10 * (attempt + 1)
-                        print(f"  ⚠️ 429 Rate limited, انتظار {wait}ث")
+                        retry_after = resp.headers.get("Retry-After", str(10 * (attempt + 1)))
+                        try:
+                            wait = int(retry_after)
+                        except ValueError:
+                            wait = 10 * (attempt + 1)
+                        wait = min(wait, 120)
+                        log.info(f"  ⚠️ 429 Rate Limited → انتظار {wait}ث")
                         time.sleep(wait)
                         continue
 
                     if resp.status_code == 200:
-                        if not ('text/html' in content_type or 'application/xhtml+xml' in content_type):
-                            print(f"  ⚠️ نوع المحتوى ليس HTML: {content_type}")
-                        if is_binary(text):
-                            print(f"  ❌ محتوى ثنائي غير صالح - تخطي")
-                            return (None, None, None, None)
-                        return (resp.status_code, text, dict(resp.headers), final_url)
-                    if resp.status_code == 404:
-                        return (404, text, dict(resp.headers), final_url)
+                        return (200, text, final_url, dict(resp.headers))
+                    if resp.status_code in (404, 410):
+                        return (resp.status_code, text, final_url, dict(resp.headers))
 
-                    print(f"  ⚠️ HTTP {resp.status_code} (محاولة {attempt+1})")
+                    log.info(f"  ⚠️ HTTP {resp.status_code} ({attempt+1})")
                 except Exception as e:
-                    print(f"  ❌ خطأ: {e} (محاولة {attempt+1})")
+                    log.info(f"  ❌ CS error: {e} ({attempt+1})")
                     time.sleep(3 * (attempt + 1))
             return (None, None, None, None)
 
-        async def try_playwright(url: str, retries: int = 3):
+        # ─── PLAYWRIGHT ──────────────────────────────────────────────────
+        playwright_imported = False
+
+        async def fetch_playwright(url: str, retries: int = 3) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[Dict]]:
+            global playwright_imported
+            if not playwright_imported:
+                log.info("  🎭 Loading Playwright...")
+                playwright_imported = True
+
             for attempt in range(retries):
                 browser = None
+                p = None
                 try:
-                    p = await async_playwright().start()
+                    from playwright.async_api import async_playwright as apw
+                    p = await apw().start()
                     ua = random.choice(USER_AGENTS)
                     browser = await p.chromium.launch(
                         headless=True,
                         args=[
                             "--disable-blink-features=AutomationControlled",
-                            "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                            "--disable-web-security", "--disable-features=IsolateOrigins,site-per-process",
+                            "--no-sandbox", "--disable-dev-shm-usage",
+                            "--disable-gpu", "--disable-web-security",
+                            "--disable-features=IsolateOrigins,site-per-process",
+                            "--disable-setuid-sandbox",
                         ],
                     )
                     ctx = await browser.new_context(
                         user_agent=ua,
                         viewport={"width": 1920, "height": 1080},
-                        locale="ar", timezone_id="Asia/Riyadh",
-                        device_scale_factor=1,
-                        java_script_enabled=True, ignore_https_errors=True,
+                        locale="ar",
+                        timezone_id="Asia/Riyadh",
+                        java_script_enabled=True,
+                        ignore_https_errors=True,
                         extra_http_headers={
                             "Accept-Language": "ar,en;q=0.9",
                             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                            "Sec-Fetch-Dest": "document",
-                            "Sec-Fetch-Mode": "navigate",
-                            "Sec-Fetch-Site": "none",
                         },
                     )
                     await ctx.add_init_script("""
@@ -190,178 +448,307 @@ jobs:
                         Object.defineProperty(navigator, 'languages', {get: () => ['ar','en']});
                         Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
                         window.chrome = {runtime: {}};
-                        delete navigator.__proto__.webdriver;
-                        // Cloudflare evasion: override permission
                         const origQuery = window.navigator.permissions.query;
                         window.navigator.permissions.query = (params) => (
                             params.name === 'notifications' ? Promise.resolve({state: 'denied'}) : origQuery(params)
                         );
+                        // Block analytics
+                        window.__insp = window.__insp = undefined;
                     """)
                     page = await ctx.new_page()
-                    page.set_default_timeout(90000)
+                    page.set_default_timeout(60000)
 
-                    print(f"  🚀 Playwright → {url}")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                    log.info(f"  🎭 PW → {url}")
+                    await page.goto(url, wait_until="networkidle", timeout=60000)
 
-                    # انتظار أطول لتجاوز Cloudflare
-                    wait_time = 0
-                    while wait_time < 30:
+                    cf_wait = 0
+                    while cf_wait < 40:
                         title = await page.title()
-                        html_preview = await page.evaluate("document.body?.innerText?.substring(0,200) || ''")
-                        if not is_cf_challenge(title + " " + html_preview):
+                        preview = await page.evaluate("document.body?.innerText?.substring(0,300) || ''")
+                        if not is_cf_challenge(title + " " + preview):
                             break
                         await asyncio.sleep(2)
-                        wait_time += 2
-                        if wait_time % 10 == 0:
-                            print(f"  ⏳ انتظار Cloudflare... {wait_time}ث")
+                        cf_wait += 2
+                        if cf_wait % 10 == 0:
+                            log.info(f"  ⏳ Cloudflare wait... {cf_wait}s")
 
-                    # انتظار إضافي لتحميل JS
-                    await asyncio.sleep(2)
-
+                    await asyncio.sleep(1)
                     html = await page.content()
                     final_url = page.url
-                    cookies = await ctx.cookies()
+                    cookies_list = await ctx.cookies()
 
                     await browser.close()
                     await p.stop()
 
                     if is_cf_challenge(html):
-                        print(f"  ⚠️ Playwright فشل في تخطي Cloudflare (محاولة {attempt+1}/{retries})")
+                        log.info(f"  ⚠️ PW still blocked ({attempt+1})")
                         await asyncio.sleep(5 * (attempt + 1))
                         continue
 
-                    return (200, html, final_url, cookies)
+                    cookie_dict = {c["name"]: c["value"] for c in cookies_list} if cookies_list else {}
+                    return (200, html, final_url, cookie_dict)
 
                 except Exception as e:
-                    print(f"  ❌ Playwright خطأ: {e}")
+                    log.info(f"  ❌ PW error: {e}")
                     if browser:
                         try: await browser.close()
                         except Exception: pass
-                    try: await p.stop()
-                    except Exception: pass
+                    if p:
+                        try: await p.stop()
+                        except Exception: pass
                     await asyncio.sleep(5 * (attempt + 1))
 
             return (None, None, None, None)
 
-        visited = set()
-        queue = []
-        cs = make_cloudscraper()
-        pages_fetched = 0
-        pages_pw = 0
+        # ─── ASSET DOWNLOADER ────────────────────────────────────────────
+        def download_assets(sess, html: str, base_url: str, page_path: Path):
+            soup = BeautifulSoup(html, "lxml")
+            assets = []
+            for tag, attr in [("img", "src"), ("script", "src"), ("link", "href")]:
+                for el in soup.find_all(tag):
+                    val = el.get(attr)
+                    if val and not val.startswith("data:"):
+                        full = urljoin(base_url, val)
+                        if is_same_site(full, {BASE_DOMAIN}):
+                            assets.append((full, tag, attr, val))
 
-        def clean_url(url: str) -> str:
-            u = urlparse(url)
-            return urlunparse((u.scheme, u.netloc, u.path.rstrip("/") or "/", "", "", ""))
+            asset_dir = page_path.parent / (page_path.stem + "_assets")
+            asset_dir.mkdir(exist_ok=True)
+            for asset_url, tag, attr, orig_val in assets[:50]:
+                try:
+                    resp = sess.get(asset_url, timeout=30)
+                    if resp.status_code == 200:
+                        ext = Path(urlparse(asset_url).path).suffix or ".bin"
+                        fname = hashlib.md5(asset_url.encode()).hexdigest()[:12] + ext
+                        fpath = asset_dir / fname
+                        fpath.write_bytes(resp.content)
+                except Exception:
+                    pass
 
-        def is_same_site(url: str) -> bool:
-            host = urlparse(url).netloc
-            return any(host == d or host.endswith('.' + d) or d.endswith('.' + host) for d in tracked_domains)
-
-        async def fetch_page(url: str):
-            global pages_fetched, pages_pw
-
-            url = clean_url(url)
-            if url in visited: return
-            visited.add(url)
-
-            parsed_url = urlparse(url)
-            if not is_same_site(url):
-                print(f"  ⏭️ خارج النطاق: {parsed_url.netloc}")
-                return
-
-            print(f"\n📥 [{pages_fetched+1}] {url}")
-
-            target_domain = parsed_url.netloc
-            tracked_domains.add(target_domain)
-
-            status, html_text, headers, final_url_cs = try_cloudscraper(cs, url)
-            used_pw = False
-            cookies = []
-            final_url = final_url_cs or url
-
-            if final_url_cs:
-                redirect_domain = urlparse(final_url_cs).netloc
-                if redirect_domain and redirect_domain != target_domain:
-                    tracked_domains.add(redirect_domain)
-                    print(f"  🔀 تمت إعادة التوجيه → {redirect_domain} (تمت الإضافة للمتابعة)")
-
-            if (status is None or status == 403) and (html_text is None or is_cf_challenge(html_text or "")):
-                print(f"  🔄 تحويل إلى Playwright...")
-                status, html_text, final_url, cookies = await try_playwright(url)
-                used_pw = True
-                if used_pw:
-                    pages_pw += 1
-                    if cookies:
-                        for c in cookies:
-                            cs.cookies.set(c["name"], c["value"], domain=c.get("domain", target_domain))
-
-            if status != 200 or not html_text:
-                print(f"  ❌ فشل بعد جميع المحاولات")
-                return
-
-            if is_binary(html_text):
-                print(f"  ❌ محتوى ثنائي - تخطي الحفظ")
-                return
-
-            if not is_valid_html(html_text):
-                print(f"  ⚠️ تحذير: المحتوى لا يشبه HTML (قد يكون JSON أو غيره)")
-                if 'Full Website' not in SCRAPE_MODE:
-                    return
-
-            local_path = parsed_url.path
-            if local_path.endswith("/") or not local_path:
-                local_path = "index.html"
+        # ─── SAVE PAGE ───────────────────────────────────────────────────
+        def save_page(text: str, url: str, is_pw: bool, state_obj: CrawlState):
+            fpath = get_save_path(url)
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(text, encoding="utf-8")
+            mode_icon = "🎭 PW" if is_pw else "⚡ CS"
+            log.info(f"  {mode_icon} → {fpath.relative_to(Path('.'))}  ({len(text):,} chars)")
+            state_obj.pages_fetched += 1
+            state_obj.total_bytes += len(text.encode("utf-8"))
+            if is_pw:
+                state_obj.pages_playwright += 1
             else:
-                ext = os.path.splitext(local_path)[1].lower()
-                if ext not in (".html", ".htm", ".php", ".asp", ".aspx", ".jsp"):
-                    local_path += ".html"
-            file_path = OUTPUT_DIR / local_path.lstrip("/")
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(html_text)
+                state_obj.pages_cloudscraper += 1
 
-            mode_str = "🎭 PW" if used_pw else "⚡ CS"
-            print(f"  💾 {mode_str} → {file_path}  ({len(html_text)} حرف)")
-            pages_fetched += 1
-
-            if "Full Website" in SCRAPE_MODE and pages_fetched < MAX_PAGES:
-                soup = BeautifulSoup(html_text, "lxml")
+        # ─── EXTRACT LINKS ───────────────────────────────────────────────
+        def extract_links(html: str, base_url: str) -> Set[str]:
+            links = set()
+            try:
+                soup = BeautifulSoup(html, "lxml")
                 for a in soup.find_all("a", href=True):
-                    href = a["href"]
-                    full = urljoin(final_url, href)
-                    full = clean_url(full)
-                    if is_same_site(full) and full not in visited and full not in queue:
-                        if full.startswith("mailto:") or full.startswith("tel:") or full.startswith("javascript:"):
-                            continue
-                        queue.append(full)
+                    href = a["href"].strip()
+                    if not href or href.startswith(("#", "javascript:", "mailto:", "tel:", "data:")):
+                        continue
+                    full = urljoin(base_url, href)
+                    full = urldefrag(full)[0]
+                    links.add(normalize_url(full))
+            except Exception:
+                pass
+            return links
 
-        async def main():
-            global pages_fetched
-            queue.append(clean_url(TARGET_URL))
+        def extract_api_links(html: str, base_url: str) -> Set[str]:
+            links = set()
+            try:
+                soup = BeautifulSoup(html, "lxml")
+                for el in soup.find_all(["script", "link"]):
+                    src = el.get("src") or el.get("href") or ""
+                    if src and ("/api/" in src or ".json" in src or "/graphql" in src):
+                        full = urljoin(base_url, src)
+                        links.add(normalize_url(full))
+                for el in soup.find_all("form", action=True):
+                    action = el["action"]
+                    if action and not action.startswith("#"):
+                        full = urljoin(base_url, action)
+                        links.add(normalize_url(full))
+            except Exception:
+                pass
+            return links
 
-            while queue and pages_fetched < MAX_PAGES:
-                batch = []
-                while queue and len(batch) < 5:
-                    u = queue.pop(0)
-                    if u not in visited:
-                        batch.append(u)
+        # ─── MAIN CRAWLER ────────────────────────────────────────────────
+        async def run():
+            state = load_state() or CrawlState(start_time=time.time())
+            resumed = state.pages_fetched > 0
 
-                for u in batch:
-                    if pages_fetched >= MAX_PAGES: break
-                    await fetch_page(u)
-                    await asyncio.sleep(random.uniform(1.5, 4.0))
+            if resumed:
+                log.info(f"🔄 Resuming from state ({state.pages_fetched} pages done)")
+            else:
+                log.info(f"🚀 Starting scrape: {TARGET_URL}")
+                log.info(f"   Mode: {SCRAPE_MODE} | Max: {MAX_PAGES if MAX_PAGES < 2**31 else '∞'} | "
+                        f"Depth: {MAX_DEPTH if MAX_DEPTH < 2**31 else '∞'} | Concurrency: {CONCURRENCY}")
+                if RESPECT_ROBOTS:
+                    log.info("   robots.txt: enabled")
+                state.queue.append(normalize_url(TARGET_URL))
+                state.depth_map[normalize_url(TARGET_URL)] = 0
+                save_state(state)
 
-            print("\n" + "=" * 60)
-            print(f"✅ تم بنجاح!")
-            print(f"📄 الصفحات: {pages_fetched}")
-            print(f"🎭 عبر Playwright: {pages_pw}")
-            print(f"⚡ عبر Cloudscraper: {pages_fetched - pages_pw}")
-            print("=" * 60)
+            sess = make_cloudscraper()
+            sem = asyncio.Semaphore(CONCURRENCY)
 
-        asyncio.run(main())
+            # Sitemap mode
+            if SCRAPE_MODE == "Sitemap Only" and not resumed:
+                log.info("📑 Parsing sitemap.xml...")
+                urls = parse_sitemap(TARGET_URL, sess)
+                if urls:
+                    log.info(f"   Found {len(urls)} URLs in sitemap")
+                    state.queue = urls
+                    for u in urls:
+                        state.depth_map.setdefault(normalize_url(u), 0)
+                else:
+                    log.warning("   No sitemap found, falling back to crawl")
+
+            async def process_url(url: str) -> int:
+                async with sem:
+                    url = normalize_url(url)
+                    if url in state.visited or url in state.failed or state.pages_fetched >= MAX_PAGES:
+                        return 0
+                    if not check_robots(url):
+                        log.info(f"  ⏭️ robots.txt blocked: {url}")
+                        state.failed.add(url)
+                        return 0
+
+                    depth = state.depth_map.get(url, 0)
+                    if depth > MAX_DEPTH:
+                        return 0
+
+                    log.info(f"\n📥 [{state.pages_fetched+1}] {url}")
+
+                    status, html_text, final_url, meta = fetch_cloudscraper(sess, url)
+                    used_pw = False
+
+                    if (status is None or status == 403) and (html_text is None or (html_text and is_cf_challenge(html_text))):
+                        log.info(f"  🔄 → Playwright...")
+                        status, html_text, final_url, meta = await fetch_playwright(url)
+                        used_pw = True
+                        if status == 200 and html_text:
+                            state.pages_playwright += 1
+                            state.pages_fetched += 1
+
+                    if status != 200 or not html_text:
+                        log.info(f"  ❌ Failed")
+                        state.failed.add(url)
+                        save_state(state)
+                        return 0
+
+                    state.visited.add(url)
+
+                    # Detect SPA and wait extra
+                    if '<div id="root"' in html_text[:5000] or '<div id="app"' in html_text[:5000] or \
+                       'ng-app' in html_text[:3000] or 'vue' in html_text[:3000].lower():
+                        if not used_pw:
+                            log.info("  🔍 SPA detected, re-fetching with PW...")
+                            pw_status, pw_html, pw_url, pw_meta = await fetch_playwright(url)
+                            if pw_status == 200 and pw_html:
+                                html_text = pw_html
+                                final_url = pw_url
+                                used_pw = True
+
+                    if is_api_endpoint(url):
+                        try:
+                            data = json.loads(html_text)
+                            html_text = f"<html><body><pre>{html_mod.escape(json.dumps(data, ensure_ascii=False, indent=2))}</pre></body></html>"
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+
+                    # Follow redirects
+                    if final_url and final_url != url:
+                        f_norm = normalize_url(final_url)
+                        if f_norm != url and f_norm not in state.visited:
+                            state.queue.append(f_norm)
+                            state.depth_map[f_norm] = depth
+                        redirect_domain = urlparse(f_norm).netloc
+                        if redirect_domain != BASE_DOMAIN:
+                            state.tracked_domains.add(redirect_domain)
+
+                    save_page(html_text, final_url or url, used_pw, state)
+
+                    if DOWNLOAD_ASSETS:
+                        download_assets(sess, html_text, final_url or url, get_save_path(final_url or url))
+
+                    # Extract links for Full Website mode
+                    if "Full Website" in SCRAPE_MODE and state.pages_fetched < MAX_PAGES:
+                        links = extract_links(html_text, final_url or url)
+                        api_links = extract_api_links(html_text, final_url or url)
+                        all_links = links | api_links
+
+                        for link in all_links:
+                            if is_same_site(link, state.tracked_domains) and link not in state.visited:
+                                if link not in state.queue and link not in state.failed:
+                                    state.queue.append(link)
+                                    state.depth_map[link] = depth + 1
+
+                        # Pagination
+                        try:
+                            soup = BeautifulSoup(html_text, "lxml")
+                            next_url = find_next_page(soup, final_url or url)
+                            if next_url:
+                                n_norm = normalize_url(next_url)
+                                if is_same_site(n_norm, state.tracked_domains) and \
+                                   n_norm not in state.visited and n_norm not in state.queue:
+                                    state.queue.append(n_norm)
+                                    state.depth_map[n_norm] = depth
+                        except Exception:
+                            pass
+
+                    # Deduplicate queue
+                    state.queue = list(dict.fromkeys(state.queue))
+                    save_state(state)
+                    return 1
+
+            try:
+                while state.queue and state.pages_fetched < MAX_PAGES:
+                    batch = []
+                    while state.queue and len(batch) < CONCURRENCY * 2:
+                        u = state.queue.pop(0)
+                        if u not in state.visited and u not in state.failed:
+                            if check_robots(u):
+                                batch.append(u)
+                            else:
+                                state.failed.add(u)
+
+                    if not batch:
+                        continue
+
+                    tasks = [process_url(u) for u in batch]
+                    await asyncio.gather(*tasks)
+                    await asyncio.sleep(random.uniform(0.5, 2.0))
+
+            except asyncio.CancelledError:
+                log.info("\n⚠️ Cancelled, saving state...")
+                save_state(state)
+                raise
+
+            finally:
+                elapsed = time.time() - state.start_time
+                rate = state.pages_fetched / elapsed if elapsed > 0 else 0
+
+                log.info("")
+                log.info("=" * 65)
+                log.info(f"✅ COMPLETE")
+                log.info(f"📄 Pages fetched: {state.pages_fetched}")
+                log.info(f"⚡ Cloudscraper:  {state.pages_cloudscraper}")
+                log.info(f"🎭 Playwright:   {state.pages_playwright}")
+                log.info(f"📦 Total size:   {state.total_bytes / 1024:.1f} KB")
+                log.info(f"⏱️  Time:         {elapsed:.0f}s ({rate:.1f} pages/s)")
+                log.info(f"🗂️  Visited:      {len(state.visited)}")
+                log.info(f"❌ Failed:       {len(state.failed)}")
+                log.info(f"📌 Remaining:    {len(state.queue)}")
+                log.info("=" * 65)
+
+                save_state(state)
+
+        asyncio.run(run())
         PYEOF
 
-    - name: Commit and Push Scraped Data
+    - name: Commit and Push
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
