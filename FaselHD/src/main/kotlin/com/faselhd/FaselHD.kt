@@ -412,7 +412,6 @@ class FaselHD(private val context: Context) : MainAPI() {
         }
 
         val currentSeasonEpisodes = mutableListOf<Episode>()
-        val otherSeasonsFakeEpisodes = mutableListOf<Episode>()
 
         if (seasonCards.isNotEmpty()) {
 
@@ -441,40 +440,36 @@ class FaselHD(private val context: Context) : MainAPI() {
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
 
 
-            var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
                 val actualSeasonNum = i + 1
 
                 val seasonName = seasonCards[i].selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "الموسم $actualSeasonNum"
 
-                if (i == currentSeasonIndex) {
+                val seasonDoc = if (i == currentSeasonIndex) {
+                    doc
+                } else {
+                    val onclickAttr = seasonCards[i].attr("onclick")
+                    val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
+                    val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
+                    try { smartGet(fullSeasonUrl) } catch (_: Exception) { null }
+                }
 
-                    doc.select("div#epAll a").forEach { el ->
+                if (seasonDoc != null) {
+                    seasonDoc.select("div#epAll a").forEach { el ->
                         val epUrlRaw = el.attr("href").trim()
                         if (epUrlRaw.isNotBlank()) {
                             val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
                             if (!epTitle.contains("باقي الحلقات") && !epTitle.contains("المزيد")) {
                                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
                                 currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
-
                                     this.name = "$seasonName - $epTitle"
                                     this.episode = epNum
-
-                                    this.season = 1
+                                    this.season = actualSeasonNum
                                     this.posterUrl = poster
                                 })
                             }
                         }
                     }
-                } else {
-
-                    otherSeasonsFakeEpisodes.add(newEpisode("$absoluteUrl?s=$actualSeasonNum#fake") {
-                        this.name = "($seasonName في الاقتراحات فوق في الزاوية اليسار)"
-                        this.episode = 1
-                        this.season = fakeSeasonCounter
-                        this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/1.jpg"
-                    })
-                    fakeSeasonCounter++
                 }
             }
         } else {
@@ -494,7 +489,7 @@ class FaselHD(private val context: Context) : MainAPI() {
             }
         }
 
-        val allEpisodes = currentSeasonEpisodes + otherSeasonsFakeEpisodes
+        val allEpisodes = currentSeasonEpisodes
 
         return if (allEpisodes.isEmpty()) {
             newMovieLoadResponse(title, absoluteUrl, TvType.Movie, absoluteUrl) {
