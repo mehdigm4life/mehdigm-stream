@@ -427,21 +427,22 @@ class FaselHD(private val context: Context) : MainAPI() {
 
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
 
-
             for (i in 0 until seasonCards.size) {
                 val actualSeasonNum = i + 1
 
                 val seasonName = seasonCards[i].selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "الموسم $actualSeasonNum"
 
+                val onclickAttr = seasonCards[i].attr("onclick")
+                val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
+                val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
+
                 val seasonDoc = if (i == currentSeasonIndex) {
                     doc
                 } else {
-                    val onclickAttr = seasonCards[i].attr("onclick")
-                    val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
-                    val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
                     try { smartGet(fullSeasonUrl) } catch (_: Exception) { null }
                 }
 
+                var hasEpisodes = false
                 if (seasonDoc != null) {
                     seasonDoc.select("div#epAll a").forEach { el ->
                         val epUrlRaw = el.attr("href").trim()
@@ -455,9 +456,19 @@ class FaselHD(private val context: Context) : MainAPI() {
                                     this.season = actualSeasonNum
                                     this.posterUrl = poster
                                 })
+                                hasEpisodes = true
                             }
                         }
                     }
+                }
+
+                if (!hasEpisodes) {
+                    currentSeasonEpisodes.add(newEpisode(fullSeasonUrl) {
+                        this.name = seasonName
+                        this.episode = 1
+                        this.season = actualSeasonNum
+                        this.posterUrl = poster
+                    })
                 }
             }
         } else {
