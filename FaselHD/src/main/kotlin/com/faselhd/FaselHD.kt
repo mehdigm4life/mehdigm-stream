@@ -210,7 +210,7 @@ class FaselHD : MainAPI() {
                 this.tags = tags
                 this.recommendations = recommendations
                 this.posterHeaders = cfKiller.getCookieHeaders(mainUrl).toMap()
-                this.rating = rating
+                this.score = score
             }
         }
     }
@@ -238,13 +238,15 @@ class FaselHD : MainAPI() {
                 val directLink = playerDoc.selectFirst("div.dl-link a")?.attr("href")
                 if (!directLink.isNullOrBlank()) {
                     callback.invoke(
-                        ExtractorLink(
+                        newExtractorLink(
                             source = this.name,
                             name = "$name - Download Server",
                             url = directLink,
-                            referer = mainUrl,
-                            quality = Qualities.Unknown.value
-                        )
+                            type = null
+                        ) {
+                            this.referer = mainUrl
+                            this.quality = Qualities.Unknown.value
+                        }
                     )
                 }
             } catch (_: Exception) {
@@ -268,11 +270,11 @@ class FaselHD : MainAPI() {
                     )
                 ).first
 
-                val streamUrl = webView?.url
+                val streamUrl = webView?.url?.toString()
                 if (!streamUrl.isNullOrBlank() && streamUrl.contains("master.m3u8")) {
                     M3u8Helper.generateM3u8(
                         name = this.name,
-                        streamUrl = streamUrl,
+                        url = streamUrl,
                         referer = mainUrl
                     ).forEach(callback)
                 }
