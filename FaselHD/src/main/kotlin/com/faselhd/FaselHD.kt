@@ -399,18 +399,6 @@ class FaselHD(private val context: Context) : MainAPI() {
         val seasonCards = doc.select(".seasonDiv")
         val seasonUrlRegex = Regex("""window\.location\.href\s*=\s*['"]([^'"]+)['"]""")
 
-        val recommendations = seasonCards.mapNotNull { seasonEl ->
-            val onclickAttr = seasonEl.attr("onclick")
-            val seasonPoster = seasonEl.selectFirst("img")?.attr("data-src") ?: seasonEl.selectFirst("img")?.attr("src")
-            val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: return@mapNotNull null
-            val seasonTitle = seasonEl.selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "موسم"
-            val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-            newTvSeriesSearchResponse(seasonTitle, fullSeasonUrl, TvType.TvSeries) {
-                this.posterUrl = seasonPoster
-                this.posterHeaders = headers
-            }
-        }
-
         val currentSeasonEpisodes = mutableListOf<Episode>()
 
         if (seasonCards.isNotEmpty()) {
@@ -497,7 +485,6 @@ class FaselHD(private val context: Context) : MainAPI() {
                 this.posterHeaders = headers
                 this.backgroundPosterUrl = backgroundPoster
                 this.plot = plot
-                this.recommendations = recommendations
             }
         } else {
             newTvSeriesLoadResponse(title, absoluteUrl, TvType.Anime, allEpisodes) {
@@ -505,7 +492,6 @@ class FaselHD(private val context: Context) : MainAPI() {
                 this.posterHeaders = headers
                 this.backgroundPosterUrl = backgroundPoster
                 this.plot = plot
-                this.recommendations = recommendations
             }
         }
     }
