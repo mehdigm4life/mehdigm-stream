@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.requestCreator
 import org.jsoup.nodes.Element
 
@@ -273,8 +274,8 @@ class FaselHD : MainAPI() {
                 val streamUrl = webView?.url?.toString()
                 if (!streamUrl.isNullOrBlank() && streamUrl.contains("master.m3u8")) {
                     M3u8Helper.generateM3u8(
-                        name = this.name,
-                        url = streamUrl,
+                        source = this.name,
+                        streamUrl = streamUrl,
                         referer = mainUrl
                     ).forEach(callback)
                 }
