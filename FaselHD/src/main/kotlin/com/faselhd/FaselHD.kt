@@ -144,7 +144,7 @@ class FaselHD : MainAPI() {
 
         val ratingText = doc.selectFirst("span.pImdb")?.text()
             ?: doc.selectFirst("div.singleImdb")?.text()
-        val rating = ratingText?.toRatingInt()
+        val score = Score.from10(ratingText)
 
         // Determine if it's a movie: no episode list and no season list
         val hasEpisodes = doc.select(".epAll a").isNotEmpty()
@@ -159,7 +159,7 @@ class FaselHD : MainAPI() {
                 this.tags = tags
                 this.recommendations = recommendations
                 this.posterHeaders = cfKiller.getCookieHeaders(mainUrl).toMap()
-                this.rating = rating
+                this.score = score
             }
         } else {
             val episodes = ArrayList<Episode>()
@@ -169,17 +169,16 @@ class FaselHD : MainAPI() {
                 ?.getIntFromText() ?: 1
             doc.select(".epAll a").map { ep ->
                 episodes.add(
-                    Episode(
-                        data = ep.attr("href"),
-                        name = ep.text().trim(),
-                        season = currentSeasonNumber,
-                        episode = ep.text().getIntFromText()
-                    )
+                    newEpisode(ep.attr("href")) {
+                        this.name = ep.text().trim()
+                        this.season = currentSeasonNumber
+                        this.episode = ep.text().getIntFromText()
+                    }
                 )
             }
 
             // Other seasons
-            doc.select("div#seasonList div.seasonDiv").not(".active").apmap { season ->
+            doc.select("div#seasonList div.seasonDiv").not(".active").amap { season ->
                 val onclick = season.attr("onclick")
                 val seasonId = Regex("""\\?p=(\\d+)'""").find(onclick)?.groupValues?.get(1)
                 if (seasonId != null) {
@@ -188,12 +187,11 @@ class FaselHD : MainAPI() {
                         ?.getIntFromText() ?: currentSeasonNumber
                     seasonDoc.select(".epAll a").map { ep ->
                         episodes.add(
-                            Episode(
-                                data = ep.attr("href"),
-                                name = ep.text().trim(),
-                                season = seasonNumber,
-                                episode = ep.text().getIntFromText()
-                            )
+                            newEpisode(ep.attr("href")) {
+                                this.name = ep.text().trim()
+                                this.season = seasonNumber
+                                this.episode = ep.text().getIntFromText()
+                            }
                         )
                     }
                 }
