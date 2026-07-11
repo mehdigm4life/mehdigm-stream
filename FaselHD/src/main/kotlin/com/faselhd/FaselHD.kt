@@ -1,420 +1,289 @@
 package com.faselhd
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
+import com.lagradost.nicehttp.requestCreator
 import org.jsoup.nodes.Element
-import java.net.URLEncoder
 
 class FaselHD : MainAPI() {
+
+    //region Provider metadata
     override var lang = "ar"
-    override var name = "FaselHD"
     override var mainUrl = "https://www.fasel-hd.cam"
-    override val usesWebView = false
+    override var name = "FaselHD"
+    override val usesWebView = true
     override val hasMainPage = true
-    override val hasQuickSearch = true
-    override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
+    override val supportedTypes = setOf(
+        TvType.Movie,
+        TvType.TvSeries,
+        TvType.AsianDrama,
+        TvType.Anime
+    )
+    //endregion
 
     private val cfKiller = CloudflareKiller()
-    private var _baseUrl: String? = null
 
-    private val browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-    private val baseHeaders = mapOf(
-        "User-Agent" to browserUA,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language" to "ar,en;q=0.9",
-        "Upgrade-Insecure-Requests" to "1"
-    )
-
-    private val arabicSeasonMap = mapOf(
-        "الاول" to 1, "الأول" to 1,
-        "التاني" to 2, "الثاني" to 2, "الثانى" to 2,
-        "التالت" to 3, "الثالث" to 3,
-        "الرابع" to 4, "الخامس" to 5,
-        "السادس" to 6, "السابع" to 7,
-        "الثامن" to 8, "التاسع" to 9,
-        "العاشر" to 10
-    )
-
-    private suspend fun baseUrl(): String {
-        _baseUrl?.let { return it }
-        return try {
-            val resp = app.get(mainUrl, allowRedirects = true, timeout = 15)
-            val uri = java.net.URI(resp.url)
-            "${uri.scheme}://${uri.host}".also { _baseUrl = it }
-        } catch (_: Exception) {
-            mainUrl.also { _baseUrl = it }
-        }
-    }
-
-    private fun String.fixUrl(): String {
-        if (isBlank()) return this
-        val base = _baseUrl ?: mainUrl
-        return when {
-            startsWith("http") -> this
-            startsWith("//") -> "https:$this"
-            startsWith("/") -> "$base$this"
-            else -> "$base/$this"
-        }
-    }
-
-    private suspend fun getPage(url: String, referer: String? = null): Document {
-        val base = baseUrl()
-        val cleanUrl = url.fixUrl()
-        var response = app.get(cleanUrl, headers = baseHeaders, referer = referer ?: base, timeout = 120)
-        val doc = response.document
-        val title = doc.select("title").text()
-        if (response.code == 403 || response.code == 503 ||
-            title.contains("Just a moment", ignoreCase = true) ||
-            title.contains("Attention Required", ignoreCase = true) ||
-            doc.select("body").text().contains("cf-browser-verification")
-        ) {
-            response = app.get(cleanUrl, headers = baseHeaders, referer = referer ?: base, interceptor = cfKiller, timeout = 120)
-        }
-        return response.document
+    //region Helpers
+    private fun String.getIntFromText(): Int? {
+        return Regex("""\d+""").find(this)?.groupValues?.firstOrNull()?.toIntOrNull()
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
-        val anchor = if (tagName() == "a") this else selectFirst("a[href]") ?: return null
-        val url = anchor.attr("href").fixUrl()
-        if (url.isBlank() || url == "#" || !url.startsWith("http")) return null
+        val anchor = selectFirst("div.postDiv a") ?: return null
+        val url = anchor.attr("href") ?: return null
+        val img = anchor.selectFirst("div.imgdiv-class img") ?: anchor.selectFirst("img")
+        val posterUrl = img?.attr("data-src")?.ifBlank { img.attr("src") } ?: ""
+        val rawTitle = img?.attr("alt") ?: anchor.text()
 
-        val title = anchor.attr("title").ifBlank {
-            selectFirst(".postInner .h1, .h1, .title")?.text()?.trim()
-                ?: anchor.text().trim()
-        }
-        if (title.isBlank()) return null
-
-        val img = selectFirst("img") ?: anchor.selectFirst("img")
-        val posterUrl = img?.let { el ->
-            listOf("data-src", "data-lazy-src", "src")
-                .map { el.attr(it).trim() }
-                .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
-        }
+        val quality = selectFirst(".quality")?.text()
+            ?.replace("1080p | -".toRegex(), "")
+            ?.trim()
 
         val type = when {
-            url.contains("/seasons/") || url.contains("/series/") || title.contains("مسلسل") -> TvType.TvSeries
-            url.contains("/anime/") || title.contains("انمي") || title.contains("أنمي") -> TvType.Anime
-            else -> TvType.Movie
+            url.contains("/movies/") || url.contains("/hindi/") || url.contains("/dubbed-movies/") || url.contains("/asian-movies/") || url.contains("/anime-movies/") -> TvType.Movie
+            url.contains("/series/") || url.contains("/episodes/") || url.contains("/asian-series/") || url.contains("/asian_seasons/") || url.contains("/asian-episodes/") -> TvType.TvSeries
+            url.contains("/anime/") || url.contains("/anime-episodes/") -> TvType.Anime
+            else -> TvType.TvSeries
         }
 
-        return newMovieSearchResponse(title, url, type) {
+        val cleanTitle = rawTitle
+            .replace("مسلسل|فيلم|انمي|أنمي|برنامج|مترجم|مدبلج|اون لاين|مشاهدة|تحميل".toRegex(), "")
+            .trim()
+
+        return newMovieSearchResponse(cleanTitle, url, type) {
             this.posterUrl = posterUrl
+            this.quality = getQualityFromString(quality)
+            this.posterHeaders = cfKiller.getCookieHeaders(mainUrl).toMap()
         }
     }
 
-    private fun Document.extractItems(): List<SearchResponse> {
-        for (selector in listOf("div.postDiv", "div.blockMovie", "div.epDivHome", "div.MovieBlock")) {
-            val items = select(selector).mapNotNull { it.toSearchResponse() }
-            if (items.isNotEmpty()) return items.distinctBy { it.url }
+    private suspend fun fetchDocument(url: String): Element {
+        var doc = app.get(url, interceptor = cfKiller).document
+        if (doc.select("title").text() == "Just a moment...") {
+            doc = app.get(url, interceptor = cfKiller, timeout = 120).document
         }
-        return select("a:has(img)").mapNotNull { it.toSearchResponse() }.distinctBy { it.url }
+        return doc
     }
+    //endregion
 
+    //region Main Page
     override val mainPage = mainPageOf(
-        "/main" to "الرئيسية",
-        "/movies" to "أفلام أجنبية",
-        "/series" to "مسلسلات",
-        "/tvshows" to "برامج تلفزيونية",
-        "/anime" to "أنمي",
-        "/asian-series" to "مسلسلات آسيوية",
-        "/most_recent" to "المضاف حديثاً",
-        "/episodes" to "أحدث الحلقات",
-        "/dubbed-movies" to "أفلام مدبلجة",
-        "/hindi" to "أفلام هندية",
-        "/anime-movies" to "أفلام أنمي",
-        "/asian-movies" to "أفلام آسيوية"
+        "$mainUrl/all-movies" to "جميع الأفلام",
+        "$mainUrl/movies" to "أفلام أجنبي",
+        "$mainUrl/movies_top_views" to "الأفلام الأكثر مشاهدة",
+        "$mainUrl/movies_top_imdb" to "الأفلام الأعلى تقييماً IMDB",
+        "$mainUrl/dubbed-movies" to "أفلام مدبلجة",
+        "$mainUrl/hindi" to "أفلام هندي",
+        "$mainUrl/asian-movies" to "أفلام آسيوية",
+        "$mainUrl/anime-movies" to "أفلام أنمي",
+        "$mainUrl/series" to "مسلسلات أجنبية",
+        "$mainUrl/recent_series" to "المضاف حديثاً",
+        "$mainUrl/anime" to "أنمي",
+        "$mainUrl/asian-series" to "مسلسلات آسيوية",
+        "$mainUrl/tvshows" to "برامج تلفزيونية"
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val pageUrl = if (page > 1) "${request.data}/page/$page" else request.data
-        val doc = getPage(pageUrl)
-
-        if (request.data == "/main") {
-            val lists = mutableListOf<HomePageList>()
-
-            val slider = doc.select("#homeSlide .swiper-slide").mapNotNull { slide ->
-                val a = slide.selectFirst("a") ?: return@mapNotNull null
-                val title = slide.select(".h1 a, .slideContent .h1 a, .post--content--inner .h1 a").text().trim()
-                    .ifBlank { slide.selectFirst("img")?.attr("alt")?.trim() ?: return@mapNotNull null }
-                val img = slide.selectFirst(".poster img, img")
-                val poster = img?.let { el ->
-                    listOf("data-src", "src").map { el.attr(it) }.firstOrNull { it.isNotBlank() }
-                }
-                newMovieSearchResponse(title, a.attr("href").fixUrl(), TvType.Movie) {
-                    this.posterUrl = poster
-                }
-            }
-            if (slider.isNotEmpty()) {
-                lists.add(HomePageList("أحدث الإضافات", slider, isHorizontalImages = true))
-            }
-
-            doc.select("section, div[id^=blockList]").forEach { block ->
-                val title = block.selectFirst(".blockHead .h3")?.text()?.trim()
-                    ?: block.selectFirst(".blockHead")?.text()?.trim()
-                    ?: return@forEach
-                val items = block.select(".blockMovie, .postDiv, .epDivHome").mapNotNull { it.toSearchResponse() }
-                if (items.isNotEmpty()) {
-                    lists.add(HomePageList(title, items, isHorizontalImages = block.select(".blockMovie").size > 2))
-                }
-            }
-
-            return newHomePageResponse(lists.filter { it.list.isNotEmpty() }, hasNext = false)
+    override suspend fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+        val url = if (request.data.endsWith("/")) {
+            "${request.data}page/$page"
+        } else {
+            "$request.data/page/$page"
         }
-
-        val items = doc.extractItems()
-        val hasNext = doc.select("a.page-numbers:not(.current)").any {
-            Regex("/page/${page + 1}").containsMatchIn(it.attr("href"))
-        } || doc.select("a.next, a:contains(»)").any { it.attr("href").isNotBlank() && it.attr("href") != "#" }
-        return newHomePageResponse(request.name, items, hasNext)
+        val doc = fetchDocument(url)
+        val list = doc.select("div#postList div.postDiv")
+            .mapNotNull { it.toSearchResponse() }
+        return newHomePageResponse(request.name, list)
     }
+    //endregion
 
-    override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
-
+    //region Search
     override suspend fun search(query: String): List<SearchResponse> {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val results = arrayListOf<SearchResponse>()
-        runCatching { results.addAll(getPage("/?s=$encoded").extractItems()) }
-        if (results.isEmpty()) runCatching { results.addAll(getPage("/search/$encoded").extractItems()) }
-        return results.distinctBy { it.url }
+        val q = query.replace(" ", "+")
+        val doc = fetchDocument("$mainUrl/?s=$q")
+        return doc.select("div#postList div.postDiv")
+            .mapNotNull { it.toSearchResponse() }
     }
+    //endregion
 
-    private fun extractSeasonNum(text: String): Int? {
-        val clean = java.net.URLDecoder.decode(text, "UTF-8")
-        for ((name, num) in arabicSeasonMap) {
-            if (clean.contains(name)) return num
-        }
-        return Regex("""(?:الموسم|season|s)\s*[-_:]?\s*(\d{1,2})""", RegexOption.IGNORE_CASE)
-            .find(clean)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    }
-
+    //region Load
     override suspend fun load(url: String): LoadResponse {
-        val doc = getPage(url)
+        val doc = fetchDocument(url)
+        val title = doc.select("title").text()
+            .replace(" - فاصل إعلاني", "")
+            .replace("مسلسل|فيلم|انمي|أنمي|برنامج|مترجم|مدبلج|اون لاين|مشاهدة|تحميل".toRegex(), "")
+            .trim()
 
-        val title = (
-            doc.selectFirst(".singleInfo .h1, .postInner .h1")?.text()
-                ?: doc.selectFirst("h1")?.text()
-                ?: doc.selectFirst("meta[property=og:title]")?.attr("content")
-                ?: ""
-            ).trim()
+        val posterUrl = doc.selectFirst("div.posterImg img")?.attr("src")
+            ?.ifBlank { doc.selectFirst("div.seasonDiv.active img")?.attr("data-src") }
+            ?: doc.selectFirst("div.posterImg img")?.attr("data-src")
+            ?: ""
 
-        val poster = (
-            doc.selectFirst(".posterImg img, .imgdiv-class img")?.let { img ->
-                listOf("data-src", "src").map { img.attr(it) }
-                    .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
+        val year = doc.select("div#singleList div.col-xl-6, div#singleList div.col-lg-6").firstOrNull {
+            it.text().contains("سنة|موعد|Released|تاريخ الصدور".toRegex())
+        }?.text()?.getIntFromText()
+
+        val duration = doc.select("div#singleList div.col-xl-6, div#singleList div.col-lg-6").firstOrNull {
+            it.text().contains("مدة|توقيت|Duration".toRegex())
+        }?.text()?.getIntFromText()
+
+        val tags = doc.select("div#singleList div.col-xl-6 a, div#singleList div.col-lg-6 a")
+            .map { it.text() }
+            .filter { it.isNotBlank() }
+
+        val synopsis = doc.selectFirst("div.singleDesc p")?.text()
+            ?: doc.selectFirst("div.singleDesc")?.text()
+            ?: ""
+
+        val recommendations = doc.select("div#postList div.postDiv")
+            .mapNotNull { it.toSearchResponse() }
+
+        val ratingText = doc.selectFirst("span.pImdb")?.text()
+            ?: doc.selectFirst("div.singleImdb")?.text()
+        val rating = ratingText?.toRatingInt()
+
+        // Determine if it's a movie: no episode list and no season list
+        val hasEpisodes = doc.select(".epAll a").isNotEmpty()
+        val hasSeasons = doc.select("#seasonList .seasonDiv").isNotEmpty()
+
+        return if (!hasEpisodes && !hasSeasons) {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = posterUrl
+                this.year = year
+                this.plot = synopsis
+                this.duration = duration
+                this.tags = tags
+                this.recommendations = recommendations
+                this.posterHeaders = cfKiller.getCookieHeaders(mainUrl).toMap()
+                this.rating = rating
             }
-                ?: doc.selectFirst("meta[property=og:image]")?.attr("content")
-            )?.fixUrl()
+        } else {
+            val episodes = ArrayList<Episode>()
 
-        val synopsis = (
-            doc.selectFirst(".singleDesc, .story p")?.text()
-                ?: doc.selectFirst("meta[property=og:description]")?.attr("content")
-            )?.trim()
+            // Current season episodes
+            val currentSeasonNumber = doc.selectFirst("div.seasonDiv.active div.title")?.text()
+                ?.getIntFromText() ?: 1
+            doc.select(".epAll a").map { ep ->
+                episodes.add(
+                    Episode(
+                        data = ep.attr("href"),
+                        name = ep.text().trim(),
+                        season = currentSeasonNumber,
+                        episode = ep.text().getIntFromText()
+                    )
+                )
+            }
 
-        val tags = doc.select("a[href*=movies_cats], a[href*=series_genres]")
-            .map { it.text().trim() }.filter { it.isNotBlank() }
-
-        val year = doc.selectFirst("a[href*=movies_years]")?.text()
-            ?.let { Regex("""\d{4}""").find(it)?.value?.toIntOrNull() }
-
-        val score = doc.selectFirst(".pImdb, .imdb")?.text()
-            ?.let { Regex("""[\d.]+""").find(it)?.value?.toFloatOrNull() }
-
-        val episodes = mutableListOf<Episode>()
-        val epContainer = doc.selectFirst("#epAll")
-
-        if (epContainer != null) {
-            val seasonNum = extractSeasonNum(url) ?: 1
-            epContainer.select("a[href]").forEach { ep ->
-                val epUrl = ep.attr("href").fixUrl()
-                if (epUrl.isBlank() || !epUrl.startsWith("http")) return@forEach
-                val epText = ep.text().trim()
-                if (epText.contains("باقي") || epText.contains("المزيد")) return@forEach
-                val epNum = Regex("""\d+""").find(epText)?.value?.toIntOrNull()
-                newEpisode(epUrl)?.let {
-                    it.name = epText
-                    it.season = seasonNum
-                    it.episode = epNum
-                    episodes.add(it)
+            // Other seasons
+            doc.select("div#seasonList div.seasonDiv").not(".active").apmap { season ->
+                val onclick = season.attr("onclick")
+                val seasonId = Regex("""\\?p=(\\d+)'""").find(onclick)?.groupValues?.get(1)
+                if (seasonId != null) {
+                    val seasonDoc = fetchDocument("$mainUrl/?p=$seasonId")
+                    val seasonNumber = seasonDoc.selectFirst("div.seasonDiv.active div.title")?.text()
+                        ?.getIntFromText() ?: currentSeasonNumber
+                    seasonDoc.select(".epAll a").map { ep ->
+                        episodes.add(
+                            Episode(
+                                data = ep.attr("href"),
+                                name = ep.text().trim(),
+                                season = seasonNumber,
+                                episode = ep.text().getIntFromText()
+                            )
+                        )
+                    }
                 }
             }
-        }
 
-        val isSeries = episodes.isNotEmpty() || url.contains("/seasons/") || url.contains("/series/") || url.contains("/episodes/")
-
-        if (isSeries) {
-            val sorted = episodes.distinctBy { it.data }
-                .sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 0 }))
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, sorted) {
-                this.posterUrl = poster
-                this.plot = synopsis
-                this.tags = tags
+            newTvSeriesLoadResponse(
+                title,
+                url,
+                TvType.TvSeries,
+                episodes.distinct().sortedWith(compareBy({ it.season }, { it.episode }))
+            ) {
+                this.posterUrl = posterUrl
                 this.year = year
-                this.score = Score.from10(score)
+                this.plot = synopsis
+                this.duration = duration
+                this.tags = tags
+                this.recommendations = recommendations
+                this.posterHeaders = cfKiller.getCookieHeaders(mainUrl).toMap()
+                this.rating = rating
             }
         }
-
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = poster
-            this.plot = synopsis
-            this.tags = tags
-            this.year = year
-            this.score = Score.from10(score)
-        }
     }
+    //endregion
 
+    //region Load Links
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = getPage(data)
-        var foundAny = false
-        val seen = mutableSetOf<String>()
+        val doc = fetchDocument(data)
 
-        doc.select("iframe").amap { frame ->
-            val src = frame.attr("data-src").ifBlank { frame.attr("src") }
-            if (src.isNotBlank() && src.contains("video_player")) {
-                val playerUrl = src.fixUrl()
-                val urls = extractHlsFromPlayer(playerUrl)
-                for ((i, hlsUrl) in urls.withIndex()) {
-                    val quality = when {
-                        hlsUrl.contains("_hd1080") || hlsUrl.contains("master") -> Qualities.P1080.value
-                        hlsUrl.contains("_hd720") -> Qualities.P720.value
-                        hlsUrl.contains("_sd360") -> Qualities.P360.value
-                        else -> Qualities.P1080.value
-                    }
-                    callback(
-                        newExtractorLink("FaselHD", "FaselHD ${if (i == 0) "HD" else "SD $i"}", hlsUrl) {
-                            this.referer = playerUrl
-                            this.quality = quality
-                        }
+        // 1) Try the download server first (direct MP4/MKV link)
+        val downloadHref = doc.selectFirst(".downloadLinks a")?.attr("href")
+        if (!downloadHref.isNullOrBlank()) {
+            try {
+                val playerDoc = app.post(
+                    downloadHref,
+                    interceptor = cfKiller,
+                    referer = mainUrl,
+                    timeout = 120
+                ).document
+                val directLink = playerDoc.selectFirst("div.dl-link a")?.attr("href")
+                if (!directLink.isNullOrBlank()) {
+                    callback.invoke(
+                        ExtractorLink(
+                            source = this.name,
+                            name = "$name - Download Server",
+                            url = directLink,
+                            referer = mainUrl,
+                            quality = Qualities.Unknown.value
+                        )
                     )
-                    foundAny = true
                 }
-            } else if (src.isNotBlank()) {
-                val url = src.fixUrl()
-                foundAny = loadExtractor(url, data, subtitleCallback, callback) || foundAny
+            } catch (_: Exception) {
+                // Ignore download errors, fallback to streaming
             }
         }
 
-        doc.select("[onclick]").amap { el ->
-            val onclick = el.attr("onclick")
-            Regex("""(?:player_iframe\.location\.href|location\.href)\s*=\s*['"]([^'"]+)['"]""")
-                .find(onclick)?.groupValues?.get(1)?.let { iframeUrl ->
-                    val playerUrl = iframeUrl.fixUrl()
-                    if (playerUrl.contains("video_player")) {
-                        val urls = extractHlsFromPlayer(playerUrl)
-                        for ((i, hlsUrl) in urls.withIndex()) {
-                            val quality = when {
-                                hlsUrl.contains("master") || hlsUrl.contains("_hd1080") -> Qualities.P1080.value
-                                hlsUrl.contains("_hd720") -> Qualities.P720.value
-                                hlsUrl.contains("_sd360") -> Qualities.P360.value
-                                else -> Qualities.P1080.value
-                            }
-                            callback(
-                                newExtractorLink("FaselHD", "FaselHD ${if (i == 0) "HD" else "SD $i"}", hlsUrl) {
-                                    this.referer = playerUrl
-                                    this.quality = quality
-                                }
-                            )
-                            foundAny = true
-                        }
-                    } else {
-                        foundAny = loadExtractor(playerUrl, data, subtitleCallback, callback) || foundAny
-                    }
+        // 2) HLS streaming via JWPlayer iframe
+        val iframe = doc.selectFirst("iframe[name=\"player_iframe\"]")
+        val iframeSrc = iframe?.attr("src")?.ifBlank { iframe.attr("data-src") }
+
+        if (!iframeSrc.isNullOrBlank()) {
+            try {
+                val webView = WebViewResolver(
+                    Regex("""master\.m3u8""")
+                ).resolveUsingWebView(
+                    requestCreator(
+                        method = "GET",
+                        url = iframeSrc,
+                        referer = mainUrl
+                    )
+                ).first
+
+                val streamUrl = webView?.url
+                if (!streamUrl.isNullOrBlank() && streamUrl.contains("master.m3u8")) {
+                    M3u8Helper.generateM3u8(
+                        name = this.name,
+                        streamUrl = streamUrl,
+                        referer = mainUrl
+                    ).forEach(callback)
                 }
-        }
-
-        doc.select("a[href*=t7meel], a[href*=/series_quality/], a.download__item, .downloads__links__list a").amap { anchor ->
-            val link = anchor.attr("href").fixUrl()
-            if (link.isNotBlank() && link.startsWith("http") && seen.add(link)) {
-                foundAny = loadExtractor(link, data, subtitleCallback, callback) || foundAny
+            } catch (_: Exception) {
+                // WebView failed
             }
         }
 
-        return foundAny
+        return true
     }
-
-    @OptIn(Prerelease::class)
-    private suspend fun extractHlsFromPlayer(playerUrl: String): List<String> {
-        return try {
-            val response = app.get(playerUrl, headers = baseHeaders, referer = baseUrl(), timeout = 60)
-            val doc = Jsoup.parse(response.text)
-
-            val scripts = doc.select("script:not([src])").mapNotNull { it.data().takeIf { d -> d.isNotBlank() } }
-            if (scripts.isEmpty()) return emptyList()
-
-            val wrappedScripts = scripts.joinToString("\n") { script ->
-                "try { $script } catch(e) {}"
-            }
-
-            val safeUrl = playerUrl.replace("'", "\\'").replace("\\", "\\\\").replace("\n", "\\n")
-
-            val wrapper = buildString {
-                append("""
-var document = {
-    _output: '',
-    write: function(html) { this._output += html; },
-    writeln: function(html) { this._output += html + '\n'; },
-    getElementById: function() { return null; },
-    querySelector: function() { return null; },
-    querySelectorAll: function() { return []; },
-    createElement: function() { return { innerHTML: '', setAttribute: function() {}, addEventListener: function() {}, className: '', style: {} }; },
-    createTextNode: function() { return {}; },
-    body: { appendChild: function() {}, insertAdjacentHTML: function() {}, innerHTML: '' },
-    documentElement: { outerHTML: '' },
-    cookie: '',
-    createEvent: function() { return {}; },
-    addEventListener: function() {}
-};
-var window = this;
-var navigator = { userAgent: 'Mozilla/5.0', platform: 'Win32', language: 'en-US' };
-var setTimeout = function(fn) { try { if (typeof fn === 'function') fn(); } catch(e) {} };
-var setInterval = function() { return 0; };
-var clearInterval = function() {};
-var clearTimeout = function() {};
-var console = { log: function() {}, warn: function() {}, error: function() {} };
-var screen = { width: 1920, height: 1080 };
-var history = { pushState: function() {} };
-var location = { href: '$safeUrl' };
-var jwplayer = function() {
-    return {
-        key: '',
-        setup: function(config) {
-            try { if (config && config.image) document._output += config.image; } catch(e) {}
-        },
-        on: function() {},
-        load: function() {},
-        getPosition: function() { return 0; },
-        play: function() {},
-        seek: function() {}
-    };
-};
-
-""".trimIndent())
-                append(wrappedScripts)
-                append("\ndocument._output;")
-            }
-
-            val rhino = getRhinoContext()
-            val scope = rhino.initSafeStandardObjects()
-            val result = rhino.evaluateString(scope, wrapper, "player.js", 1, null)
-            val output = result?.toString() ?: return emptyList()
-
-            Regex("""https://[^\s"'<>]+\.m3u8""").findAll(output)
-                .map { it.value }
-                .distinct()
-                .toList()
-        } catch (e: Exception) {
-            logError(e)
-            emptyList()
-        }
-    }
+    //endregion
 }
