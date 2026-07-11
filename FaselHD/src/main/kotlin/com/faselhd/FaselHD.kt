@@ -57,7 +57,7 @@ import android.widget.Toast
 import com.lagradost.cloudstream3.newMovieSearchResponse
 
 class FaselHD(private val context: Context) : MainAPI() {
-    override var name = "FASELHD"
+    override var name = "FaselHD"
     override val hasQuickSearch = true
     override var mainUrl = "https://web31312x.faselhdx.bid"
     override var lang = "ar"
