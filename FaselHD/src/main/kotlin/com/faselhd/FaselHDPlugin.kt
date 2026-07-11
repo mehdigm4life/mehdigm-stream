@@ -7,6 +7,6 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class FaselhdPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(FaselHD())
+        registerMainAPI(FaselHD(context))
     }
 }
