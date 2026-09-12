@@ -121,12 +121,10 @@ class Animezid : MainAPI() {
             else -> typeFromText(title, default = TvType.Anime)
         }
 
-        val loadUrl = if (isSeriesLink) "SERIES::$absHref" else absHref
-
         return if (tvType == TvType.Movie || tvType == TvType.AnimeMovie) {
-            newMovieSearchResponse(title, loadUrl, tvType) { this.posterUrl = poster }
+            newMovieSearchResponse(title, absHref, tvType) { this.posterUrl = poster }
         } else {
-            newAnimeSearchResponse(title, loadUrl, tvType) { this.posterUrl = poster }
+            newAnimeSearchResponse(title, absHref, tvType) { this.posterUrl = poster }
         }
     }
 
@@ -413,7 +411,14 @@ class Animezid : MainAPI() {
             else -> data.replace("/watch.php", "/play.php")
         }
 
-        val playDoc = getPage(playUrl, mainUrl)
+        val playResp = try {
+            app.get(playUrl, headers = pageHeaders(mainUrl), referer = mainUrl)
+        } catch (_: Exception) {
+            return false
+        }
+        if (playResp.code !in 200..299) return false
+        val playDoc = playResp.document
+        val cookieHeader = buildCookieHeader(playResp.cookies)
 
         // ----- Protected playback API -----
         val csrf = playDoc.selectFirst("[data-playback-csrf]")
@@ -427,7 +432,8 @@ class Animezid : MainAPI() {
 
         if (csrf != null && createUrl != null) {
             val found = loadViaProtectedApi(
-                createUrl, csrf, videoUniq, playUrl, subtitleCallback, callback
+                createUrl, csrf, videoUniq, playUrl, cookieHeader,
+                subtitleCallback, callback
             )
             if (found) return true
         }
@@ -445,10 +451,11 @@ class Animezid : MainAPI() {
         csrf: String,
         contentId: String,
         playUrl: String,
+        cookies: Map<String, String>,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val headers = playbackHeaders(csrf, playUrl)
+        val headers = playbackHeaders(csrf, playUrl, cookies)
 
         val sessionJson = retryPost(createUrl, headers, mapOf("content_id" to contentId), playUrl)
             ?: return false
@@ -477,7 +484,7 @@ class Animezid : MainAPI() {
             val finalUrl = try {
                 val resp = app.get(
                     launchUrl,
-                    headers = pageHeaders(playUrl),
+                    headers = pageHeaders(playUrl) + cookies,
                     referer = playUrl
                 )
                 resp.url
@@ -489,9 +496,10 @@ class Animezid : MainAPI() {
 
             // 3) Try registered extractors (Uqload, Dood, StreamWish, etc.)
             var extracted = false
+            val extractorUrl = normalizeEmbedUrl(finalUrl)
             try {
                 extracted = loadExtractor(
-                    finalUrl, playUrl, subtitleCallback
+                    extractorUrl, playUrl, subtitleCallback
                 ) { link ->
                     callback(link)
                 }
@@ -616,18 +624,26 @@ class Animezid : MainAPI() {
         return null
     }
 
-    private fun playbackHeaders(csrf: String, referer: String) = mapOf(
-        "User-Agent" to browserUA,
-        "Accept" to "*/*",
-        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
-        "X-Playback-CSRF" to csrf,
-        "X-Requested-With" to "XMLHttpRequest",
-        "Origin" to mainUrl,
-        "Referer" to referer,
-        "Sec-Fetch-Dest" to "empty",
-        "Sec-Fetch-Mode" to "cors",
-        "Sec-Fetch-Site" to "same-origin"
-    )
+    private fun playbackHeaders(csrf: String, referer: String, cookies: Map<String, String>) =
+        mapOf(
+            "User-Agent" to browserUA,
+            "Accept" to "*/*",
+            "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
+            "X-Playback-CSRF" to csrf,
+            "X-Requested-With" to "XMLHttpRequest",
+            "Origin" to mainUrl,
+            "Referer" to referer,
+            "Sec-Fetch-Dest" to "empty",
+            "Sec-Fetch-Mode" to "cors",
+            "Sec-Fetch-Site" to "same-origin"
+        ) + cookies
+
+private fun buildCookieHeader(cookies: Map<String, String>): Map<String, String> {
+    val value = cookies.entries
+        .filter { it.value.isNotBlank() }
+        .joinToString("; ") { "${it.key}=${it.value}" }
+    return if (value.isBlank()) emptyMap() else mapOf("Cookie" to value)
+}
 
     // -----------------------------------------------------------------
     // Legacy fallback (old button[data-embed] / iframe layout)
@@ -679,6 +695,15 @@ class Animezid : MainAPI() {
         return host.contains("animezid.cam") ||
                 host.contains("animezid.com") ||
                 host.contains("animezid.net")
+    }
+
+    /** Map embed hosts to domains handled by Cloudstream's built-in extractors. */
+    private fun normalizeEmbedUrl(url: String): String {
+        // uqload accepts the same embed id on any uqload domain;
+        // uqload.com is handled by Cloudstream's built-in Uqload extractor.
+        return url
+            .replace("uqload.vc", "uqload.com")
+            .replace("uqload.to", "uqload.com")
     }
 
     private fun getHostFromUrl(url: String): String {

@@ -117,7 +117,12 @@ Cloudstream App
 ### 2. البحث (`search`)
 
 يرسل طلب إلى `search.php?keywords=<query>` ويحلل النتائج بنفس محددات الكروت.
-إذا كان الرابط يحتوي `/series/` فيُعالج كمسلسل (يُختم ببادئة `SERIES::`)، وإلا كفيلم/حلقة.
+إذا كان الرابط يحتوي `/series/` فيُعالج كمسلسل، وإلا كفيلم/حلقة. الكروت تُمرَّر
+بعنوانها المطلق (`https://animezid.cam/series/...` أو `.../watch.php?vid=...`)
+دون أي بادئة — لأن Cloudstream يمرّر روابط `new*SearchResponse` عبر `fixUrl()` الذي
+يشوّه أي بادئة غير مبدوءة بـ `http` (فمثلاً `SERIES::https://...` تتحوّل إلى
+`https://animezid.cam/SERIES::https://...` → 404 عند الضغط). ولهذا يُعتمد على وجود
+`/series/` داخل الرابط نفسه للتمييز.
 
 ### 3. تحميل التفاصيل (`load`)
 
@@ -146,18 +151,29 @@ Cloudstream App
 الموقع الآن يحمي السيرفرات خلف واجهة برمجية. التدفق:
 
 1. `GET play.php?vid=XXX` → استخراج `data-playback-csrf` و `data-video-uniq`
-   (مع حفظ كوكيز الجلسة من الاستجابة).
+   مع حفظ **كوكيز الجلسة** من الاستجابة (`PHPSESSID` + `watched_video_list`).
 2. `POST https://animezid.cam/web-playback/sessions` (هيدرات
-   `Content-Type: application/json` + `X-Playback-CSRF` + `Origin`/`Referer`،
-   جسم `{"content_id": vid}`) → `session_id` + قائمة `sources[]`.
+   `Content-Type: application/json` + `X-Playback-CSRF` + `Origin`/`Referer` +
+   **`Cookie` صريح** من الخطوة 1، جسم `{"content_id": vid}`)
+   → `session_id` + قائمة `sources[]`.
+
+   > ⚠️ كوكيز `play.php` **إلزامي** ولا يوفّرها Cloudstream تلقائياً: كائن
+   > `app` في Cloudstream هو `NiceHttp.Requests` بلا CookieJar، لذا بدون تمرير
+   > `Cookie` يدوي ستعيد `sessions` و `resolve` كود `403 {"error":"forbidden"}`
+   > ويظهر "no link found". تُبنى من `buildCookieHeader()` ثم تمرر عبر
+   > `playbackHeaders(csrf, referer, cookies)`.
+
 3. لكل مصدر من نوع `embedded_web`: `POST .../sessions/{sid}/sources/{srcId}/resolve`
    → `launch_url`.
-4. `GET launch_url` (تتبع إعادة التوجيه) → عنوان المستضيف الحقيقي (Uqload، DoodStream،
-   StreamWish، MegaMax، StreamRuby، إلخ).
-5. تمرير العنوان لـ `loadExtractor()`، وإن فشل تُجرَّب استخراج عامة لرابط
+4. `GET launch_url` (تتبع إعادة التوجيه، مع الكوكيز والـ Referer) → عنوان المستضيف
+   الحقيقي (Uqload، DoodStream، StreamWish، MegaMax، StreamRuby، إلخ).
+5. `normalizeEmbedUrl()` يقرّب المستضيفات إلى نطاقات يدعمها extractor مدمج:
+   `uqload.vc` / `uqload.to` → `uqload.com` (نفس الـ embed id على كل نطاقات uqload)،
+   ثم يمرّر العنوان لـ `loadExtractor()`، وإن فشل تُجرَّب استخراج عامة لرابط
    `m3u8`/`mp4` من صفحة الـ embed، وإلا تسجيل رابط احتياطي.
 
-نقاط قوة التنفيذ: إعادة المحاولة مع تأخير متصاعد عند `403` (الموقع يفرض rate-limit)،
+نقاط قوة التنفيذ: إعادة المحاولة مع تأخير متصاعد عند `403`/`429` (الموقع يفرض
+rate-limit)،
 تجاهل مصادر التحميل (`download`) واكتفاء بـ `embedded_web`، وتجاهل الروابط التي
 تعيد التوجيه إلى animezid نفسه. وإذا لم تتوفر توكنات `data-playback-*` فتُستخدم
 محاولة قديمة عبر `button[data-embed]` و `iframe[src]`.
@@ -242,14 +258,19 @@ https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json
 
 ### آلية التمييز بين المسلسل والفيلم
 
-في نتائج البحث والقوائم تُستخدم بادئة `SERIES::` لتمييز الكروت التي تؤدي إلى
-صفحة مسلسل كاملة (`/series/{slug}/`) عن روابط المشاهدة المباشرة. كما تُفحص
-صفحة `watch.php` نفسها: وجود تبويبات المواسم `a[data-season-link]` يعني مسلسلاً،
-وغيابها يعني فيلماً.
+في نتائج البحث والقوائم يُمرَّر الرابط المطلق مباشرة (بدون بادئة) ويتم التمييز
+بفحص محتوى الرابط: وجود `/series/` يعني مسلسلاً، ووجود `watch.php` يعني صفة
+مشاهدة مباشرة. كما تُفحص صفحة `watch.php` نفسها: وجود تبويبات المواسم
+`a[data-season-link]` يعني مسلسلاً، وغيابها يعني فيلماً.
+
+> ملاحظة: لا تُستخدم بادئة مثل `SERIES::` أبداً في نتائج البحث — Cloudstream يمرّر
+> روابط `new*SearchResponse` عبر `fixUrl()` الذي يضيف `mainUrl + "/"` لأي رابط لا
+> يبدأ بـ `http`، فيتحول `SERIES::https://...` إلى
+> `https://animezid.cam/SERIES::https://...` (رابط مكسور يعطي 404 عند الضغط).
 
 ```kotlin
 // في toSearchResponse()
-val loadUrl = if (isSeriesLink) "SERIES::$absHref" else absHref
+val loadUrl = absHref   // URL مطلق مباشرة، بلا بادئة
 
 // في load() — dispatch
 when {
