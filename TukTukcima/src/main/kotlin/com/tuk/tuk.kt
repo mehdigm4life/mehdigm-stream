@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
+import org.jsoup.select.Elements
 
 import java.net.URLEncoder
 import kotlinx.coroutines.async
@@ -132,51 +133,53 @@ class TukTukHd : MainAPI() {
         val isSeries = doc.select(".allepcont, .allseasonss").isNotEmpty()
 
         if (isSeries) {
-            val episodesList = ArrayList<Episode>()
+            val episodesByUrl = LinkedHashMap<String, Episode>()
             val seasonElements = doc.select(".allseasonss .Block--Item a")
 
+            fun addEpisodes(epElements: List<Element>, seasonNum: Int) {
+                epElements.forEach { ep ->
+                    val epHref = fixUrl(ep.attr("href"))
+                    if (epHref.isBlank() || episodesByUrl.containsKey(epHref)) return@forEach
+                    val epTitle = ep.select(".ep-info h2").text()
+                    if (epTitle.isBlank()) return@forEach
+                    val epNum = ep.select(".epnum").text().filter { it.isDigit() }.toIntOrNull()
+                        ?: Regex("(?:الحلقة|episode|EP)[- _]?(\\d+)", RegexOption.IGNORE_CASE)
+                            .find(epTitle + " " + epHref)?.groupValues?.get(1)?.toIntOrNull()
+                    val epThumb = ep.select("img").attr("data-src")
+                        .ifEmpty { ep.select("img").attr("src") }
+
+                    episodesByUrl[epHref] = newEpisode(epHref) {
+                        this.name = epTitle
+                        episode = epNum
+                        season = seasonNum
+                        posterUrl = epThumb
+                    }
+                }
+            }
+
             if (seasonElements.isNotEmpty()) {
-                seasonElements.amap { seasonEl ->
+                val seasonResults = seasonElements.amap { seasonEl ->
                     val seasonUrl = fixUrl(seasonEl.attr("href"))
                     val seasonName = seasonEl.select("h3").text()
                     val seasonNum = seasonName.filter { it.isDigit() }.toIntOrNull() ?: 1
 
-                    val seasonDoc = app.get(seasonUrl).document
-                    seasonDoc.select(".allepcont a").forEach { ep ->
-                        val epTitle = ep.select(".ep-info h2").text()
-                        val epHref = fixUrl(ep.attr("href"))
-                        val epNum = ep.select(".epnum").text().filter { it.isDigit() }.toIntOrNull()
-                        val epThumb = ep.select("img").attr("data-src")
-                            .ifEmpty { ep.select("img").attr("src") }
-
-                        episodesList.add(
-                            newEpisode(epHref) {
-                                this.name = epTitle
-                                episode = epNum
-                                season = seasonNum
-                                posterUrl = epThumb
-                            }
-                        )
+                    val episodeTags = runCatching {
+                        app.get(seasonUrl).document.select(".allepcont a")
+                    }.getOrDefault(emptyList<Element>())
+                    Pair(seasonNum, episodeTags)
+                }
+                seasonResults.forEach { (seasonNum, episodeTags) ->
+                    addEpisodes(episodeTags, seasonNum)
+                }
+                if (episodesByUrl.isEmpty()) {
+                    doc.select(".allepcont a").forEach { ep ->
+                        addEpisodes(listOf(ep), 1)
                     }
                 }
             } else {
-                doc.select(".allepcont a").forEach { ep ->
-                    val epTitle = ep.select(".ep-info h2").text()
-                    val epHref = fixUrl(ep.attr("href"))
-                    val epNum = ep.select(".epnum").text().filter { it.isDigit() }.toIntOrNull()
-                    val epThumb = ep.select("img").attr("data-src").ifEmpty { ep.select("img").attr("src") }
-
-                    episodesList.add(
-                        newEpisode(epHref) {
-                            this.name = epTitle
-                            this.episode = epNum
-                            this.season = 1
-                            this.posterUrl = epThumb
-                        }
-                    )
-                }
+                addEpisodes(doc.select(".allepcont a"), 1)
             }
-            val sortedEpisodes = episodesList.sortedWith(compareBy({ it.season }, { it.episode }))
+            val sortedEpisodes = episodesByUrl.values.sortedWith(compareBy({ it.season }, { it.episode }))
 
             return newTvSeriesLoadResponse(cleanTitle, url, TvType.TvSeries, sortedEpisodes) {
                 this.posterUrl = poster
