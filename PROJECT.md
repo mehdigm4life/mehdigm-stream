@@ -169,8 +169,17 @@ Cloudstream App
    الحقيقي (Uqload، DoodStream، StreamWish، MegaMax، StreamRuby، إلخ).
 5. `normalizeEmbedUrl()` يقرّب المستضيفات إلى نطاقات يدعمها extractor مدمج:
    `uqload.vc` / `uqload.to` → `uqload.com` (نفس الـ embed id على كل نطاقات uqload)،
-   ثم يمرّر العنوان لـ `loadExtractor()`، وإن فشل تُجرَّب استخراج عامة لرابط
-   `m3u8`/`mp4` من صفحة الـ embed، وإلا تسجيل رابط احتياطي.
+   ثم يمرّر العنوان لـ `loadExtractor()`، وإن فشل تُجرَّب استخراج من صفحة الـ embed
+   عبر `tryProviderExtract()`:
+   - **`decodePacker()`**: يفكّ حزم Dean Edwards
+     `eval(function(p,a,c,k,e,d)...)` التي تعتمدها عائلات Uqload/StreamRuby/StreamWish
+     (الرابط الموقّع `master.m3u8` يظهر فقط بعد الفك)،
+   - ثم تعبيرات `m3u8`/`mp4` مباشرة (يغطّي TurboViPlay وكل صفحة فيها رابط تدفق صريح)،
+   وإلا تسجيل رابط احتياطي.
+
+> ملاحظة: روابط هذا الجيل موقّعة ومرتبطة بالـ IP/ASN؛ CDN مثل `streamruby.net`
+> يرد `403` على عناوين مراكز البيانات، لذا يتحقق الاختبار المحلي من وجود الرابط
+> الموقّع في الصفحة المفكوكة لا من تشغيله على نفس الجهاز.
 
 نقاط قوة التنفيذ: إعادة المحاولة مع تأخير متصاعد عند `403`/`429` (الموقع يفرض
 rate-limit)،

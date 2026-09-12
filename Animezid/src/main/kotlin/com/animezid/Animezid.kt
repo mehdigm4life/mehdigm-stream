@@ -507,9 +507,10 @@ class Animezid : MainAPI() {
                 // ignore
             }
 
-            // 4) Generic m3u8/mp4 extraction from embed page
+            // 4) Provider-aware m3u8/mp4 extraction from embed page
+            //    (direct regex + packed-JS decode for Uqload/StreamRuby/StreamWish...)
             if (!extracted) {
-                extracted = tryGenericExtract(finalUrl, providerName, playUrl, callback)
+                extracted = tryProviderExtract(finalUrl, providerName, playUrl, callback)
             }
 
             // 5) Last resort: raw link (won't play for SPA hosts, but keeps menu populated)
@@ -537,25 +538,36 @@ class Animezid : MainAPI() {
         return found
     }
 
-    /** Generic regex extraction of m3u8/mp4 URLs from an embed page. */
-    private suspend fun tryGenericExtract(
+    /** Regex extraction of m3u8/mp4 URLs from an embed page.
+     *  Handles direct URLs and Dean Edwards (p,a,c,k,e,d) packed-JS pages
+     *  used by Uqload, StreamRuby/cdn, StreamWish, TurboViPlay etc. */
+    private suspend fun tryProviderExtract(
         embedUrl: String,
         providerName: String,
         referer: String,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val text = try {
+        val rawText = try {
             val resp = app.get(embedUrl, headers = pageHeaders(referer), referer = referer)
             resp.text
         } catch (_: Exception) {
             return false
         }
 
-        // Prefer HLS
-        val m3u8 = Regex("""https?://[^"'<>\s]+\.m3u8[^"'<>\s]*""")
-            .find(text)?.value
+        val decodePacked = decodePacker(rawText)
+        val texts = listOfNotNull(rawText, decodePacked)
+
+        val host = getHostFromUrl(embedUrl)
+
+        // Prefer HLS (signed/plain), then direct mp4; dedupe across variants.
+        val m3u8Set = linkedSetOf<String>()
+        for (t in texts) {
+            Regex("""https?://[^"'<>\s]+\.m3u8[^"'<>\s]*""")
+                .findAll(t)
+                .forEach { m3u8Set.add(it.value) }
+        }
+        val m3u8 = m3u8Set.firstOrNull()
         if (m3u8 != null) {
-            val host = getHostFromUrl(embedUrl)
             callback(
                 newExtractorLink(
                     source = this.name,
@@ -563,7 +575,6 @@ class Animezid : MainAPI() {
                     url = m3u8,
                     type = ExtractorLinkType.M3U8
                 ) {
-                    this.referer = host
                     this.quality = Qualities.Unknown.value
                     this.headers = mapOf(
                         "User-Agent" to browserUA,
@@ -576,8 +587,13 @@ class Animezid : MainAPI() {
         }
 
         // Fallback: direct mp4
-        val mp4 = Regex("""https?://[^"'<>\s]+\.mp4[^"'<>\s]*""")
-            .find(text)?.value
+        val mp4Set = linkedSetOf<String>()
+        for (t in texts) {
+            Regex("""https?://[^"'<>\s]+\.mp4[^"'<>\s]*""")
+                .findAll(t)
+                .forEach { mp4Set.add(it.value) }
+        }
+        val mp4 = mp4Set.firstOrNull()
         if (mp4 != null) {
             callback(
                 newExtractorLink(
@@ -586,15 +602,52 @@ class Animezid : MainAPI() {
                     url = mp4,
                     type = ExtractorLinkType.VIDEO
                 ) {
-                    this.referer = embedUrl
                     this.quality = Qualities.Unknown.value
-                    this.headers = mapOf("User-Agent" to browserUA)
+                    this.headers = mapOf(
+                        "User-Agent" to browserUA,
+                        "Referer" to embedUrl
+                    )
                 }
             )
             return true
         }
 
         return false
+    }
+
+    /** Decode a Dean Edwards packer: eval(function(p,a,c,k,e,d){...})('PAYLOAD',a,c,'KEY...'.split('|'),...)
+     *  Returns the unpacked JavaScript source, or null when not a packer. */
+    private fun decodePacker(html: String): String? {
+        val start = html.indexOf("function(p,a,c,k,e,d)")
+        if (start < 0) return null
+
+        val tail = html.substring(start)
+        val matcher = Regex(
+            """\((['"])(.*?)\1,\s*(\d+),(\d+),\s*['\"]([^'\"]*)['\"]\.split\(['\"]\|['\"]\)""",
+            RegexOption.DOT_MATCHES_ALL
+        ).find(tail) ?: return null
+
+        val payload = matcher.groupValues[2]
+        val radix = matcher.groupValues[3].toIntOrNull() ?: return null
+        val count = matcher.groupValues[4].toIntOrNull() ?: return null
+        val keys = matcher.groupValues[5].split("|")
+
+        if (payload.isEmpty() || radix !in 2..36 || count < 1) return null
+
+        var out = payload
+        for (i in (count - 1) downTo 0) {
+            val symbol = packerSymbol(i, radix)
+            val key = keys.getOrNull(i) ?: continue
+            out = Regex("\\b" + Regex.escape(symbol) + "\\b")
+                .replace(out) { key }
+        }
+        return out
+    }
+
+    /** Base-`radix` word representation used by the packer (like JS toString(radix)). */
+    private fun packerSymbol(value: Int, radix: Int): String {
+        if (value < radix) return Integer.toString(value, radix)
+        return packerSymbol(value / radix, radix) + Integer.toString(value % radix, radix)
     }
 
     /** Retry POST with exponential back-off (for 403 / rate-limit). */
