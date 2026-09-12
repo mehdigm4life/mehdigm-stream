@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -97,15 +98,15 @@ class Animhq : MainAPI() {
     // Item parsing (cards in lists)
     // ---------------------------------------------------------------
 
-    /**
+/**
      * يحوّل عنصر قائمة إلى SearchResponse. يدعم النموذجين:
      *  1) <li class="singleBB"><a title href><img><h3>Title</h3><span>..</span></a></li>
      *     (يستخدمه AJAX في الرئيسية)
      *  2) <div class="poster-img-container">
      *        <div class="poster-img" data-src="...">
      *        <a class="poster-wrapper" href="...">
-     *        <div class="poster-info-under"><h3>Title</h3>...
-     *     (يستخدمه التصنيفات والبحث)
+     *     <div class="poster-info-under"><h3>Title</h3>...
+     *     (يستخدمه التصنيفات والبحث وapi.php)
      */
     private fun Element.toSearchResponse(): SearchResponse? {
         val anchor = selectFirst("a.poster-wrapper")
@@ -124,11 +125,7 @@ class Animhq : MainAPI() {
             ).adjustEntities().trim()
         if (title.isBlank()) return null
 
-        val posterUrl = img?.let { el ->
-            listOf("data-src", "src", "data-image")
-                .map { el.attr(it).trim() }
-                .firstOrNull { it.isNotBlank() && !it.startsWith("data:") }
-        }
+        val posterUrl = extractPosterUrl()
 
         val type = when {
             url.contains("/movie/") -> TvType.Movie
@@ -139,6 +136,37 @@ class Animhq : MainAPI() {
         return newMovieSearchResponse(title, url, type) {
             this.posterUrl = posterUrl
         }
+    }
+
+    /**
+     * استخراج صورة البوستر من عدة مصادر:
+     *  - <img data-src>/<img src>
+     *  - <div class="poster-img" data-src="..."> (يُستخدم في التصنيفات وبطاقات api.php)
+     *  - style="...background(-image): url(...); ..."
+     *  - خصائص الحاوية .poster-img-container أو البطاقة نفسها
+     */
+    private fun Element.extractPosterUrl(): String? {
+        val candidates = sequenceOf(
+            selectFirst("img[data-src]"),
+            selectFirst("img[src]"),
+            selectFirst(".poster-img[data-src]"),
+            selectFirst(".poster-img[style]"),
+            this
+        )
+        for (el in candidates) {
+            if (el == null) continue
+            val value = listOf("data-src", "src")
+                .map { el.attr(it).trim() }
+                .firstOrNull { it.isNotBlank() && !it.startsWith("data:") && it != "#" }
+            if (value != null) return value
+            val style = el.attr("style")
+            if (style.isNotBlank()) {
+                Regex("""url\(['"]?([^'")]+)['"]?\)""")
+                    .find(style)?.groupValues?.getOrNull(1)
+                    ?.takeIf { it.startsWith("http") }?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun Document.extractPosterCards(): List<SearchResponse> {
@@ -155,13 +183,20 @@ class Animhq : MainAPI() {
     // Main page
     // ---------------------------------------------------------------
 
-    override val mainPage = mainPageOf(
-        "${mainUrl}/wp-content/themes/animhq/Ajax/Home/last-posts.php?x&page=" to "مضاف حديثاً",
-        "${mainUrl}/wp-content/themes/animhq/Ajax/Home/most-views.php?x&page=" to "الأكثر مشاهدة",
-        "${mainUrl}/wp-content/themes/animhq/Ajax/Home/most-download.php?x&page=" to "الأكثر تحميلاً",
+    private val apiUrl = "$mainUrl/wp-content/themes/animhq/api.php"
+
+    private fun apiRow(req: String, name: String): MainPageData =
+        MainPageData(name, "$apiUrl|$req", false)
+
+    override val mainPage: List<MainPageData> = buildList {
+        add(apiRow("getEnded", "مكتملة"))
+        add(apiRow("getEps", "حلقات حديثة"))
+        add(apiRow("getMovies", "أفلام"))
+        add(apiRow("getTopRated", "الأعلى تقييماً"))
+        add(apiRow("getFree", "شاهد مجاناً"))
+    } + mainPageOf(
         "$mainUrl/category/movies/?c=all&c2=series&y=all&ot=all&page=" to "مسلسلات أنمي",
         "$mainUrl/category/movies/?c=all&c2=movies&y=all&ot=all&page=" to "أفلام أنمي",
-        "$mainUrl/category/free/?page=" to "شاهد مجاناً",
         "$mainUrl/category/action/?page=" to "أكشن",
         "$mainUrl/category/fantasy/?page=" to "فنتازيا",
         "$mainUrl/category/isekai/?page=" to "إسيكاي",
@@ -169,7 +204,35 @@ class Animhq : MainAPI() {
         "$mainUrl/category/supernatural/?page=" to "خارق للطبيعة"
     )
 
+    private suspend fun fetchApiRow(req: String, page: Int): List<SearchResponse> {
+        val body = app.post(
+            apiUrl,
+            data = mapOf(
+                "req" to req,
+                "page" to page.toString(),
+                "perPage" to "24"
+            ),
+            headers = baseHeaders,
+            referer = "$mainUrl/",
+            timeout = 45
+        ).text
+        val content = try {
+            JSONObject(body).getString("content")
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return Jsoup.parse(content.adjustEntities())
+            .select(".swiper-slide.flex-item, .poster-img-container")
+            .mapNotNull { it.toSearchResponse() }
+            .distinctBy { it.url }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val marker = request.data.substringBefore('|')
+        if (marker == apiUrl) {
+            val req = request.data.substringAfter('|')
+            return newHomePageResponse(request.name, fetchApiRow(req, page))
+        }
         val url = request.data + page
         val doc = if (url.contains(".php")) {
             postPage(url)
@@ -325,7 +388,41 @@ class Animhq : MainAPI() {
             val clean = page.html().adjustEntities()
             var emitted = false
 
+            // مسارات مباشرة: /stream/ (تشغيل) و /download/ (نسخة التحميل)
+            val candidates = mutableListOf<String>()
+            page.select("span[dld], input[dld], span[data-src], input[data-src]")
+                .forEach { el ->
+                    val raw = el.attr("dld").ifBlank { el.attr("data-src") }
+                    if (raw.startsWith("http")) candidates.add(raw)
+                }
+
             val seen = mutableSetOf<String>()
+            candidates.takeIf { it.isNotEmpty() }?.forEach { link ->
+                if (!seen.add(link)) return@forEach
+                if (!link.contains("/stream/") && !link.contains("/download/")) return@forEach
+                runCatching {
+                    callback(
+                        newExtractorLink(
+                            source = this.name,
+                            name = if (link.contains("/download/")) "$name تحميل" else "$name مباشر",
+                            url = link,
+                            type = ExtractorLinkType.VIDEO
+                        ) {
+                            this.quality = Qualities.Unknown.value
+                            this.headers = mapOf(
+                                "User-Agent" to browserUA,
+                                "Referer" to embedPageUrl,
+                                "Origin" to mainUrl
+                            )
+                        }
+                    )
+                    emitted = true
+                    foundAny = true
+                }
+            }
+            if (emitted) return true
+
+            // فحص شامل للنص (بعض الصفحات قد تضع الرابط مباشرة)
             Regex("""https?://[^"'\s<>]+""").findAll(clean).forEach { match ->
                 val link = match.value
                 if (!link.contains("/stream/")) return@forEach

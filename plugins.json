@@ -13,11 +13,11 @@
       "Anime",
       "Movie"
     ],
-    "version": 1,
+    "version": 2,
     "internalName": "Animhq",
     "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animhq.cs3",
     "name": "Animhq (أنمي إتش كيو)",
-    "description": "شاهد وتحميل الأنمي مترجم بجودات عالية — مشاهدة مباشرة بدقة عالية."
+    "description": "شاهد الأنمي مترجم — بوسترات ورئيسية عبر api، تشغيل مباشر للحلقات المجانية."
   },
   {
     "iconUrl": "https://animezid.cam/uploads/custom-logo.png",
