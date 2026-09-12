@@ -96,46 +96,71 @@ Cloudstream App
 
 ### 1. الصفحة الرئيسية (`getMainPage`)
 
-يجلب الإضافة محتوى من 6 أقسام على موقع animezid.cam:
+يجلب الإضافة محتوى من 8 أقسام على موقع animezid.cam:
 
 | القسم | الرابط |
 |-------|--------|
-| الأنمي | `/category.php?cat=anime` |
-| الأفلام | `/category.php?cat=movies` |
-| المسلسلات | `/category.php?cat=series` |
+| أحدث حلقات الأنمي | `/category.php?cat=new-anime-eps` |
+| أحدث الحلقات | `/category.php?cat=new-eps` |
+| أفلام الأنمي | `/category.php?cat=anime-movies` |
+| أفلام الأنيميشن المدبلجة | `/category.php?cat=dubbed-animation` |
 | ديزني بالمصري | `/category.php?cat=disney-masr` |
 | سبيستون | `/category.php?cat=spacetoon` |
+| أحدث الأفلام | `/category.php?cat=new-movies` |
 | الأكثر مشاهدة | `/topvideos.php` |
 
-يستخرج الكروت (صورة + عنوان + رابط) من عناصر `div#movies a.movie` و `div.movies a.movie`.
+يستخرج الكروت (صورة + عنوان + رابط) من عناصر:
+`a.az-card__link` (الأقسام والبحث) و `a.az-showcase-card__link` (الواجهة الرئيسية).
+كل كارت يحمل: `.az-card__title` (العنوان)، `img[src]` (البوستر)، وشارات مثل
+`.az-badge--episode strong` (رقم الحلقة) و `.az-badge--rating` (التقييم).
 
 ### 2. البحث (`search`)
 
-يرسل طلب إلى `search.php?keywords=<query>` و يحلل النتائج بنفس طريقة الصفحة الرئيسية.
+يرسل طلب إلى `search.php?keywords=<query>` ويحلل النتائج بنفس محددات الكروت.
+إذا كان الرابط يحتوي `/series/` فيُعالج كمسلسل (يُختم ببادئة `SERIES::`)، وإلا كفيلم/حلقة.
 
 ### 3. تحميل التفاصيل (`load`)
 
-تتعامل الدالة مع حالتين:
+يحدد المسار حسب نوع الرابط:
 
-#### أ. مسلسل (متعدد الحلقات)
-إذا كان الرابط يبدأ بالبادئة `SERIES::` أو كان رابط تصنيف (`category.php?cat=...`):
-- تجلب الإضافة الصفحة الأولى من الحلقات
-- تستمر في التصفح عبر الصفحات اللاحقة (حتى 100 صفحة)
-- تستخرج رقم الحلقة من النص العربي مثل **"الحلقة 31"**
-- ترتب الحلقات تصاعدياً (الموقع يعرض الأحدث أولاً)
-- تعيد كائن `AnimeLoadResponse` مع قائمة الحلقات
+#### أ. صفحة مسلسل `/series/{slug}/` (معامل `SERIES::`)
+- يقرأ العنوان والبوستر والقصة من وسوم `og:title / og:image / og:description`.
+- يجمع روابط المواسم من `a.az-card__link[href$=/season/N/]` الموجودة في الصفحة.
+- لكل موسم يطحلب صفحات الجزء بلا فوضى عبر `?ajax=episodes&page=N` (يُرسل مع
+  الهيدر `X-Requested-With: XMLHttpRequest`) ويستخرج الحلقات من
+  `div.az-series-episode-grid-item` (مع `data-episode-number`).
+- يتوقف عند تكرار الدفعات (بعد آخر صفحة يعيد الموقع نفس الدفعة) أو عند الوصول
+  للحد الأقصى من الصفحات، ثم يرتب النتائج بمفاتيح (الموسم، رقم الحلقة).
 
-#### ب. فيلم / حلقة واحدة
-إذا كان الرابط من نوع `watch.php?vid=...`:
-- تستخرج العنوان، الملصق، القصة، السنة، التقييم، والتصنيفات (tags)
-- تحدد إذا كان المحتوى فيلم أم حلقة أنمي بناءً على العنوان والتصنيفات
-- تعيد `MovieLoadResponse` أو `AnimeLoadResponse` حسب النوع
+#### ب. صفحة مشاهدة `watch.php?vid=...`
+- إذا وجدت تبويبات المواسم `nav.az-cinema-season-tabs a[data-season-link]`
+  (تحمل `data-season` و `data-season-count` والموسم الحالي) فالمحتوى مسلسل:
+  - الحلقات الظاهرة في `div.az-cinema-episode-grid` تُضاف مباشرة.
+  - المواسم الأخرى (أو ناقص الموسم النشط) تُستكمل عبر نفس AJAX pagination.
+  - يُقرأ العنوان من `h1`، البوستر من `figure.az-cinema-poster img`، القصة من
+    `p.az-cinema-summary`، والسنة/النوع/البلد/الترجمة من `ul.az-cinema-meta li`.
+- إذا لم توجد تبويبات مواسم فالمحتوى فيلم → `MovieLoadResponse`.
 
 ### 4. تحميل روابط التشغيل (`loadLinks`)
 
-- تحوّل رابط `watch.php?vid=XXX` إلى `play.php?vid=XXX`
-- تبحث عن قائمة السيرفرات في `<ul id="xservers"> <button data-embed="...">`
-- تستخدم `loadExtractor()` من Cloudstream للتعامل مع مشغّلات الفيديو المختلفة (Google Drive, Upstream, إلخ)
+الموقع الآن يحمي السيرفرات خلف واجهة برمجية. التدفق:
+
+1. `GET play.php?vid=XXX` → استخراج `data-playback-csrf` و `data-video-uniq`
+   (مع حفظ كوكيز الجلسة من الاستجابة).
+2. `POST https://animezid.cam/web-playback/sessions` (هيدرات
+   `Content-Type: application/json` + `X-Playback-CSRF` + `Origin`/`Referer`،
+   جسم `{"content_id": vid}`) → `session_id` + قائمة `sources[]`.
+3. لكل مصدر من نوع `embedded_web`: `POST .../sessions/{sid}/sources/{srcId}/resolve`
+   → `launch_url`.
+4. `GET launch_url` (تتبع إعادة التوجيه) → عنوان المستضيف الحقيقي (Uqload، DoodStream،
+   StreamWish، MegaMax، StreamRuby، إلخ).
+5. تمرير العنوان لـ `loadExtractor()`، وإن فشل تُجرَّب استخراج عامة لرابط
+   `m3u8`/`mp4` من صفحة الـ embed، وإلا تسجيل رابط احتياطي.
+
+نقاط قوة التنفيذ: إعادة المحاولة مع تأخير متصاعد عند `403` (الموقع يفرض rate-limit)،
+تجاهل مصادر التحميل (`download`) واكتفاء بـ `embedded_web`، وتجاهل الروابط التي
+تعيد التوجيه إلى animezid نفسه. وإذا لم تتوفر توكنات `data-playback-*` فتُستخدم
+محاولة قديمة عبر `button[data-embed]` و `iframe[src]`.
 
 ---
 
@@ -217,27 +242,41 @@ https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json
 
 ### آلية التمييز بين المسلسل والفيلم
 
-تستخدم الإضافة بادئة `SERIES::` لتمييز روابط التصنيفات (التي تمثل مسلسلات متعددة الحلقات) عن روابط المشاهدة المباشرة:
+في نتائج البحث والقوائم تُستخدم بادئة `SERIES::` لتمييز الكروت التي تؤدي إلى
+صفحة مسلسل كاملة (`/series/{slug}/`) عن روابط المشاهدة المباشرة. كما تُفحص
+صفحة `watch.php` نفسها: وجود تبويبات المواسم `a[data-season-link]` يعني مسلسلاً،
+وغيابها يعني فيلماً.
 
 ```kotlin
 // في toSearchResponse()
 val loadUrl = if (isSeriesLink) "SERIES::$absHref" else absHref
 
-// في load()
-val isSeries = url.startsWith("SERIES::") || (...)
+// في load() — dispatch
+when {
+    clean.contains("/series/") -> buildSeriesFromSeriesPage(clean)
+    clean.contains("watch.php") -> {
+        val hasSeasonTabs = doc.selectFirst("nav.az-cinema-season-tabs a[data-season-link]") != null
+        if (hasSeasonTabs) buildSeriesFromWatchPage(clean, doc)
+        else buildMovieFromWatchPage(clean, doc)
+    }
+    ...
+}
 ```
 
 ### استخراج رقم الحلقة
 
-تستخدم الـ Regex لاستخراج رقم الحلقة من النص العربي:
-
-```kotlin
-val epNum = Regex("الحلقة\\s*(\\d+)").find(name)?.groupValues?.get(1)?.toIntOrNull()
-```
+رقم الحلقة يُقرأ من الخاصية `data-episode-number` على عنصر
+`div.az-series-episode-grid-item` (أرقام قد تكون عشرية مثل `1122.5`)، أو من
+`strong` داخل `a[role=listitem]` في شبكة الحلقات الظاهرة، مع استخراج فعلي
+كبديل عبر regex.
 
 ### دعم السيرفرات المتعددة
 
-كل حلقة يمكن أن تحتوي على عدة سيرفرات. الإضافة تسحب كل `data-embed` من `ul#xservers` وتمررها إلى `loadExtractor()`.
+كل حلقة تحوي عدة سيرفرات تُجلب من واجهة `web-playback` المحمية (POST sessions →
+POST resolve لكل مصدر `embedded_web` → تتبع إعادة التوجيه إلى الـ embed). تمرر
+الروابط إلى `loadExtractor()` لدعم حاضنات الإضافة التلقائية (Uqload, Dood,
+StreamWish, FileMoon ...)، مع استخراج عام للـ m3u8/MP4 كبديل للسيرفرات غير
+المعروفة، وإعادة محاولة مع backoff عند أي `403`.
 
 ---
 
