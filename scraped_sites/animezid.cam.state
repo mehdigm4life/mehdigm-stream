@@ -1,0 +1,18 @@
+{
+  "visited": [],
+  "queue": [],
+  "failed": [
+    "https://animezid.cam/"
+  ],
+  "pages_fetched": 0,
+  "pages_playwright": 0,
+  "pages_cloudscraper": 0,
+  "total_bytes": 0,
+  "start_time": 1789227248.671572,
+  "tracked_domains": [
+    "animezid.cam"
+  ],
+  "depth_map": {
+    "https://animezid.cam/": 0
+  }
+}
