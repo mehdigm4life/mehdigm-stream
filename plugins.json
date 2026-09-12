@@ -1,5 +1,25 @@
 [
   {
+    "iconUrl": "https://animhq.com/wp-content/uploads/2023/06/cropped-fav-01.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 0,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "mehdigm4life"
+    ],
+    "tvTypes": [
+      "Anime",
+      "Movie"
+    ],
+    "version": 1,
+    "internalName": "Animhq",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animhq.cs3",
+    "name": "Animhq (أنمي إتش كيو)",
+    "description": "شاهد وتحميل الأنمي مترجم بجودات عالية — مشاهدة مباشرة بدقة عالية."
+  },
+  {
     "iconUrl": "https://animezid.cam/uploads/custom-logo.png",
     "apiVersion": 1,
     "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",

@@ -9,6 +9,7 @@
 
 | الإضافة | الموقع | النوع | الكود المصدري |
 |---------|--------|-------|---------------|
+| **Animhq (أنمي إتش كيو)** | [animhq.com](https://animhq.com) | أنمي مترجم | ✅ متوفر |
 | **Animezid (انمي زد)** | [animezid.cam](https://animezid.cam) | أنمي + كرتون مدبلج ومترجم | ✅ متوفر |
 | **FaselHD** | FaselHD | أفلام + مسلسلات | ❌ ملف .cs3 فقط |
 | **ArabSeed (عرب سيد)** | [arabseed.show](https://arabseed.show) | أفلام + مسلسلات عربية وأجنبية | ❌ ملف .cs3 فقط |
@@ -20,6 +21,13 @@
 ```
 mehdigm-stream/
 │
+├── Animhq/                           # كود إضافة Animhq
+│   ├── build.gradle.kts              # إعدادات Gradle للوحدة
+│   └── src/main/
+│       ├── AndroidManifest.xml
+│       └── kotlin/com/animhq/
+│           ├── Animhq.kt             # ⭐ منطق السكرابينغ (MainAPI)
+│           └── AnimhqPlugin.kt       # نقطة دخول الإضافة (CloudstreamPlugin)
 ├── Animezid/                          # كود إضافة Animezid (المصدر الأساسي)
 │   ├── build.gradle.kts               # إعدادات Gradle للوحدة
 │   └── src/main/
@@ -29,6 +37,7 @@ mehdigm-stream/
 │           └── AnimezidPlugin.kt      # نقطة دخول الإضافة (CloudstreamPlugin)
 │
 ├── build/                             # 📦 ملفات .cs3 الجاهزة (يستهلكها Cloudstream)
+│   ├── Animhq.cs3
 │   ├── Animezid.cs3
 │   ├── ArabSeed.cs3
 │   └── FaselHD.cs3
@@ -40,7 +49,7 @@ mehdigm-stream/
 │   └── BUILDING.md                    # دليل البناء (بالعربية)
 │
 ├── .github/workflows/
-│   ├── build.yml                      # CI: بناء تلقائي للإضافات عند كل push
+│   ├── build-*.yml                    # CI: بناء تلقائي لكل إضافة عند push
 │   └── opencode.yml                   # تشغيل OpenCode AI عبر Cloudflare tunnel
 │
 ├── build.gradle.kts                   # ⚙️ الإعدادات العامة لـ Gradle (كل الوحدات)
