@@ -24,7 +24,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 
 class TukTukHd : MainAPI() {
     override var mainUrl = "https://tuktukhd.com"
-    override var name = "TukTukcima"
+    override var name = "توك توك سينما (TukTuk)"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
