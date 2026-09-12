@@ -85,5 +85,26 @@
     "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Shahid4u.cs3",
     "name": "شاهد فور يو (Shahid4u)",
     "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والعربية والتركية والأسيوية والأنمي مدبلج ومترجم."
+  },
+  {
+    "iconUrl": "https://tuktukhd.com/wp-content/themes/TukTukCinema3/tuk.png?x50750",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+    "fileSize": 0,
+    "status": 1,
+    "language": "ar",
+    "authors": [
+      "mehdigm4life"
+    ],
+    "tvTypes": [
+      "TvSeries",
+      "Movie",
+      "Anime"
+    ],
+    "version": 1,
+    "internalName": "TukTuk",
+    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TukTuk.cs3",
+    "name": "توك توك سينما (TukTuk)",
+    "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والتركية والأنمي."
   }
 ]
