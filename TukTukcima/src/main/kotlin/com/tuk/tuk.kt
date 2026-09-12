@@ -158,15 +158,21 @@ class TukTukHd : MainAPI() {
             }
 
             if (seasonElements.isNotEmpty()) {
-                val seasonResults = seasonElements.amap { seasonEl ->
+                val seasonResults = mutableListOf<Pair<Int, List<Element>>>()
+                seasonElements.forEach { seasonEl ->
                     val seasonUrl = fixUrl(seasonEl.attr("href"))
                     val seasonName = seasonEl.select("h3").text()
                     val seasonNum = seasonName.filter { it.isDigit() }.toIntOrNull() ?: 1
 
-                    val episodeTags = runCatching {
-                        app.get(seasonUrl).document.select(".allepcont a")
-                    }.getOrDefault(emptyList<Element>())
-                    Pair(seasonNum, episodeTags)
+                    var episodeTags = emptyList<Element>()
+                    repeat(2) {
+                        episodeTags = runCatching {
+                            app.get(seasonUrl).document.select(".allepcont a")
+                        }.getOrDefault(emptyList<Element>())
+                        if (episodeTags.isNotEmpty()) return@repeat
+                    }
+                    seasonResults += Pair(seasonNum, episodeTags)
+                    delay(600)
                 }
                 seasonResults.forEach { (seasonNum, episodeTags) ->
                     addEpisodes(episodeTags, seasonNum)
