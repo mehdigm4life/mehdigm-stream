@@ -1,130 +1,130 @@
 [
-  {
-    "iconUrl": "https://animhq.com/wp-content/uploads/2023/06/cropped-fav-01.png",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "Anime",
-      "Movie"
-    ],
-    "version": 2,
-    "internalName": "Animhq",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animhq.cs3",
-    "name": "Animhq (أنمي إتش كيو)",
-    "description": "شاهد الأنمي مترجم — بوسترات ورئيسية عبر api، تشغيل مباشر للحلقات المجانية."
-  },
-  {
-    "iconUrl": "https://animezid.cam/uploads/custom-logo.png",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "Anime",
-      "AnimeMovie",
-      "Cartoon",
-      "TvSeries",
-      "Movie",
-      "OVA"
-    ],
-    "version": 4,
-    "internalName": "Animezid",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animezid.cs3",
-    "name": "Animezid (انمي زد)",
-    "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
-  },
-  {
-    "iconUrl": "https://m.arabseed.show/favicon.ico",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "TvSeries",
-      "Movie",
-      "Anime"
-    ],
-    "version": 1,
-    "internalName": "ArabSeed",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/ArabSeed.cs3",
-    "name": "عرب سيد (ArabSeed)",
-    "description": "مشاهدة وتحميل الأفلام والمسلسلات العربية والأجنبية والمترجمة."
-  },
-  {
-    "iconUrl": "https://static.faselhdcdn.com/wp-content/uploads/2022/06/logo-1.png",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "TvSeries",
-      "Movie",
-      "Anime"
-    ],
-    "version": 1,
-    "internalName": "FaselHD",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
-    "name": "فاصل إعلاني (FaselHD)",
-    "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والأنمي."
-  },
-  {
-    "iconUrl": "https://shhaiid4u.net/favicon.png?v=33",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 32243,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "TvSeries",
-      "Movie",
-      "Anime"
-    ],
-    "version": 2,
-    "internalName": "Shahid4u",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Shahid4u.cs3",
-    "name": "شاهد فور يو (Shahid4u)",
-    "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والعربية والتركية والأسيوية والأنمي مع دعم كل سيرفرات الموقع (EarnVids/FastVid/FastVed, Vinovo, Doodstream, Vidaraa, Savefiles, Streamtape, Luluvdo, Voe, OK)."
-  },
-  {
-    "iconUrl": "https://tuktukhd.com/wp-content/themes/TukTukCinema3/tuk.png?x50750",
-    "apiVersion": 1,
-    "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-    "fileSize": 0,
-    "status": 1,
-    "language": "ar",
-    "authors": [
-      "mehdigm4life"
-    ],
-    "tvTypes": [
-      "TvSeries",
-      "Movie",
-      "Anime"
-    ],
-    "version": 1,
-    "internalName": "TukTukcima",
-    "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TukTukcima.cs3",
-    "name": "توك توك سينما (TukTuk)",
-    "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والتركية والأنمي."
-  }
+ {
+  "iconUrl": "https://animhq.com/wp-content/uploads/2023/06/cropped-fav-01.png",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 0,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "Anime",
+   "Movie"
+  ],
+  "version": 2,
+  "internalName": "Animhq",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animhq.cs3",
+  "name": "Animhq (أنمي إتش كيو)",
+  "description": "شاهد الأنمي مترجم — بوسترات ورئيسية عبر api، تشغيل مباشر للحلقات المجانية."
+ },
+ {
+  "iconUrl": "https://animezid.cam/uploads/custom-logo.png",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 0,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "Anime",
+   "AnimeMovie",
+   "Cartoon",
+   "TvSeries",
+   "Movie",
+   "OVA"
+  ],
+  "version": 4,
+  "internalName": "Animezid",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Animezid.cs3",
+  "name": "Animezid (انمي زد)",
+  "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
+ },
+ {
+  "iconUrl": "https://m.arabseed.show/favicon.ico",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 0,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "TvSeries",
+   "Movie",
+   "Anime"
+  ],
+  "version": 1,
+  "internalName": "ArabSeed",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/ArabSeed.cs3",
+  "name": "عرب سيد (ArabSeed)",
+  "description": "مشاهدة وتحميل الأفلام والمسلسلات العربية والأجنبية والمترجمة."
+ },
+ {
+  "iconUrl": "https://static.faselhdcdn.com/wp-content/uploads/2022/06/logo-1.png",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 51876,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "TvSeries",
+   "Movie",
+   "Anime"
+  ],
+  "version": 2,
+  "internalName": "FaselHD",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
+  "name": "فاصل إعلاني (FaselHD)",
+  "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والأنمي."
+ },
+ {
+  "iconUrl": "https://shhaiid4u.net/favicon.png?v=33",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 32243,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "TvSeries",
+   "Movie",
+   "Anime"
+  ],
+  "version": 2,
+  "internalName": "Shahid4u",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Shahid4u.cs3",
+  "name": "شاهد فور يو (Shahid4u)",
+  "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والعربية والتركية والأسيوية والأنمي مع دعم كل سيرفرات الموقع (EarnVids/FastVid/FastVed, Vinovo, Doodstream, Vidaraa, Savefiles, Streamtape, Luluvdo, Voe, OK)."
+ },
+ {
+  "iconUrl": "https://tuktukhd.com/wp-content/themes/TukTukCinema3/tuk.png?x50750",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 0,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "TvSeries",
+   "Movie",
+   "Anime"
+  ],
+  "version": 1,
+  "internalName": "TukTukcima",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TukTukcima.cs3",
+  "name": "توك توك سينما (TukTuk)",
+  "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والتركية والأنمي."
+ }
 ]

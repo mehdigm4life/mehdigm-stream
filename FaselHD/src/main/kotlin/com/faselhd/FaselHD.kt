@@ -4,1000 +4,428 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
-import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import com.lagradost.cloudstream3.Episode
+import com.lagradost.cloudstream3.HomePageList
+import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.MainPageRequest
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.SearchResponseList
+import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.cloudstream3.newEpisode
+import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newMovieLoadResponse
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newSearchResponseList
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.M3u8Helper
+import com.lagradost.cloudstream3.utils.loadExtractor
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
-import okhttp3.CookieJar
-import okhttp3.FormBody
+import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
-import android.widget.FrameLayout
-import android.widget.TextView
-import android.graphics.Color
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.net.Uri
-import android.widget.LinearLayout
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
-import android.webkit.JavascriptInterface
-import android.widget.ScrollView
-import android.webkit.WebChromeClient
-import android.view.View
-import android.webkit.ConsoleMessage
-import android.graphics.Bitmap
-import java.io.InputStream
-import android.webkit.SslErrorHandler
-import android.widget.Toast
-import com.lagradost.cloudstream3.newMovieSearchResponse
 
 class FaselHD(private val context: Context) : MainAPI() {
+
     override var name = "FaselHD"
     override val hasQuickSearch = true
-    override var mainUrl = "https://web31312x.faselhdx.bid"
+    override var mainUrl = "https://www.fasel-hd.co/"
     override var lang = "ar"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
-    companion object {
 
-        var redirectUrl: String? = null
+    override var sequentialMainPage = true
+    override var sequentialMainPageDelay = 100L
 
-    }
-    private suspend fun baseUrl(): String {
-        redirectUrl?.let { return it }
+    private val userAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 
-        return try {
-            val response = app.get(mainUrl, allowRedirects = true)
-            val finalUrl = response.url
+    private val cloudflareKiller by lazy { CloudflareKiller() }
+    private val cfInterceptor: okhttp3.Interceptor
+        get() = cloudflareKiller
 
-            val base = try {
-                val uri = java.net.URI(finalUrl)
-                "${uri.scheme}://${uri.host}"
-            } catch (e: Exception) {
-                mainUrl
-            }
-
-            redirectUrl = base
-
-            base
-        } catch (e: Exception) {
-            mainUrl
-        }
-    }
-    private val cfLock = Mutex()
-    private var lastValidUserAgent =
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-
-
-    private fun getModernHeaders(url: String): MutableMap<String, String> {
-        val cm = CookieManager.getInstance()
-        val cookies = cm.getCookie(url) ?: ""
-        return mutableMapOf(
-            "Cookie" to cookies,
-            "User-Agent" to lastValidUserAgent,
-            "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
-            "sec-ch-ua-mobile" to "?1",
-            "sec-ch-ua-platform" to "\"Android\"",
-            "upgrade-insecure-requests" to "1",
-            "accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "sec-fetch-site" to "none",
-            "sec-fetch-mode" to "navigate",
-            "sec-fetch-dest" to "document",
-            "accept-language" to "ar-EG,ar;q=0.9",
-            "priority" to "u=0, i"
-        )
+    private val httpClient: OkHttpClient by lazy {
+        app.baseClient.newBuilder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
     }
 
-    private fun getProtectedHeaders(): Map<String, String> {
-        return getModernHeaders(mainUrl)
-    }
-
-    private suspend fun smartGet(
-        url: String,
-        referer: String? = null,
-        timeoutSeconds: Long? = null
-    ): Document {
-        val cleanUrl = if (!url.endsWith("/") && !url.substringAfterLast("/").contains(".")) "$url/" else url
-
-        for (attempt in 1..3) {
-            try {
-                val headers = getModernHeaders(cleanUrl)
-                if (referer != null) headers["Referer"] = referer
-
-                val response = app.get(
-                    cleanUrl,
-                    headers = headers,
-                    timeout = timeoutSeconds ?: 30L,
-                    allowRedirects = true
-                )
-
-                if (response.code == 200 || response.code in 300..308) {
-                    return response.document
-                }
-
-                if (response.code == 429) {
-
-                    kotlinx.coroutines.delay(1000L * attempt)
-                    continue
-                }
-
-                break
-
-            } catch (e: Exception) {
-
-                if (e.message?.contains("429") == true) {
-
-                    kotlinx.coroutines.delay(1000L * attempt)
-                    continue
-                }
-
-                break
-            }
-        }
-
-        return cfLock.withLock {
-            val activity = context as? Activity
-
-            CloudflareSolver.solve(activity, cleanUrl, lastValidUserAgent) ?: Jsoup.parse("", cleanUrl)
-        }
-    }
-    private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
-        val base = baseUrl()
-        var currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
-
-        try {
-            val result = requestBlock(currentCookies)
-            if (result.isNotBlank()) return result
-        } catch (e: Exception) {
-            if (e.message != "403_FORBIDDEN") return null
-        }
-
-        try {
-            cfLock.withLock {
-                val activity = context as? Activity
-                CloudflareSolver.solve(activity, base, lastValidUserAgent)
-            }
-            currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
-            if (!currentCookies.contains("cf_clearance")) return null
-        } catch (e: Exception) { return null }
-
-        return try {
-            requestBlock(currentCookies)
-        } catch (e: Exception) { null }
-    }
-    private fun Element.toSearchResult(): SearchResponse? {
-        val href = this.selectFirst("a")?.attr("href")?.trim() ?: return null
-        val title = this.selectFirst(".h1, .h4, .h5")?.text()?.trim() ?: return null
-        val posterUrl = this.selectFirst("img")
-            ?.let { it.attr("data-src").ifBlank { it.attr("src") } }
-            ?.trim()
-        if (href.isBlank() || title.isBlank()) return null
-
-        val headers = getProtectedHeaders()
-
-        return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-            this.posterUrl = posterUrl
-            this.posterHeaders = headers
-        }
-    }
     override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية"
+        "$mainUrl/main" to "الرئيسية",
+        "$mainUrl/movies" to "أفلام أجنبية",
+        "$mainUrl/series" to "مسلسلات أجنبية",
+        "$mainUrl/episodes" to "أحدث الحلقات",
+        "$mainUrl/anime" to "الأنمي",
+        "$mainUrl/asian-movies" to "أفلام آسيوية",
+        "$mainUrl/asian-series" to "مسلسلات آسيوية",
+        "$mainUrl/tvshows" to "البرامج",
+        "$mainUrl/anime-movies" to "أفلام الأنمي",
+        "$mainUrl/dubbed-movies" to "أفلام مدبلجة",
+        "$mainUrl/hindi" to "أفلام هندية",
+        "$mainUrl/most_recent" to "أحدث الإضافات"
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1 && !request.data.endsWith("/main")) {
-            if (request.data.contains("all_movies"))
-                "${request.data.removeSuffix("/")}/page/$page"
-            else
-                "${request.data}/page/$page"
+    // ------------------------------------------------------------------
+    // أدوات مساعدة
+    // ------------------------------------------------------------------
+
+    private fun toAbsolute(url: String?): String? {
+        val value = url?.trim() ?: return null
+        return when {
+            value.startsWith("http://", ignoreCase = true) ||
+                value.startsWith("https://", ignoreCase = true) -> value
+            value.startsWith("//") -> "https:$value"
+            else -> mainUrl.trimEnd('/') + "/" + value.trimStart('/')
+        }
+    }
+
+    private fun pageHeaders(url: String): Map<String, String> {
+        val headers = mutableMapOf(
+            "User-Agent" to userAgent,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
+            "Upgrade-Insecure-Requests" to "1"
+        )
+        runCatching {
+            cloudflareKiller.getCookieHeaders(url).toMultimap()
+                .mapValues { it.value.joinToString("; ") }
+                .forEach { (k, v) -> headers.putIfAbsent(k, v) }
+        }
+        return headers
+    }
+
+    private suspend fun getDocument(url: String, referer: String? = null): Document {
+        return app.get(
+            url,
+            headers = pageHeaders(url),
+            referer = referer ?: mainUrl,
+            interceptor = cfInterceptor
+        ).document
+    }
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val link = selectFirst("a[href]") ?: return null
+        val href = toAbsolute(link.attr("href")) ?: return null
+        val title = selectFirst(".h1, .h4, .h5, .title")?.text()
+            ?.replace(Regex("\\s+"), " ")?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: selectFirst("img")?.attr("alt")?.trim() ?: return null
+        val img = selectFirst("img")
+        val poster = img?.attr("data-src")?.ifBlank { img.attr("src") }?.let { toAbsolute(it) }
+        val type = if (href.contains("/movies", ignoreCase = true)) TvType.Movie else TvType.TvSeries
+
+        return if (type == TvType.Movie) {
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = poster
+            }
         } else {
-            request.data
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = poster
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // الصفحة الرئيسية + الأقسام
+    // ------------------------------------------------------------------
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val isHome = request.data.endsWith("/main")
+        val url = when {
+            isHome || page <= 1 -> request.data
+            else -> request.data.trimEnd('/') + "/page/$page"
         }
 
-        val document = smartGet(url)
-        val headers = getProtectedHeaders()
+        val doc = getDocument(url)
 
-        if (request.data.endsWith("/main") || request.data == mainUrl) {
+        if (isHome) {
             val lists = mutableListOf<HomePageList>()
 
-            val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
-                val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-                val slideTitle = it.selectFirst(".h1 a")?.text()?.trim() ?: return@mapNotNull null
-                val slidePoster = it.selectFirst(".poster img")?.attr("src")
-                newMovieSearchResponse(slideTitle, slideHref, TvType.Movie) {
-                    this.posterUrl = slidePoster
-                    this.posterHeaders = headers
+            val slides = doc.select("#homeSlide .swiper-slide").mapNotNull { slide ->
+                val href = toAbsolute(slide.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
+                val title = slide.selectFirst(".h1 a, .h1")?.text()?.trim() ?: return@mapNotNull null
+                val poster = slide.selectFirst(".poster img")?.attr("src")?.let { toAbsolute(it) }
+                newMovieSearchResponse(title, href, TvType.Movie) {
+                    this.posterUrl = poster
                 }
             }
-            if (sliderItems.isNotEmpty()) {
-                lists.add(HomePageList("أحدث الإضافات", sliderItems, isHorizontalImages = true))
+            if (slides.isNotEmpty()) {
+                lists.add(HomePageList("أحدث الإضافات", slides, isHorizontalImages = true))
             }
 
-            document.select("section#blockList").forEach { block ->
+            doc.select("section#blockList").forEach { block ->
                 val title = block.selectFirst(".blockHead .h3")?.text()?.trim() ?: return@forEach
                 val items = block.select(".blockMovie, .postDiv, .epDivHome").mapNotNull { it.toSearchResult() }
-
                 if (items.isNotEmpty()) {
                     lists.add(HomePageList(title, items))
                 }
             }
 
-            document.select("div.slider")
-                .firstOrNull { it.selectFirst(".h4")?.text()?.contains("مشاهدة") == true }
-                ?.let { mostWatchedBlock ->
-                    val title = mostWatchedBlock.selectFirst(".h4")?.text()?.trim() ?: "الأكثر مشاهدة"
-                    val items = mostWatchedBlock.select(".itemviews .postDiv").mapNotNull { it.toSearchResult() }
-                    if (items.isNotEmpty()) {
-                        lists.add(HomePageList(title, items, isHorizontalImages = true))
-                    }
-                }
-
-            return newHomePageResponse(request.name, lists.filter { it.list.isNotEmpty() }.flatMap { it.list }, false)
-        } else {
-
-            val items = document.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
-            val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
-            return newHomePageResponse(request.name, items, hasNext)
+            val flat = lists.flatMap { it.list }
+            return newHomePageResponse(request.name, flat, false)
         }
+
+        val items = doc.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
+        val hasNext = doc.select("ul.pagination a[href]")
+            .any { it.attr("href").contains("page/${page + 1}") }
+        return newHomePageResponse(request.name, items, hasNext)
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query,1)?.items
+    // ------------------------------------------------------------------
+    // البحث
+    // ------------------------------------------------------------------
+
+    override suspend fun quickSearch(query: String): List<SearchResponse>? {
+        return search(query, 1).items
+    }
+
     override suspend fun search(query: String, page: Int): SearchResponseList {
-        val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
-
-        val originalSearch = if (page == 1) {
-            "$base/?s=$encoded"
+        val url = if (page <= 1) {
+            "$mainUrl/?s=$encoded"
         } else {
-            "$base/page/$page/?s=$encoded"
+            "$mainUrl/?s=$encoded&paged=$page"
         }
-
-        var finalSearchUrl = originalSearch
-        try {
-            val resp = app.get(originalSearch, allowRedirects = true)
-            val final = resp.url
-            finalSearchUrl =
-                if (final.contains("?s=", ignoreCase = true)) final else "$final?s=$encoded"
-        } catch (_: Exception) {
-            finalSearchUrl = originalSearch
-        }
-
-        val document = try {
-            smartGet(finalSearchUrl, referer = base)
+        val doc = try {
+            getDocument(url, referer = mainUrl)
         } catch (e: Exception) {
-
-            Jsoup.parse("", finalSearchUrl)
+            Jsoup.parse("", url)
         }
 
-        var items = document.select("div#postList div.postDiv, div.postDiv, article")
+        val items = doc.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
             .mapNotNull { it.toSearchResult() }
-        var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
-
-            if (items.isEmpty() && page == 1) {
-                try {
-                    val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
-                    val formBody = FormBody.Builder()
-                        .add("action", "dtc_live")
-                        .add("trsearch", query)
-                        .build()
-
-
-                    val bodyStr = executeRequestWithCloudflareRetry { cookies ->
-                        makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
-                    }
-
-                    if (!bodyStr.isNullOrBlank()) {
-
-
-
-                        val ajaxDoc = Jsoup.parse(bodyStr, baseUrl())
-
-                        items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
-                        hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
-                                ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
-
-                    }
-                } catch (e: Exception) {
-
-                }
+        val hasNext = doc.select("ul.pagination a[href]")
+            .any {
+                it.attr("href").contains("paged=${page + 1}") ||
+                    it.attr("href").contains("page/${page + 1}")
             }
+        return newSearchResponseList(items, hasNext)
+    }
 
-            return newSearchResponseList(items, hasNext)
-        }
+    // ------------------------------------------------------------------
+    // التفاصيل: فيلم أو مسلسل بمواسمه وحلقاته الحقيقية
+    // ------------------------------------------------------------------
 
-        private suspend fun makeAjaxRequest(
-            ajaxUrl: String,
-            referer: String,
-            formBody: FormBody,
-            cookies: String
-        ): String {
-            val client = app.baseClient.newBuilder()
-                .cookieJar(CookieJar.NO_COOKIES)
-                .followRedirects(false)
-                .build()
-
-            var currentUrl = ajaxUrl
-            var redirectCount = 0
-
-            while (redirectCount < 5) {
-                val requestBuilder = OkRequest.Builder()
-                    .url(currentUrl)
-                    .post(formBody)
-                    .header("User-Agent", lastValidUserAgent)
-                    .header("Referer", referer)
-                if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
-
-                val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
-
-                response.use { res ->
-                    when (res.code) {
-                        403 -> throw IllegalStateException("403_FORBIDDEN")
-                        301, 302, 307, 308 -> {
-                            val location = res.header("Location")
-                            if (location != null) {
-                                currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
-                                redirectCount++
-                            } else {
-                                return ""
-                            }
-                        }
-                        200 -> return res.body?.string() ?: ""
-                        else -> return ""
-                    }
-                }
-            }
-            return ""
-        }
-    override suspend fun load(url: String): LoadResponse? {
-        val base = baseUrl()
-        val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
-
-        val doc = smartGet(absoluteUrl)
-
-        val rawTitle = doc.selectFirst(".singleInfo .title.h1")?.ownText() ?: ""
-        val title = rawTitle.replace("\\n", "").replace("\n", "").trim()
-        if (title.isBlank()) return null
-
-        val plot = doc.selectFirst(".singleDesc p, .story p")?.text()?.replace("\\n", " ")?.replace("\n", " ")?.trim()
-
-        val poster = fixUrlNull(
-            doc.selectFirst("meta[itemprop=image]")?.attr("content")
-                ?: doc.selectFirst(".posterImg img.poster")?.attr("src")
+    private fun extractSeasonNumber(titleText: String?, fallback: Int): Int {
+        val text = titleText ?: return fallback
+        Regex("""موسم\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        val arabic = mapOf(
+            "الاول" to 1, "الأول" to 1, "الثاني" to 2, "الثالث" to 3, "الرابع" to 4,
+            "الخامس" to 5, "السادس" to 6, "السابع" to 7, "الثامن" to 8, "التاسع" to 9, "العاشر" to 10
         )
+        Regex("""الموسم\s*(\S+)""").find(text)?.groupValues?.get(1)?.trim()?.let { word ->
+            arabic[word]?.let { return it }
+        }
+        return fallback
+    }
 
-        val backgroundPoster = doc.selectFirst("div.singlePage")?.attr("style")
-            ?.let { Regex("""url\(['"]?(.*?)['"]?\)""").find(it)?.groupValues?.get(1) }
-            ?.let { fixUrlNull(it) }
-
-        val headers = getProtectedHeaders()
-
-        val seasonCards = doc.select(".seasonDiv")
-        val seasonUrlRegex = Regex("""window\.location\.href\s*=\s*['"]([^'"]+)['"]""")
-
-        val currentSeasonEpisodes = mutableListOf<Episode>()
-
-        if (seasonCards.isNotEmpty()) {
-
-            val h1TitleText = doc.selectFirst(".singleInfo .title.h1")?.text() ?: ""
-            var currentSeasonIndex = -1
-
-            seasonCards.forEachIndexed { idx, seasonEl ->
-                val onclickAttr = seasonEl.attr("onclick")
-                val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
-                val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-                if (fullSeasonUrl.removeSuffix("/") == absoluteUrl.removeSuffix("/")) {
-                    currentSeasonIndex = idx
-                }
+    private fun addEpisode(
+        el: Element,
+        out: MutableList<Episode>,
+        season: Int,
+        poster: String?
+    ) {
+        val href = toAbsolute(el.attr("href")) ?: return
+        val name = el.ownText().ifBlank { el.text() }
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (name.isBlank()) return
+        val number = Regex("""(\d+)""").find(name)?.groupValues?.get(1)?.toIntOrNull()
+        out.add(
+            newEpisode(href) {
+                this.name = name
+                this.season = season
+                this.episode = number
+                this.posterUrl = poster
             }
+        )
+    }
 
-            if (currentSeasonIndex == -1) {
-                seasonCards.forEachIndexed { idx, seasonEl ->
-                    val seasonCardTitle = seasonEl.selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: ""
+    override suspend fun load(url: String): LoadResponse? {
+        val pageUrl = toAbsolute(url) ?: return null
+        val doc = getDocument(pageUrl)
 
-                    if (seasonCardTitle.isNotBlank() && h1TitleText.contains(seasonCardTitle)) {
-                        currentSeasonIndex = idx
-                    }
-                }
-            }
+        val title = doc.selectFirst(".singleInfo h1.title, h1.title")?.ownText()
+            ?.replace(Regex("\\s+"), " ")?.trim()
+            ?: return null
 
-            if (currentSeasonIndex == -1) currentSeasonIndex = 0
+        val plot = doc.selectFirst(".singleDesc p, .story p")?.text()?.trim()
+        val poster = doc.selectFirst("img.poster")?.attr("src")?.let { toAbsolute(it) }
+            ?: doc.selectFirst("meta[property='og:image']")?.attr("content")?.let { toAbsolute(it) }
+        val tags = doc.select("#singleList a[href]")
+            .mapNotNull { it.text().trim().takeIf { t -> t.isNotBlank() } }
+            .distinct()
+        val isAnime = pageUrl.contains("/anime", ignoreCase = true) ||
+            tags.any { it.contains("انمي", ignoreCase = true) }
 
-            for (i in 0 until seasonCards.size) {
-                val actualSeasonNum = i + 1
+        val seasonCards = doc.select("#seasonList .seasonDiv")
+        val episodeLinks = doc.select("#epAll a[href]")
+        val onClickSeason = Regex("""window\.location\.href\s*=\s*['"]([^'"]+)['"]""")
 
-                val seasonName = seasonCards[i].selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "الموسم $actualSeasonNum"
+        if (seasonCards.isNotEmpty() || episodeLinks.isNotEmpty()) {
+            val episodes = mutableListOf<Episode>()
 
-                val onclickAttr = seasonCards[i].attr("onclick")
-                val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
-                val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
+            if (seasonCards.isNotEmpty()) {
+                seasonCards.forEachIndexed { index, seasonEl ->
+                    val seasonName = seasonEl.selectFirst(".title")?.text()
+                        ?.replace(Regex("\\s+"), " ")?.trim()
+                    val seasonNumber = extractSeasonNumber(seasonName, index + 1)
 
-                val seasonDoc = if (i == currentSeasonIndex) {
-                    doc
-                } else {
-                    try { smartGet(fullSeasonUrl) } catch (_: Exception) { null }
-                }
-
-                var hasEpisodes = false
-                if (seasonDoc != null) {
-                    seasonDoc.select("div#epAll a").forEach { el ->
-                        val epUrlRaw = el.attr("href").trim()
-                        if (epUrlRaw.isNotBlank()) {
-                            val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
-                            if (!epTitle.contains("باقي الحلقات") && !epTitle.contains("المزيد")) {
-                                val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                                currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
-                                    this.name = "$seasonName - $epTitle"
-                                    this.episode = epNum
-                                    this.season = actualSeasonNum
-                                    this.posterUrl = poster
-                                })
-                                hasEpisodes = true
+                    if (seasonEl.hasClass("active")) {
+                        doc.select("#epAll a[href]").forEach { addEpisode(it, episodes, seasonNumber, poster) }
+                    } else {
+                        val seasonUrl = onClickSeason.find(seasonEl.attr("onclick"))
+                            ?.groupValues?.get(1)?.let { toAbsolute(it) }
+                        if (seasonUrl != null) {
+                            val seasonDoc = try {
+                                getDocument(seasonUrl, referer = pageUrl)
+                            } catch (e: Exception) {
+                                null
                             }
+                            seasonDoc?.select("#epAll a[href]")?.forEach { addEpisode(it, episodes, seasonNumber, poster) }
                         }
                     }
                 }
-
-                if (!hasEpisodes) {
-                    currentSeasonEpisodes.add(newEpisode(fullSeasonUrl) {
-                        this.name = seasonName
-                        this.episode = 1
-                        this.season = actualSeasonNum
-                        this.posterUrl = poster
-                    })
-                }
+            } else {
+                episodeLinks.forEach { addEpisode(it, episodes, 1, poster) }
             }
-        } else {
 
-            doc.select("div#epAll a").forEach { el ->
-                val epUrlRaw = el.attr("href").trim()
-                if (epUrlRaw.isNotBlank()) {
-                    val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
-                    val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                    currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
-                        this.name = epTitle
-                        this.episode = epNum
-                        this.season = 1
-                        this.posterUrl = poster
-                    })
+            if (episodes.isNotEmpty()) {
+                val type = if (isAnime) TvType.Anime else TvType.TvSeries
+                return newTvSeriesLoadResponse(title, pageUrl, type, episodes) {
+                    this.posterUrl = poster
+                    this.plot = plot
+                    this.tags = tags
                 }
             }
         }
 
-        val allEpisodes = currentSeasonEpisodes
-
-        return if (allEpisodes.isEmpty()) {
-            newMovieLoadResponse(title, absoluteUrl, TvType.Movie, absoluteUrl) {
-                this.posterUrl = poster
-                this.posterHeaders = headers
-                this.backgroundPosterUrl = backgroundPoster
-                this.plot = plot
-            }
-        } else {
-            newTvSeriesLoadResponse(title, absoluteUrl, TvType.Anime, allEpisodes) {
-                this.posterUrl = poster
-                this.posterHeaders = headers
-                this.backgroundPosterUrl = backgroundPoster
-                this.plot = plot
-            }
+        return newMovieLoadResponse(title, pageUrl, TvType.Movie, pageUrl) {
+            this.posterUrl = poster
+            this.plot = plot
+            this.tags = tags
         }
     }
-    private fun extractIframeSources(doc: Document): List<String> {
+
+    // ------------------------------------------------------------------
+    // روابط المشاهدة
+    // ------------------------------------------------------------------
+
+    private fun extractWatchUrls(doc: Document): List<String> {
         val results = mutableSetOf<String>()
+        val blocked = listOf("recaptcha", "google.com/ads", "googlesyndication.com", "googletagmanager.com")
 
-        val blockedKeywords = listOf(
-            "google.com/recaptcha",
-            "google.com/ads",
-            "googlesyndication.com",
-            "googletagmanager.com"
-        )
-
-        fun addResult(url: String) {
-            val fixedUrl = fixUrl(url)
-
-            if (blockedKeywords.none { fixedUrl.contains(it) }) {
-                results.add(fixedUrl)
-            }
+        fun add(url: String) {
+            val clean = url.replace("&amp;", "&").trim()
+            if (clean.isBlank()) return
+            if (blocked.any { clean.contains(it) }) return
+            results.add(clean)
         }
 
+        val onClick = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
+        doc.select("[onclick]").forEach { el ->
+            onClick.find(el.attr("onclick"))?.let { add(it.groupValues[1]) }
+        }
 
+        doc.select("iframe[data-src]").forEach { el ->
+            val src = el.attr("data-src")
+            if (src.isNotBlank() && (src.contains("video_player") || src.contains("embed") || src.contains("player"))) {
+                add(src)
+            }
+        }
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
-            if (src.isNotBlank()) addResult(src)
-        }
-
-        val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
-        doc.select("[onclick]").forEach { el ->
-            val onclick = el.attr("onclick")
-            onClickRegex.find(onclick)?.let { match ->
-                addResult(match.groupValues[1])
+            if (src.isNotBlank() && (src.contains("video_player") || src.contains("embed") || src.contains("player"))) {
+                add(src)
             }
-        }
-
-        val scriptRegex = Regex("""https?://[^\s"'<>]+""")
-        doc.select("script").forEach { s ->
-            val data = s.data()
-            if (data.isNotBlank()) {
-                scriptRegex.findAll(data).forEach { m ->
-                    val url = m.value
-                    if (url.contains("player") || url.contains("embed")) {
-                        addResult(url)
-                    }
-                }
-            }
-        }
-
-        doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
-            val text = el.text().trim()
-            if (text.startsWith("http")) addResult(text)
         }
 
         return results.toList()
     }
 
+    // فك تشفير روابط المشغل الداخلي (بنفس مفاتيح الموقع)
+    private val decryptAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
+    private val decryptKey1 = "V2@%YSU2B]G~"
+    private val decryptKey2 = "bv0fim4qf17"
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun resolveWithWebView(
-        iframeUrl: String,
-        referer: String
-    ): String? = suspendCancellableCoroutine { cont ->
+    private fun ie(char: Char): Int = decryptAlphabet.indexOf(char).let { if (it < 0) 0 else it }
 
-        val activity = context as? Activity
-        if (activity == null || activity.isFinishing) {
-            cont.resume(null)
-            return@suspendCancellableCoroutine
+    private fun bn(value: Int): Char = decryptAlphabet[value]
+
+    private fun decryptString(enc: String, key: String): String {
+        val sb = StringBuilder(enc.length)
+        for (i in enc.indices) {
+            val keyChar = key[i % (key.length - 1)]
+            var diff = ie(enc[i]) - ie(keyChar)
+            if (diff < 0) diff += 64
+            sb.append(bn(diff))
         }
+        return sb.toString()
+    }
 
-        val finalUrl = iframeUrl.replace("&amp;", "&").trim()
-        val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
+    private fun decryptEncryptedUrl(enc: String): String {
+        val value = enc.removePrefix("enc:")
+        return decryptString(decryptString(value, decryptKey2), decryptKey1)
+    }
 
-        activity.runOnUiThread {
+    private suspend fun fetchPlayerSource(playerUrl: String, referer: String): String? {
+        return try {
+            val html = getDocument(playerUrl, referer = referer).outerHtml()
 
-            val dialog = Dialog(activity)
-
-            dialog.setCancelable(false)
-            dialog.setCanceledOnTouchOutside(false)
-            dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(false)
-
-            dialog.window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                setDimAmount(0f)
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-
-                addFlags(
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                )
-
-                attributes = attributes?.apply {
-                    width = 1
-                    height = 1
-                    x = -10000
-                    y = -10000
-                    gravity = Gravity.START or Gravity.TOP
-                }
+            Regex("""enc:[A-Za-z0-9+/=_%]+""").findAll(html).forEach { match ->
+                val decrypted = decryptEncryptedUrl(match.value)
+                if (decrypted.startsWith("http")) return decrypted
             }
 
-            val webView = WebView(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(1, 1)
-                visibility = View.INVISIBLE
-                isHorizontalScrollBarEnabled = false
-                isVerticalScrollBarEnabled = false
+            Regex("""https?://[^"'\s<>\\]+\.m3u8[^"'\s<>\\]*""").findAll(html).forEach { match ->
+                return match.value.replace("&amp;", "&")
             }
 
-            try {
-                dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
-                dialog.show()
-            } catch (e: Exception) {
-
-                try {
-                    val decor = activity.window?.decorView as? ViewGroup
-                    decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
-                } catch (_: Exception) {}
-            }
-
-            webView.settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                allowContentAccess = true
-                allowFileAccess = true
-                allowFileAccessFromFileURLs = true
-                allowUniversalAccessFromFileURLs = true
-                javaScriptCanOpenWindowsAutomatically = true
-                setSupportMultipleWindows(true)
-                mediaPlaybackRequiresUserGesture = false
-                loadWithOverviewMode = true
-                useWideViewPort = true
-                builtInZoomControls = true
-                displayZoomControls = false
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                cacheMode = WebSettings.LOAD_DEFAULT
-                userAgentString = lastValidUserAgent
-
-                blockNetworkImage = true
-            }
-
-            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-
-            val cookieManager = CookieManager.getInstance()
-            try {
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(webView, true)
-                cookieManager.flush()
-            } catch (_: Exception) {}
-
-            val client = app.baseClient.newBuilder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .cookieJar(okhttp3.CookieJar.NO_COOKIES)
-                .build()
-
-            val foundM3u8 = linkedSetOf<String>()
-            var finished = false
-            val finishLock = Any()
-            val handler = Handler(Looper.getMainLooper())
-            var finishRunnable: Runnable? = null
-
-            var currentAttempt = 0
-            val maxAttempts = 2
-            val attemptTimeoutMs = 12_000L
-            var attemptTimeoutRunnable: Runnable? = null
-            var autoTouchRunnable: Runnable? = null
-
-            fun cleanup() {
-                try { attemptTimeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
-                try { autoTouchRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
-                try { (webView.parent as? ViewGroup)?.removeView(webView) } catch (_: Exception) {}
-                try { webView.stopLoading() } catch (_: Exception) {}
-                try { webView.destroy() } catch (_: Exception) {}
-                try { cookieManager.flush() } catch (_: Exception) {}
-                try { if (dialog.isShowing) dialog.dismiss() } catch (_: Exception) {}
-            }
-
-            fun safeFinish(result: String?) {
-                synchronized(finishLock) {
-                    if (finished) return
-                    finished = true
-                }
-                try { if (cont.isActive) cont.resume(result) } catch (_: Exception) {}
-                cleanup()
-            }
-
-            fun chooseAndFinish() {
-                if (foundM3u8.isEmpty()) { safeFinish(null); return }
-                val strict = foundM3u8.firstOrNull {
-                    val clean = it.substringBefore("?")
-                    clean.endsWith(".m3u8") && (clean.contains("master") || clean.contains("playlist") || clean.contains("index"))
-                } ?: foundM3u8.firstOrNull { it.substringBefore("?").endsWith(".m3u8") }
-                safeFinish(strict ?: foundM3u8.first())
-            }
-
-            fun handleFoundLink(url: String) {
-                val clean = url.substringBefore("?")
-                if (!clean.endsWith(".m3u8")) return
-                synchronized(foundM3u8) {
-                    if (!foundM3u8.contains(url)) {
-                        foundM3u8.add(url)
-
-                        finishRunnable?.let { handler.removeCallbacks(it) }
-                        if (clean.contains("master") || clean.contains("playlist") || clean.contains("index")) {
-                            finishRunnable = Runnable { chooseAndFinish() }
-                            handler.postDelayed(finishRunnable!!, 300)
-                        } else {
-                            if (finishRunnable == null) {
-                                finishRunnable = Runnable { chooseAndFinish() }
-                                handler.postDelayed(finishRunnable!!, 1500)
-                            }
-                        }
-                    }
-                }
-            }
-
-            fun startNextAttempt() {
-                synchronized(finishLock) { if (finished) return }
-
-                if (currentAttempt >= maxAttempts) {
-
-                    chooseAndFinish()
-                    return
-                }
-
-                attemptTimeoutRunnable?.let { handler.removeCallbacks(it) }
-                attemptTimeoutRunnable = Runnable {
-                    synchronized(foundM3u8) {
-                        if (foundM3u8.isEmpty()) {
-
-                            currentAttempt++
-                            startNextAttempt()
-                        } else {
-                            chooseAndFinish()
-                        }
-                    }
-                }
-                handler.postDelayed(attemptTimeoutRunnable!!, attemptTimeoutMs)
-
-                activity.runOnUiThread {
-                    try { webView.loadUrl(finalUrl, mapOf("Referer" to referer)) } catch (_: Exception) {}
-                }
-            }
-
-            fun getStrategyJs(attempt: Int): String {
-                return """
-                (function() {
-                    const strategy = $attempt;
-
-                    Object.defineProperty(navigator, 'userActivation', { get: () => ({ hasBeenActive: true, isActive: true }) });
-
-                    const Decryptor = {
-                        key1: "V2@%YSU2B]G~", key2: "bv0fim4qf17",
-                        ie: function(c) {
-                            const x = c.charCodeAt(0);
-                            if(x>=97 && x<=122) return x-97; if(x>=65 && x<=90) return x-65+26;
-                            if(x>=48 && x<=57) return x-48+52; if(x===43) return 62; if(x===47) return 63; return 0;
-                        },
-                        bn: function(x) {
-                            if(x<=25) return String.fromCharCode(x+97); if(x<=51) return String.fromCharCode(x-26+65);
-                            if(x<=61) return String.fromCharCode(x-52+48); if(x===62) return '+'; if(x===63) return '/'; return ' ';
-                        },
-                        dec: function(e, k) {
-                            let r=''; for(let i=0; i<e.length; i++) {
-                                const kc=k[i%(k.length-1)]; const M=this.ie(e[i])-this.ie(kc); r+=this.bn(M<0?M+64:M);
-                            } return r;
-                        },
-                        parse: function(url) {
-                            if(!url || !url.startsWith('enc:')) return url;
-                            try { return this.dec(this.dec(url.substring(4), this.key2), this.key1); } catch(e){return url;}
-                        }
-                    };
-
-                    if ((strategy === 0 || strategy === 4) && !window.__isDecryptionHooked) {
-                        window.__isDecryptionHooked = true;
-                        let chk = setInterval(function() {
-                            if (typeof window.jwplayer === 'function' && !window.jwplayer.__hooked) {
-                                const orig = window.jwplayer;
-                                window.jwplayer = function() {
-                                    const p = orig.apply(this, arguments);
-                                    if (!p.__sHook) {
-                                        p.__sHook = true;
-                                        const oSetup = p.setup;
-                                        p.setup = function(cfg) {
-                                            try {
-                                                let s = cfg.sources || (cfg.playlist && cfg.playlist[0] ? cfg.playlist[0].sources : []);
-                                                if (s) s.forEach(x => { if (x.file && x.file.startsWith('enc:')) x.file = Decryptor.parse(x.file); });
-                                            } catch(e){}
-                                            cfg.autostart = true; cfg.mute = true;
-                                            return oSetup.call(this, cfg);
-                                        };
-                                    }
-                                    return p;
-                                };
-                                Object.assign(window.jwplayer, orig);
-                                window.jwplayer.prototype = orig.prototype;
-                                window.jwplayer.__hooked = true;
-                                clearInterval(chk);
-                            }
-                        }, 10);
-                    }
-
-                    try {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        let isPlaying = p && (p.getState() === 'playing' || p.getState() === 'buffering');
-                        if (isPlaying) return;
-
-                        if (strategy === 0 || strategy === 1 || strategy === 7) {
-
-                            var els = document.querySelectorAll('button, a, [onclick], video, [role="button"], .jw-icon, .vjs-control, .po-play-btn, .plyr__control');
-                            els.forEach(el => {
-                                if (el.href && (el.href.includes('google.com') || el.href.includes('recaptcha'))) return;
-                                try { el.click(); } catch(e){}
-                            });
-                        }
-                        if (strategy === 2 || strategy === 7) {
-
-                            if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                        }
-           
-                    } catch(e) {}
-                })();
-            """.trimIndent()
-            }
-
-            val fastSnifferJs = """
-            (function() {
-                try {
-                    window.open = function() { return null; };
-                    if (!window.__NET_HOOKED__) {
-                        window.__NET_HOOKED__ = true;
-                        const _fetch = window.fetch;
-                        if (_fetch) {
-                            window.fetch = function() {
-                                return _fetch.apply(this, arguments).then(function(resp) {
-                                    try {
-                                        const u = resp && resp.url ? resp.url : '';
-                                        if (u && u.indexOf('.m3u8') !== -1) { console.log('NET_M3U8::' + u); }
-                                    } catch(e){}
-                                    return resp;
-                                });
-                            };
-                        }
-                        const _open = XMLHttpRequest.prototype.open;
-                        XMLHttpRequest.prototype.open = function(method, u) {
-                            this.addEventListener('load', function() {
-                                try {
-                                    if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) { console.log('NET_M3U8::' + u); }
-                                } catch(e){}
-                            });
-                            return _open.apply(this, arguments);
-                        };
-                    }
-                } catch(err){}
-            })();
-        """.trimIndent()
-
-            lateinit var sharedWebViewClient: WebViewClient
-            sharedWebViewClient = object : WebViewClient() {
-
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val url = request?.url.toString()
-                    val lowerUrl = url.lowercase()
-
-                    if (!lowerUrl.startsWith("http")) return true
-
-                    if (lowerUrl.contains("policies.google.com") || lowerUrl.contains("recaptcha") || lowerUrl.contains("mcaptcha") || lowerUrl.contains("melbet")) {
-                        Handler(Looper.getMainLooper()).post { view?.loadUrl(finalUrl, mapOf("Referer" to referer)) }
-                        return true
-                    }
-
-                    val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch(e:Exception){""}
-                    if (originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)) {
-                        return true
-                    }
-
-                    return false
-                }
-
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    view?.evaluateJavascript(fastSnifferJs, null)
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    view?.evaluateJavascript(fastSnifferJs, null)
-
-                    autoTouchRunnable?.let { handler.removeCallbacks(it) }
-                    autoTouchRunnable = object : Runnable {
-                        override fun run() {
-                            if (finished) return
-                            view?.evaluateJavascript(getStrategyJs(currentAttempt), null)
-                            handler.postDelayed(this, 1000)
-                        }
-                    }
-                    handler.postDelayed(autoTouchRunnable!!, 500)
-                }
-
-                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                    val url = request.url.toString()
-                    val method = request.method
-                    val lower = url.lowercase()
-
-                    if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".woff2") || lower.endsWith(".css")) {
-                        return super.shouldInterceptRequest(view, request)
-                    }
-
-                    if (method.equals("GET", ignoreCase = true) && lower.contains(".m3u8") && lower.substringBefore("?").endsWith(".m3u8")) {
-                        handleFoundLink(url)
-                        try {
-                            val reqBuilder = OkRequest.Builder().url(url)
-                                .header("User-Agent", lastValidUserAgent)
-                                .header("Referer", referer)
-                                .header("Origin", mainUrl)
-                            try { cookieManager.getCookie(url)?.let { ck -> reqBuilder.header("Cookie", ck) } } catch (_: Exception) {}
-
-                            val response = client.newCall(reqBuilder.build()).execute()
-                            if (!response.isSuccessful) return null
-
-                            response.headers("Set-Cookie").forEach { try { cookieManager.setCookie(url, it) } catch (_: Exception) {} }
-                            val contentType = response.header("content-type")?.split(";")?.first() ?: "application/vnd.apple.mpegurl"
-                            return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
-                        } catch (e: Exception) { return null }
-                    }
-
-                    if (method.equals("GET", ignoreCase = true) && (lower.contains("fasel") || lower.contains("jwplayer") || lower.contains("config") || lower.contains("player"))) {
-                        try {
-                            val reqBuilder = OkRequest.Builder().url(url)
-                                .header("User-Agent", lastValidUserAgent)
-                                .header("Referer", referer)
-                            try { cookieManager.getCookie(url)?.let { ck -> reqBuilder.header("Cookie", ck) } } catch (_: Exception) {}
-
-                            val response = client.newCall(reqBuilder.build()).execute()
-                            response.headers("Set-Cookie").forEach { try { cookieManager.setCookie(url, it) } catch (_: Exception) {} }
-                            val contentType = response.header("content-type")?.split(";")?.first() ?: "text/html"
-                            return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
-                        } catch (e: Exception) { return super.shouldInterceptRequest(view, request) }
-                    }
-                    return super.shouldInterceptRequest(view, request)
-                }
-
-                @SuppressLint("WebViewClientOnReceivedSslError")
-                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
-                    handler?.proceed()
-                }
-            }
-
-            webView.webViewClient = sharedWebViewClient
-
-            webView.webChromeClient = object : WebChromeClient() {
-                override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
-                    val msg = cm?.message() ?: ""
-                    if (msg.startsWith("NET_M3U8::")) {
-                        handleFoundLink(msg.substringAfter("::").trim())
-                    }
-                    return true
-                }
-
-                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                    try {
-                        val transport = resultMsg?.obj as? WebView.WebViewTransport
-
-                        val adWebView = WebView(activity).apply {
-                            layoutParams = FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP)
-                            visibility = View.INVISIBLE
-                        }
-                        adWebView.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            userAgentString = lastValidUserAgent
-                        }
-
-                        try { (activity.window?.decorView as? ViewGroup)?.addView(adWebView) } catch (_: Exception) {}
-
-                        adWebView.webViewClient = sharedWebViewClient
-                        transport?.webView = adWebView
-                        resultMsg?.sendToTarget()
-
-                        handler.postDelayed({
-                            try {
-                                (adWebView.parent as? ViewGroup)?.removeView(adWebView)
-                                adWebView.destroy()
-                            } catch (e: Exception) {}
-                        }, 1000)
-
-                        return true
-                    } catch (e: Exception) { return false }
-                }
-            }
-
-            startNextAttempt()
-
-            cont.invokeOnCancellation { handler.post { safeFinish(null) } }
+            null
+        } catch (e: Exception) {
+            null
         }
+    }
+
+    private suspend fun emitStream(m3u8: String, referer: String, callback: (ExtractorLink) -> Unit) {
+        M3u8Helper.generateM3u8(
+            source = name,
+            streamUrl = m3u8,
+            referer = referer,
+            headers = mapOf(
+                "User-Agent" to userAgent,
+                "Referer" to referer
+            )
+        ).forEach(callback)
     }
 
     override suspend fun loadLinks(
@@ -1006,38 +434,419 @@ class FaselHD(private val context: Context) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
-        val doc = smartGet(data)
-
-        val iframeUrls = extractIframeSources(doc)
-
-        if (iframeUrls.isEmpty()) {
-
+        val doc = try {
+            getDocument(data)
+        } catch (e: Exception) {
             return false
         }
 
-        var foundLink = false
+        val playerUrls = extractWatchUrls(doc)
+        if (playerUrls.isEmpty()) return false
 
-        iframeUrls.distinct().forEach { iframeUrl ->
-            if (foundLink) return@forEach
+        var found = false
 
-            val m3u8 = resolveWithWebView(iframeUrl, data)
+        for (url in playerUrls) {
+            val playerUrl = url.replace("&amp;", "&")
+            val host = runCatching { Uri.parse(playerUrl).host }.getOrNull() ?: continue
 
-            if (!m3u8.isNullOrBlank()) {
-                foundLink = true
+            // روابط استضافة خارجية → المستخرجات الجاهزة
+            if (!host.contains("fasel-hd", ignoreCase = true)) {
+                runCatching {
+                    if (loadExtractor(playerUrl, data, subtitleCallback, callback)) {
+                        found = true
+                    }
+                }
+                continue
+            }
 
-                M3u8Helper.generateM3u8(
-                    source = name,
-                    streamUrl = m3u8,
-                    referer = iframeUrl,
-                    headers = mapOf(
-                        "Referer" to iframeUrl,
-                        "User-Agent" to lastValidUserAgent
-                    )
-                ).forEach(callback)
+            // مشغل فاصل الداخلي: جلب مباشر + فك تشفير، ثم WebView كاحتياط
+            val direct = fetchPlayerSource(playerUrl, data)
+            if (direct != null) {
+                emitStream(direct, playerUrl, callback)
+                found = true
+                continue
+            }
+
+            val m3u8 = resolveWithWebView(playerUrl, data)
+            if (m3u8 != null) {
+                emitStream(m3u8, playerUrl, callback)
+                found = true
             }
         }
 
-        return foundLink
+        return found
     }
+
+    // ------------------------------------------------------------------
+    // مستخرج WebView لمشغل فاصل (فك تشفير enc: + التقاط m3u8)
+    // ------------------------------------------------------------------
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun resolveWithWebView(iframeUrl: String, referer: String): String? =
+        suspendCancellableCoroutine { cont ->
+            val activity = context as? Activity
+            if (activity == null || activity.isFinishing) {
+                cont.resume(null)
+                return@suspendCancellableCoroutine
+            }
+
+            val finalUrl = iframeUrl.replace("&amp;", "&").trim()
+
+            activity.runOnUiThread {
+                val dialog = Dialog(activity)
+                dialog.setCancelable(false)
+                dialog.setCanceledOnTouchOutside(false)
+                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+                val webView = WebView(activity)
+                webView.layoutParams = ViewGroup.LayoutParams(1, 1)
+                webView.visibility = View.INVISIBLE
+
+                dialog.window?.apply {
+                    setBackgroundDrawableResource(android.R.color.transparent)
+                    setDimAmount(0f)
+                    clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                    addFlags(
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    )
+                    attributes = attributes?.apply {
+                        width = 1
+                        height = 1
+                        x = -10000
+                        y = -10000
+                        gravity = Gravity.START or Gravity.TOP
+                    }
+                }
+
+                try {
+                    dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
+                    dialog.show()
+                } catch (e: Exception) {
+                    try {
+                        val decor = activity.window?.decorView as? ViewGroup
+                        decor?.addView(webView, ViewGroup.LayoutParams(1, 1))
+                    } catch (_: Exception) {
+                    }
+                }
+
+                webView.settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    allowContentAccess = true
+                    allowFileAccess = true
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
+                    javaScriptCanOpenWindowsAutomatically = true
+                    setSupportMultipleWindows(true)
+                    mediaPlaybackRequiresUserGesture = false
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    userAgentString = userAgent
+                    blockNetworkImage = true
+                }
+
+                // تمرير كوكيز Cloudflare المحلولة إلى الـ WebView
+                val cookieManager = CookieManager.getInstance()
+                runCatching {
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(webView, true)
+                    cookieManager.flush()
+                }
+
+                val foundM3u8 = linkedSetOf<String>()
+                var finished = false
+                val finishLock = Any()
+                val handler = Handler(Looper.getMainLooper())
+
+                fun cleanup() {
+                    runCatching { webView.stopLoading() }
+                    runCatching { webView.destroy() }
+                    runCatching { dialog.dismiss() }
+                }
+
+                fun safeFinish(result: String?) {
+                    synchronized(finishLock) {
+                        if (finished) return
+                        finished = true
+                    }
+                    runCatching { if (cont.isActive) cont.resume(result) }
+                    cleanup()
+                }
+
+                fun chooseAndFinish() {
+                    if (foundM3u8.isEmpty()) {
+                        safeFinish(null)
+                        return
+                    }
+                    val strict = foundM3u8.firstOrNull {
+                        val clean = it.substringBefore("?")
+                        clean.endsWith(".m3u8") &&
+                            (clean.contains("master") || clean.contains("playlist") || clean.contains("index"))
+                    } ?: foundM3u8.firstOrNull { it.substringBefore("?").endsWith(".m3u8") }
+                    safeFinish(strict ?: foundM3u8.first())
+                }
+
+                fun handleFoundLink(url: String) {
+                    val clean = url.substringBefore("?")
+                    if (!clean.lowercase().endsWith(".m3u8")) return
+                    synchronized(foundM3u8) {
+                        if (foundM3u8.add(url) && (clean.contains("master") || clean.contains("playlist"))) {
+                            handler.postDelayed({ chooseAndFinish() }, 300)
+                        }
+                    }
+                }
+
+                var attempt = 0
+                val maxAttempts = 2
+                var attemptTimeout: Runnable? = null
+
+                fun startAttempt() {
+                    synchronized(finishLock) { if (finished) return }
+                    if (attempt >= maxAttempts) {
+                        chooseAndFinish()
+                        return
+                    }
+                    attemptTimeout?.let { handler.removeCallbacks(it) }
+                    attemptTimeout = Runnable {
+                        synchronized(foundM3u8) {
+                            if (foundM3u8.isNotEmpty()) chooseAndFinish()
+                            else {
+                                attempt++
+                                startAttempt()
+                            }
+                        }
+                    }
+                    handler.postDelayed(attemptTimeout!!, 11_000L)
+
+                    runCatching {
+                        webView.loadUrl(finalUrl, mapOf("Referer" to referer))
+                    }
+                }
+
+                fun strategyJs(attempt: Int): String {
+                    return """
+                        (function() {
+                            const attempt = $attempt;
+                            const Decryptor = {
+                                key1: "V2@%YSU2B]G~", key2: "bv0fim4qf17",
+                                ie: function(c) {
+                                    const x = c.charCodeAt(0);
+                                    if (x >= 97 && x <= 122) return x - 97;
+                                    if (x >= 65 && x <= 90) return x - 65 + 26;
+                                    if (x >= 48 && x <= 57) return x - 48 + 52;
+                                    if (x === 43) return 62;
+                                    if (x === 47) return 63;
+                                    return 0;
+                                },
+                                bn: function(x) {
+                                    if (x <= 25) return String.fromCharCode(x + 97);
+                                    if (x <= 51) return String.fromCharCode(x - 26 + 65);
+                                    if (x <= 61) return String.fromCharCode(x - 52 + 48);
+                                    if (x === 62) return '+';
+                                    return '/';
+                                },
+                                dec: function(e, k) {
+                                    let r = '';
+                                    for (let i = 0; i < e.length; i++) {
+                                        const kc = k[i % (k.length - 1)];
+                                        const M = this.ie(e[i]) - this.ie(kc);
+                                        r += this.bn(M < 0 ? M + 64 : M);
+                                    }
+                                    return r;
+                                },
+                                parse: function(url) {
+                                    if (!url || !url.startsWith('enc:')) return url;
+                                    try { return this.dec(this.dec(url.substring(4), this.key2), this.key1); } catch(e) { return url; }
+                                }
+                            };
+
+                            if (!window.__netHooked) {
+                                const jw = setInterval(function() {
+                                    if (typeof window.jwplayer === 'function' && !window.jwplayer.__hooked) {
+                                        const orig = window.jwplayer;
+                                        window.jwplayer = function() {
+                                            const p = orig.apply(this, arguments);
+                                            if (!p.__hooked) {
+                                                p.__hooked = true;
+                                                const oSetup = p.setup;
+                                                p.setup = function(cfg) {
+                                                    try {
+                                                        const s = cfg.sources || (cfg.playlist && cfg.playlist[0] ? cfg.playlist[0].sources : []);
+                                                        if (s) s.forEach(function(x) {
+                                                            if (x.file && x.file.startsWith('enc:')) x.file = Decryptor.parse(x.file);
+                                                        });
+                                                    } catch(e) {}
+                                                    cfg.autostart = true;
+                                                    cfg.mute = true;
+                                                    return oSetup.call(this, cfg);
+                                                };
+                                            }
+                                            return p;
+                                        };
+                                        Object.assign(window.jwplayer, orig);
+                                        window.jwplayer.prototype = orig.prototype;
+                                        window.jwplayer.__hooked = true;
+                                        clearInterval(jw);
+                                    }
+                                }, 10);
+                            }
+
+                            try {
+                                let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                                if (attempt === 0 || attempt === 1) {
+                                    document.querySelectorAll('button, a, video, [role="button"], .jw-icon, .vjs-control, .plyr__control').forEach(function(el) {
+                                        try { el.click(); } catch(e) {}
+                                    });
+                                }
+                                if (p) {
+                                    try { p.setMute(true); } catch(e) {}
+                                    try { p.play(); } catch(e) {}
+                                }
+                            } catch(e) {}
+                        })();
+                    """.trimIndent()
+                }
+
+                val snifferJs = """
+                    (function() {
+                        if (!window.__netHookedFetch) {
+                            window.__netHookedFetch = true;
+                            const _fetch = window.fetch;
+                            if (_fetch) {
+                                window.fetch = function() {
+                                    return _fetch.apply(this, arguments).then(function(resp) {
+                                        try {
+                                            const u = resp && resp.url ? resp.url : '';
+                                            if (u.indexOf('.m3u8') !== -1) console.log('NET_M3U8::' + u);
+                                        } catch(e) {}
+                                        return resp;
+                                    });
+                                };
+                            }
+                            const _open = XMLHttpRequest.prototype.open;
+                            XMLHttpRequest.prototype.open = function(method, u) {
+                                this.addEventListener('load', function() {
+                                    try {
+                                        if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) console.log('NET_M3U8::' + u);
+                                    } catch(e) {}
+                                });
+                                return _open.apply(this, arguments);
+                            };
+                        }
+                    })();
+                """.trimIndent()
+
+                val webClient = object : WebViewClient() {
+
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val url = request?.url?.toString() ?: return false
+                        if (!url.startsWith("http")) return true
+                        val host = runCatching { Uri.parse(url).host }.getOrNull() ?: return true
+
+                        if (host.contains("fasel-hd")) return false
+
+                        if (host.contains("recaptcha") || host.contains("google.com/ads") || host.contains("melbet")) {
+                            return true
+                        }
+                        return false
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        runCatching { view?.evaluateJavascript(snifferJs, null) }
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        runCatching { view?.evaluateJavascript(snifferJs, null) }
+                        if (!finished) {
+                            view?.evaluateJavascript(strategyJs(attempt), null)
+                        }
+                    }
+
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): WebResourceResponse? {
+                        val url = request.url.toString()
+                        val method = request.method
+                        val lower = url.lowercase()
+
+                        if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".woff2") || lower.endsWith(".css")) {
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
+                        if (method.equals("GET", ignoreCase = true) && lower.substringBefore("?").endsWith(".m3u8")) {
+                            handleFoundLink(url)
+                            try {
+                                val reqBuilder = OkRequest.Builder()
+                                    .url(url)
+                                    .header("User-Agent", userAgent)
+                                    .header("Referer", referer)
+                                    .header("Origin", mainUrl)
+                                val cookies = cookieManager.getCookie(url)
+                                if (cookies.isNullOrBlank().not()) reqBuilder.header("Cookie", cookies!!)
+
+                                val response = httpClient.newCall(reqBuilder.build()).execute()
+                                if (!response.isSuccessful) return null
+                                val contentType =
+                                    response.header("content-type")?.substringBefore(";")
+                                        ?: "application/vnd.apple.mpegurl"
+                                return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
+                            } catch (e: Exception) {
+                                return null
+                            }
+                        }
+
+                        if (method.equals("GET", ignoreCase = true) &&
+                            (lower.contains("fasel") || lower.contains("jwplayer") || lower.contains("config") || lower.contains("player"))
+                        ) {
+                            try {
+                                val reqBuilder = OkRequest.Builder()
+                                    .url(url)
+                                    .header("User-Agent", userAgent)
+                                    .header("Referer", referer)
+                                val cookies = cookieManager.getCookie(url)
+                                if (cookies.isNullOrBlank().not()) reqBuilder.header("Cookie", cookies!!)
+
+                                val response = httpClient.newCall(reqBuilder.build()).execute()
+                                val contentType =
+                                    response.header("content-type")?.substringBefore(";") ?: "text/html"
+                                return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
+                            } catch (e: Exception) {
+                                return super.shouldInterceptRequest(view, request)
+                            }
+                        }
+
+                        return super.shouldInterceptRequest(view, request)
+                    }
+
+                    @SuppressLint("WebViewClientOnReceivedSslError")
+                    override fun onReceivedSslError(view: WebView?, handler: android.webkit.SslErrorHandler?, error: android.net.http.SslError?) {
+                        handler?.proceed()
+                    }
+                }
+
+                webView.webViewClient = webClient
+                webView.webChromeClient = object : WebChromeClient() {
+                    override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
+                        val text = msg?.message() ?: ""
+                        if (text.startsWith("NET_M3U8::")) {
+                            handleFoundLink(text.substringAfter("::").trim())
+                        }
+                        return true
+                    }
+                }
+
+                startAttempt()
+
+                cont.invokeOnCancellation {
+                    handler.post { safeFinish(null) }
+                }
+            }
+        }
 }
