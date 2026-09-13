@@ -55,7 +55,7 @@ import kotlin.coroutines.resume
 
 class FaselHD(private val context: Context) : MainAPI() {
 
-    override var name = "FaselHD"
+    override var name = "فاصل إعلاني (FaselHD)"
     override val hasQuickSearch = true
     override var mainUrl = "https://www.fasel-hd.co/"
     override var lang = "ar"
