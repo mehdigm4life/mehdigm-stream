@@ -52,7 +52,7 @@ mehdigm-stream/
 ├── settings.gradle.kts                # يُدرج المجلدات كوحدات بشكل تلقائي
 ├── gradle.properties                  # إعدادات JVM و Android
 ├── plugins.json                       # 📑 فهرس الإضافات (يقرؤه Cloudstream)
-├── repo                               # رابط قصير يشير إلى plugins.json
+├── Mehdi.json                         # رابط قصير يشير إلى plugins.json
 ├── opencode.json                      # إعدادات OpenCode AI
 ├── gradlew / gradlew.bat             # مشغّل Gradle
 ├── README.md                          # README الرئيسي (تعليمات التثبيت)
@@ -85,7 +85,7 @@ mehdigm-stream/
 ```
 Cloudstream App
       │
-      ├── يقرأ repo → plugins.json → يجد Animezid.cs3
+      ├── يقرأ Mehdi.json → plugins.json → يجد Animezid.cs3
       │
       ├── installs .cs3 → تسجل الإضافة في التطبيق
       │
@@ -201,7 +201,7 @@ rate-limit)،
 3. الصق الرابط التالي:
 
 ```
-https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/repo
+https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
 ```
 
 أو مباشرة:
@@ -328,7 +328,7 @@ StreamWish, FileMoon ...)، مع استخراج عام للـ m3u8/MP4 كبدي�
                             │
                     المستخدم ← Cloudstream
                             │
-            يقرأ repo → plugins.json → يجد الإضافة
+            يقرأ Mehdi.json → plugins.json → يجد الإضافة
                             │
                         تنزيل .cs3 → تثبيت → استخدام
 ```
@@ -340,7 +340,7 @@ StreamWish, FileMoon ...)، مع استخراج عام للـ m3u8/MP4 كبدي�
 | الملف | الدور |
 |-------|-------|
 | **`plugins.json`** | فهرس جميع الإضافات المتاحة. يقرؤه Cloudstream ليعرضها للمستخدم. يحتوي على الاسم، الوصف، الرابط، الإصدار، اللغة، أنواع المحتوى. |
-| **`repo`** | رابط قصير يشير إلى `plugins.json`. يُستخدم كرابط المستودع في Cloudstream. |
+| **`Mehdi.json`** | رابط قصير يشير إلى `plugins.json`. يُستخدم كرابط المستودع في Cloudstream. |
 | **`opencode.json`** | إعدادات OpenCode AI للمساعدة في التطوير. |
 
 ---

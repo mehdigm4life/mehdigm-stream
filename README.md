@@ -78,7 +78,7 @@
 4. الصق الرابط التالي:
 
 ```text
-https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/repo
+https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
 ```
 
 5. ستظهر قائمة الإضافات العربية — ثبّت ما تريد، وابدأ المشاهدة فوراً
@@ -120,7 +120,7 @@ mehdigm-stream/
 ├── build/                            # 📦 ملفات .cs3 الجاهزة (يقرؤها التطبيق)
 ├── .github/workflows/                # ⚙️ CI — بناء ونشر تلقائي
 ├── plugins.json                      # 📑 فهرس الإضافات (يعرضها CloudStream)
-├── repo                              # 🔗 رابط المستودع القصير
+├── Mehdi.json                         # 🔗 رابط المستودع القصير
 ├── build.gradle.kts                  # إعدادات Gradle العامة
 ├── settings.gradle.kts               # تسجيل الوحدات تلقائياً
 └── gradle.properties                 # إعدادات JVM / Android
