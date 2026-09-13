@@ -47,7 +47,6 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -155,6 +154,36 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     // ------------------------------------------------------------------
+    // دمج بطاقات المواسم المبعثرة في بطاقة واحدة لكل مسلسل
+    // (كل موسم في الموقع يمثل post مستقل بعنوان "مسلسل X الموسم ...")
+    // ------------------------------------------------------------------
+
+    private val seriesTitleMarkers = setOf("موسم", "الموسم", "Season", "season")
+
+    private fun normalizeSeriesTitle(title: String): String {
+        val tokens = title.trim().split(Regex("\\s+"))
+        val cut = tokens.indexOfFirst { it in seriesTitleMarkers }
+        if (cut >= 0) return tokens.take(cut).joinToString(" ").trim()
+        return title.trim()
+            .replace(Regex("""\s+الحلقة\s+\d+([-–]\s*\d+)?\s*$"""), "")
+            .trim()
+    }
+
+    private fun groupResults(items: List<SearchResponse>): List<SearchResponse> {
+        val grouped = LinkedHashMap<String, SearchResponse>()
+        for (item in items) {
+            val base = normalizeSeriesTitle(item.name)
+            val existing = grouped[base]
+            when {
+                existing == null -> grouped[base] = item
+                // في حال ورود بطاقة المسلسل الرئيسية (بدون موسم) في نفس المجموعة
+                existing.name != base && item.name == base -> grouped[base] = item
+            }
+        }
+        return grouped.values.toList()
+    }
+
+    // ------------------------------------------------------------------
     // الصفحة الرئيسية + الأقسام
     // ------------------------------------------------------------------
 
@@ -194,7 +223,9 @@ class FaselHD(private val context: Context) : MainAPI() {
             return newHomePageResponse(request.name, flat, false)
         }
 
-        val items = doc.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
+        val items = groupResults(
+            doc.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
+        )
         val hasNext = doc.select("ul.pagination a[href]")
             .any { it.attr("href").contains("page/${page + 1}") }
         return newHomePageResponse(request.name, items, hasNext)
@@ -210,19 +241,22 @@ class FaselHD(private val context: Context) : MainAPI() {
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val encoded = URLEncoder.encode(query, "UTF-8")
+        val base = mainUrl.trimEnd('/')
         val url = if (page <= 1) {
-            "$mainUrl/?s=$encoded"
+            "$base/?s=$encoded"
         } else {
-            "$mainUrl/?s=$encoded&paged=$page"
+            "$base/?s=$encoded&paged=$page"
         }
         val doc = try {
             getDocument(url, referer = mainUrl)
         } catch (e: Exception) {
-            Jsoup.parse("", url)
+            return newSearchResponseList(emptyList(), false)
         }
 
-        val items = doc.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
-            .mapNotNull { it.toSearchResult() }
+        val items = groupResults(
+            doc.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
+                .mapNotNull { it.toSearchResult() }
+        )
         val hasNext = doc.select("ul.pagination a[href]")
             .any {
                 it.attr("href").contains("paged=${page + 1}") ||
