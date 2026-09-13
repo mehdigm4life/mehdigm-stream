@@ -129,7 +129,7 @@ https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
 ./gradlew :YourPlugin:make
 ```
 
-الملفات الناتجة (`.cs3`) تُوضع تلقائياً في مجلد `build/`، وهي ما يستهلكه التطبيق فعلياً. يوجد أيضاً نشر تلقائي عبر **GitHub Actions** عند أي تعديل على الكود.
+الملفات الناتجة (`.cs3`) تُوضع يدوياً في مجلد `build/`، وهي ما يستهلكه التطبيق فعلياً. يوجد أيضاً نشر تلقائي عبر **GitHub Actions** عند أي تعديل على الكود.
 
 ---
 
