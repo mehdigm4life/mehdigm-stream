@@ -133,35 +133,6 @@ https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
 
 ---
 
-## 📁 هيكل المشروع
-
-```
-mehdigm-stream/
-│
-├── AddonOne/                         # كود إضافة (كل مجلد = إضافة مستقلة)
-├── AddonTwo/
-├── AddonThree/
-│
-├── build/                            # 📦 ملفات .cs3 الجاهزة (يقرؤها التطبيق)
-├── .github/workflows/                # ⚙️ CI — بناء ونشر تلقائي
-├── plugins.json                      # 📑 فهرس الإضافات (يعرضها CloudStream)
-├── Mehdi.json                         # 🔗 رابط المستودع القصير
-├── build.gradle.kts                  # إعدادات Gradle العامة
-├── settings.gradle.kts               # تسجيل الوحدات تلقائياً
-└── gradle.properties                 # إعدادات JVM / Android
-```
-
-كل إضافة تتبع نفس النمط:
-
-```
-AddonOne/
-└── src/main/kotlin/com/addonone/
-    ├── AddonOne.kt          # منطق السكرابينغ (MainAPI)
-    └── AddonOnePlugin.kt    # نقطة دخول الإضافة (CloudstreamPlugin)
-```
-
----
-
 ## 👥 المساهمة
 
 نرحّب بأي مساهمة لتحسين الإضافات:
