@@ -23,6 +23,42 @@
 
 ---
 
+<div align="center">
+
+### ⚡ التثبيت السريع — Shortcodes
+
+**لا تحتاج لنسخ أي رابط طويل — فقط اكتب أحد الكودين داخل التطبيق**
+
+<p>
+  <img src="https://img.shields.io/badge/Shortcode%201-mehdigm-1e90ff?style=for-the-badge" alt="Shortcode 1">
+  <img src="https://img.shields.io/badge/Shortcode%202-mehdiarab-8e44ad?style=for-the-badge" alt="Shortcode 2">
+</p>
+
+| 🏆 الكود الرئيسي | 🔁 الكود الاحتياطي |
+|:---:|:---:|
+| **`mehdigm`** | **`mehdiarab`** |
+| يُوصل مباشرة إلى المستودع | بديل إن تعذّر الأول |
+| [`cutt.ly/mehdigm`](https://cutt.ly/mehdigm) | [`cutt.ly/mehdiarab`](https://cutt.ly/mehdiarab) |
+
+> 💡 الكودان يصلان إلى **نفس المستودع**، فاختر أيّهما أسهل لك.
+
+</div>
+
+**طريقة الإضافة خلال 30 ثانية ⏱️:**
+
+1. افتح تطبيق **CloudStream3** من [الرابط الرسمي](https://github.com/recloudstream/cloudstream/releases)
+2. انتقل إلى: **⚙️ الإعدادات ← الإضافات (Extensions)**
+3. اضغط زر **(+)** ثم اختر **Add Repository**
+4. اكتب الكود المختصر كما هو، مثال:
+
+```text
+mehdigm
+```
+
+5. اضغط **Add** وستظهر قائمة الإضافات العربية فوراً — ثبّت ما تريد وابدأ المشاهدة 🎬
+
+---
+
 ## ✨ لمحة سريعة
 
 **mehdigm-stream** هو مستودع إضافات عربي متكامل لتطبيق **[CloudStream3](https://github.com/recloudstream/cloudstream)** على أندرويد و Android TV. يوفّر مجموعة من الإضافات التي تجلب المحتوى من **أشهر مواقع مشاهدة الأفلام والمسلسلات العربية**، وتعرضه لك داخل تطبيق واحد أنيق — سريع، بدون إعلانات، وبواجهة عربية بالكامل.
@@ -75,7 +111,7 @@
 1. افتح تطبيق **CloudStream3**
 2. انتقل إلى: **الإعدادات (Settings) ← الإضافات (Extensions)**
 3. اضغط زر **「+」** لإضافة مستودع جديد
-4. الصق الرابط التالي:
+4. اكتب الكود المختصر `mehdigm` (من القسم أعلى الصفحة) **أو** الصق الرابط الطويل التالي احتياطياً:
 
 ```text
 https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json
