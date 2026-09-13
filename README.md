@@ -8,7 +8,7 @@
   <b>مستودع الإضافات العربية لتطبيق CloudStream3</b>
   <br><br>
   <img src="https://img.shields.io/badge/platform-Android%20%7C%20Android%20TV-black?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/features-6-blue?style=flat-square" alt="Features">
+  <img src="https://img.shields.io/badge/features-7-blue?style=flat-square" alt="Features">
 </p>
 
 <p align="center">
