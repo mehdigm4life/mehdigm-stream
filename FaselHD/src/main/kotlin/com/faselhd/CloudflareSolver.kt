@@ -14,15 +14,15 @@ import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlinx.coroutines.suspendCancellableCoroutine
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 
 object CloudflareSolver {
 
-    suspend fun solve(activity: Activity?, url: String, userAgent: String): Document? {
+    // يعرض نافذة منبثقة تحمّل صفحة التحدي، ويبقى فيها حتى يتمكن الحل (يدوياً أو تلقائياً)
+    // ويعيد true فقط عند حصولنا على كوكي cf_clearance المثبّتة في CookieManager.
+    suspend fun solve(activity: Activity?, url: String, userAgent: String): Boolean {
         return suspendCancellableCoroutine { cont ->
             if (activity == null || activity.isFinishing) {
-                cont.resumeWith(Result.success(null))
+                cont.resumeWith(Result.success(false))
                 return@suspendCancellableCoroutine
             }
 
@@ -30,8 +30,9 @@ object CloudflareSolver {
             var finished = false
             var dialogRef: Dialog? = null
             var webViewRef: WebView? = null
+            var statusRef: TextView? = null
 
-            fun finishWith(html: String?) {
+            fun finishWith(solved: Boolean) {
                 if (finished) return
                 finished = true
                 mainHandler.removeCallbacksAndMessages(null)
@@ -39,62 +40,19 @@ object CloudflareSolver {
                 runCatching { webViewRef?.stopLoading() }
                 runCatching { webViewRef?.destroy() }
                 runCatching { CookieManager.getInstance().flush() }
-
-                if (html == null) {
-                    if (cont.isActive) cont.resumeWith(Result.success(null))
-                    return
-                }
-
-                val cleanHtml = html.removeSurrounding("\"")
-                    .replace("\\u003C", "<")
-                    .replace("\\u003E", ">")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\")
-                if (cont.isActive) cont.resumeWith(Result.success(Jsoup.parse(cleanHtml)))
+                if (cont.isActive) cont.resumeWith(Result.success(solved))
             }
 
-            // مراقبة تقدم الصفحة داخل النافذة المنبثقة: ننتظر حتى تكتمل الصفحة
-            // ويختفي تحدي Cloudflare، ثم نلتقط HTML النهائي ونغلق النافذة.
-            fun waitForReady(webView: WebView) {
+            // النجاح الحقيقي: وجود كوكي cf_clearance للدومين المطلوب.
+            // التحدي عند فاصل غالباً "managed" يُحل تلقائياً بلا مربع، لذا هذا أفضل من فحص الـ HTML.
+            fun waitForClearance(url: String) {
                 if (finished) return
-                val js = """
-                    (function(){
-                        try{
-                            var hasChallenge = document.querySelector('#challenge-form, #challenge-running, .cf-turnstile, #cf-chl-widget') != null;
-                            var html = document.documentElement.innerHTML || '';
-                            html = html.toLowerCase();
-                            var stillCloudflare = html.indexOf('just a moment') !== -1 || html.indexOf('checking your browser') !== -1 || html.indexOf('cf_error') !== -1;
-                            return location.href + '|' + document.readyState + '|' + (hasChallenge ? '1' : '0') + '|' + (stillCloudflare ? '1' : '0');
-                        }catch(e){ return location.href + '|loading|1|1'; }
-                    })();
-                """.trimIndent()
-
-                webView.evaluateJavascript(js) { res ->
-                    if (finished) return@evaluateJavascript
-                    if (res == null) {
-                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
-                        return@evaluateJavascript
-                    }
-
-                    val parts = res.replace("\"", "").split("|")
-                    if (parts.size < 4) {
-                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
-                        return@evaluateJavascript
-                    }
-
-                    val (pageUrl, ready, hasChallenge, stillCloudflare) = parts
-
-                    // الصفحة الحقيقية ظهرت: اكتمل التحميل، لا يوجد تحدي، ولا أي أثر لـ Cloudflare
-                    if (ready == "complete" && hasChallenge == "0" && stillCloudflare == "0") {
-                        // سكون قصير حتى تستقر الصفحة
-                        mainHandler.postDelayed({
-                            webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
-                                finishWith(html)
-                            }
-                        }, 400)
-                    } else {
-                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
-                    }
+                val cookies = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() ?: ""
+                if (cookies.contains("cf_clearance")) {
+                    statusRef?.post { statusRef?.text = "تم الحل ✓ جارٍ التحميل..." }
+                    mainHandler.postDelayed({ finishWith(true) }, 300)
+                } else {
+                    mainHandler.postDelayed({ waitForClearance(url) }, 500)
                 }
             }
 
@@ -126,11 +84,12 @@ object CloudflareSolver {
                 }
 
                 val statusText = TextView(activity).apply {
-                    text = "حل تحدي Cloudflare: اضغط على المربع ثم انتظر ثوانٍ"
+                    text = "في انتظار حل تحدي Cloudflare...\n(سواء ظهر مربع أم لا، سيُحل تلقائياً)"
                     setTextColor(Color.WHITE)
                     textSize = 14f
                     setPadding(24, 20, 24, 20)
                 }
+                statusRef = statusText
 
                 val cancelBtn = TextView(activity).apply {
                     text = "إلغاء"
@@ -139,7 +98,7 @@ object CloudflareSolver {
                     setPadding(24, 20, 24, 20)
                     setBackgroundColor(Color.parseColor("#8E0000"))
                 }
-                cancelBtn.setOnClickListener { finishWith(null) }
+                cancelBtn.setOnClickListener { finishWith(false) }
 
                 val topBar = LinearLayout(activity).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -161,20 +120,20 @@ object CloudflareSolver {
                 webView.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, pageUrl: String?) {
                         super.onPageFinished(view, pageUrl)
-                        mainHandler.post { waitForReady(webView) }
+                        mainHandler.post { waitForClearance(url) }
                     }
                 }
 
                 dialog.show()
 
-                // مهلة أمان: في حال لم يعمل المستخدم أي شيء
-                mainHandler.postDelayed({ finishWith(null) }, 120_000L)
+                // مهلة أمان: في حال تعثّر الحل تماماً
+                mainHandler.postDelayed({ finishWith(false) }, 60_000L)
 
                 webView.loadUrl(url)
             }
 
             cont.invokeOnCancellation {
-                mainHandler.post { finishWith(null) }
+                mainHandler.post { finishWith(false) }
             }
         }
     }

@@ -171,8 +171,32 @@ class FaselHD(private val context: Context) : MainAPI() {
         }
 
         return cfLock.withLock {
-            val activity = context as? Activity
-            CloudflareSolver.solve(activity, cleanUrl, userAgent) ?: Jsoup.parse("", cleanUrl)
+            val solved = runCatching {
+                CloudflareSolver.solve(context as? Activity, cleanUrl, userAgent)
+            }.getOrDefault(false)
+
+            // بعد الحل أُعيد نفس الطلب عادياً — الكوكيز (cf_clearance) الآن في CookieManager
+            if (solved) {
+                try {
+                    val headers = getModernHeaders(cleanUrl)
+                    if (referer != null) headers["Referer"] = referer
+                    val response = app.get(
+                        cleanUrl,
+                        headers = headers,
+                        timeout = 30L,
+                        allowRedirects = true
+                    )
+                    if (response.code == 200 || response.code in 300..308) {
+                        response.document
+                    } else {
+                        Jsoup.parse("", cleanUrl)
+                    }
+                } catch (e: Exception) {
+                    Jsoup.parse("", cleanUrl)
+                }
+            } else {
+                Jsoup.parse("", cleanUrl)
+            }
         }
     }
 
