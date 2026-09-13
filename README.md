@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/fav.png" alt="mehdigm-stream" width="96" />
+  <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQuLPPUaQuuMZ7EKxywIyWZ8O6vej4dcfL-9pR0-4JccA&s=10" alt="mehdigm-stream" width="96" />
 </p>
 
 <h1 align="center">📺 mehdigm-stream</h1>
