@@ -1,221 +1,180 @@
 package com.faselhd
 
-import android.R
 import android.app.Activity
+import android.app.Dialog
+import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
-import android.util.Log
-import android.view.MotionEvent
+import android.view.Gravity
 import android.view.ViewGroup
+import android.view.Window
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 object CloudflareSolver {
-    private const val TAG = "CF_Solver_Hidden"
 
     suspend fun solve(activity: Activity?, url: String, userAgent: String): Document? {
-        return suspendCoroutine { continuation ->
+        return suspendCancellableCoroutine { cont ->
             if (activity == null || activity.isFinishing) {
-                continuation.resume(null)
-                return@suspendCoroutine
+                cont.resumeWith(Result.success(null))
+                return@suspendCancellableCoroutine
             }
 
-            Handler(Looper.getMainLooper()).post {
-                val rootView = activity.findViewById<ViewGroup>(R.id.content) ?: run {
-                    continuation.resume(null)
-                    return@post
+            val mainHandler = Handler(Looper.getMainLooper())
+            var finished = false
+            var dialogRef: Dialog? = null
+            var webViewRef: WebView? = null
+
+            fun finishWith(html: String?) {
+                if (finished) return
+                finished = true
+                mainHandler.removeCallbacksAndMessages(null)
+                runCatching { dialogRef?.dismiss() }
+                runCatching { webViewRef?.stopLoading() }
+                runCatching { webViewRef?.destroy() }
+                runCatching { CookieManager.getInstance().flush() }
+
+                if (html == null) {
+                    if (cont.isActive) cont.resumeWith(Result.success(null))
+                    return
                 }
 
-                val webView = WebView(activity)
-                webView.layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                webView.alpha = 0f
-                webView.translationX = 10000f
-                webView.isFocusable = false
-                webView.isFocusableInTouchMode = false
-                webView.isClickable = false
+                val cleanHtml = html.removeSurrounding("\"")
+                    .replace("\\u003C", "<")
+                    .replace("\\u003E", ">")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+                if (cont.isActive) cont.resumeWith(Result.success(Jsoup.parse(cleanHtml)))
+            }
 
+            // مراقبة تقدم الصفحة داخل النافذة المنبثقة: ننتظر حتى تكتمل الصفحة
+            // ويختفي تحدي Cloudflare، ثم نلتقط HTML النهائي ونغلق النافذة.
+            fun waitForReady(webView: WebView) {
+                if (finished) return
+                val js = """
+                    (function(){
+                        try{
+                            var hasChallenge = document.querySelector('#challenge-form, #challenge-running, .cf-turnstile, #cf-chl-widget') != null;
+                            var html = document.documentElement.innerHTML || '';
+                            html = html.toLowerCase();
+                            var stillCloudflare = html.indexOf('just a moment') !== -1 || html.indexOf('checking your browser') !== -1 || html.indexOf('cf_error') !== -1;
+                            return location.href + '|' + document.readyState + '|' + (hasChallenge ? '1' : '0') + '|' + (stillCloudflare ? '1' : '0');
+                        }catch(e){ return location.href + '|loading|1|1'; }
+                    })();
+                """.trimIndent()
+
+                webView.evaluateJavascript(js) { res ->
+                    if (finished) return@evaluateJavascript
+                    if (res == null) {
+                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
+                        return@evaluateJavascript
+                    }
+
+                    val parts = res.replace("\"", "").split("|")
+                    if (parts.size < 4) {
+                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
+                        return@evaluateJavascript
+                    }
+
+                    val (pageUrl, ready, hasChallenge, stillCloudflare) = parts
+
+                    // الصفحة الحقيقية ظهرت: اكتمل التحميل، لا يوجد تحدي، ولا أي أثر لـ Cloudflare
+                    if (ready == "complete" && hasChallenge == "0" && stillCloudflare == "0") {
+                        // سكون قصير حتى تستقر الصفحة
+                        mainHandler.postDelayed({
+                            webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
+                                finishWith(html)
+                            }
+                        }, 400)
+                    } else {
+                        mainHandler.postDelayed({ waitForReady(webView) }, 400)
+                    }
+                }
+            }
+
+            activity.runOnUiThread {
+                val dialog = Dialog(activity)
+                dialogRef = dialog
+                dialog.setCancelable(false)
+                dialog.setCanceledOnTouchOutside(false)
+                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+                val webView = WebView(activity)
+                webViewRef = webView
                 webView.settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     databaseEnabled = true
-                    this.userAgentString = userAgent
+                    userAgentString = userAgent
                     useWideViewPort = true
                     loadWithOverviewMode = true
+                    builtInZoomControls = true
+                    displayZoomControls = false
                 }
 
-                val cookieManager = CookieManager.getInstance()
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(webView, true)
-
-                var isSolved = false
-                var isProcessingClick = false
-                val pollingHandler = Handler(Looper.getMainLooper())
-
-                fun finishSuccess(html: String?) {
-                    if (!isSolved) {
-                        isSolved = true
-                        cookieManager.flush()
-                        try {
-                            pollingHandler.removeCallbacksAndMessages(null)
-                            rootView.removeView(webView)
-                            webView.destroy()
-                        } catch (e: Exception) {}
-
-                        if (html == null) {
-                            continuation.resume(null)
-                            return
-                        }
-
-                        var cleanHtml = html.removeSurrounding("\"")
-                            .replace("\\u003C", "<")
-                            .replace("\\u003E", ">")
-                            .replace("\\\"", "\"")
-                            .replace("\\\\", "\\")
-
-                        continuation.resume(Jsoup.parse(cleanHtml))
-                    }
+                runCatching {
+                    val cm = CookieManager.getInstance()
+                    cm.setAcceptCookie(true)
+                    cm.setAcceptThirdPartyCookies(webView, true)
+                    cm.flush()
                 }
 
-                pollingHandler.postDelayed({ finishSuccess(null) }, 60000)
-
-                fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
-                    val density = activity.resources.displayMetrics.density
-                    val realX = cssX * density
-                    val realY = cssY * density
-                    val downTime = SystemClock.uptimeMillis()
-                    val eventTime = SystemClock.uptimeMillis() + 50
-                    val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, realX, realY, 0)
-                    view.dispatchTouchEvent(downEvent)
-                    view.postDelayed({
-                        val upEvent = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_UP, realX, realY, 0)
-                        view.dispatchTouchEvent(upEvent)
-                        downEvent.recycle()
-                        upEvent.recycle()
-                    }, 50)
+                val statusText = TextView(activity).apply {
+                    text = "حل تحدي Cloudflare: اضغط على المربع ثم انتظر ثوانٍ"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setPadding(24, 20, 24, 20)
                 }
 
-                val targetCssPath = "html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div"
-
-                fun startPolling() {
-                    val runnable = object : Runnable {
-                        override fun run() {
-                            if (isSolved || isProcessingClick) {
-                                pollingHandler.postDelayed(this, 2000)
-                                return
-                            }
-
-                            val jsGetCoords = """
-                                (function(){
-                                    try{
-                                        var box = document.querySelector("$targetCssPath");
-                                        if(!box) return "NO_BOX";
-                                        var r = box.getBoundingClientRect();
-                                        if(r.width === 0 && r.height === 0) return "NO_BOX";
-                                        var size = Math.min(36, Math.max(18, Math.round(r.height * 0.55)));
-                                        var margin = Math.round(Math.max(8, r.width * 0.03));
-                                        var centerY = r.top + (r.height / 2);
-                                        var rightSideX = r.right - (size / 2) - margin;
-                                        var leftSideX = r.left + (size / 2) + margin;
-                                        return rightSideX + "," + centerY + "|" + leftSideX + "," + centerY;
-                                    }catch(e){ return "ERROR"; }
-                                })();
-                            """.trimIndent()
-
-                            webView.evaluateJavascript(jsGetCoords) { res ->
-                                try {
-                                    val clean = res?.removeSurrounding("\"")
-                                    if (clean != null && clean.contains("|")) {
-                                        isProcessingClick = true
-                                        val sides = clean.split("|")
-                                        val (rx, ry) = sides[0].split(",").map { it.toFloatOrNull() }
-                                        val (lx, ly) = sides[1].split(",").map { it.toFloatOrNull() }
-                                        if (rx != null && ry != null && lx != null && ly != null) {
-                                            simulateRealTouch(webView, rx, ry)
-                                            pollingHandler.postDelayed({
-                                                simulateRealTouch(webView, lx, ly)
-                                                pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
-                                            }, 250)
-                                        } else { isProcessingClick = false }
-                                    }
-                                } catch (e: Exception) { isProcessingClick = false }
-                            }
-                            pollingHandler.postDelayed(this, 2000)
-                        }
-                    }
-                    pollingHandler.post(runnable)
+                val cancelBtn = TextView(activity).apply {
+                    text = "إلغاء"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setPadding(24, 20, 24, 20)
+                    setBackgroundColor(Color.parseColor("#8E0000"))
                 }
+                cancelBtn.setOnClickListener { finishWith(null) }
 
-                var lastUrl: String? = null
-                var stableSince = 0L
-                var fetched = false
-
-                fun waitUntilReady() {
-                    if (isSolved) return
-                    val js = """
-                        (function(){
-                            try{
-                                var hasBox = document.querySelector("$targetCssPath") != null;
-                                var html = document.documentElement.innerHTML || "";
-                                var stillCloudflare = html.toLowerCase().includes("cloudflare") || html.toLowerCase().includes("checking your browser");
-                                return location.href + "|" + document.readyState + "|" + hasBox + "|" + stillCloudflare;
-                            }catch(e){ return location.href + "|loading|false|true"; }
-                        })();
-                    """.trimIndent()
-
-                    webView.evaluateJavascript(js) { res ->
-                        if (res == null) {
-                            pollingHandler.postDelayed({ waitUntilReady() }, 200)
-                            return@evaluateJavascript
-                        }
-
-                        val parts = res.replace("\"", "").split("|")
-                        if (parts.size < 4) {
-                            pollingHandler.postDelayed({ waitUntilReady() }, 200)
-                            return@evaluateJavascript
-                        }
-
-                        val (currentUrl, ready, hasBox, stillCloudflare) = parts
-                        val now = SystemClock.uptimeMillis()
-                        if (currentUrl != lastUrl) {
-                            lastUrl = currentUrl
-                            stableSince = now
-                        }
-                        val stableTime = now - stableSince
-
-                        if (hasBox == "false" && stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
-                            fetched = true
-                            pollingHandler.postDelayed({
-                                webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
-                                    finishSuccess(html)
-                                }
-                            }, 500)
-                            return@evaluateJavascript
-                        }
-                        pollingHandler.postDelayed({ waitUntilReady() }, 200)
-                    }
+                val topBar = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setBackgroundColor(Color.parseColor("#1B1B1B"))
                 }
+                topBar.addView(statusText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                topBar.addView(cancelBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+                val root = LinearLayout(activity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setBackgroundColor(Color.WHITE)
+                }
+                root.addView(topBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+                dialog.setContentView(root)
 
                 webView.webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, url: String?) {
-                        super.onPageFinished(view, url)
-                        isProcessingClick = false
-                        startPolling()
-                        waitUntilReady()
+                    override fun onPageFinished(view: WebView?, pageUrl: String?) {
+                        super.onPageFinished(view, pageUrl)
+                        mainHandler.post { waitForReady(webView) }
                     }
                 }
 
-                rootView.addView(webView)
+                dialog.show()
+
+                // مهلة أمان: في حال لم يعمل المستخدم أي شيء
+                mainHandler.postDelayed({ finishWith(null) }, 120_000L)
+
                 webView.loadUrl(url)
+            }
+
+            cont.invokeOnCancellation {
+                mainHandler.post { finishWith(null) }
             }
         }
     }
