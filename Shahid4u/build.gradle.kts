@@ -1,7 +1,7 @@
-version = 1
+version = 2
 
 cloudstream {
-    description = ""
+    description = "إصلاح روابط المشاهدة والتحميل (servers JSON parsing + fastved fastvid)"
     authors = listOf("mehdigm4life")
     language = "ar"
 
