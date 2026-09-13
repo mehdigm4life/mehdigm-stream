@@ -46,6 +46,9 @@ import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -70,8 +73,8 @@ class FaselHD(private val context: Context) : MainAPI() {
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
-    override var sequentialMainPage = true
-    override var sequentialMainPageDelay = 100L
+    override var sequentialMainPage = false
+    override var sequentialMainPageDelay = 0L
 
     companion object {
         @Volatile
@@ -153,7 +156,7 @@ class FaselHD(private val context: Context) : MainAPI() {
                 val response = app.get(
                     cleanUrl,
                     headers = headers,
-                    timeout = 30L,
+                    timeout = 15L,
                     allowRedirects = true
                 )
 
@@ -501,24 +504,43 @@ class FaselHD(private val context: Context) : MainAPI() {
             val episodes = mutableListOf<Episode>()
 
             if (seasonCards.isNotEmpty()) {
-                seasonCards.forEachIndexed { index, seasonEl ->
+                // الموسم النشط يُقرأ من الصفحة الحالية، والبقية تُجلب بالتوازي
+                // مع الحفاظ على ترتيب المواسم لتجنّب تخليط الأرقام.
+                val seasonInfos = seasonCards.mapIndexed { index, seasonEl ->
                     val seasonName = seasonEl.selectFirst(".title")?.text()
                         ?.replace(Regex("\\s+"), " ")?.trim()
                     val seasonNumber = extractSeasonNumber(seasonName, index + 1)
+                    Triple(index, seasonNumber, seasonEl.hasClass("active"))
+                }
 
-                    if (seasonEl.hasClass("active")) {
+                val passiveDocs = coroutineScope {
+                    seasonCards.map { seasonEl ->
+                        async {
+                            if (seasonEl.hasClass("active")) {
+                                null
+                            } else {
+                                val seasonUrl = onClickSeason.find(seasonEl.attr("onclick"))
+                                    ?.groupValues?.get(1)?.let { toAbsolute(it) }
+                                if (seasonUrl == null) {
+                                    null
+                                } else {
+                                    try {
+                                        smartGet(seasonUrl, referer = pageUrl)
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                }
+                            }
+                        }
+                    }.awaitAll()
+                }
+
+                seasonInfos.forEachIndexed { i, (_, seasonNumber, isActive) ->
+                    if (isActive) {
                         doc.select("#epAll a[href]").forEach { addEpisode(it, episodes, seasonNumber, poster) }
                     } else {
-                        val seasonUrl = onClickSeason.find(seasonEl.attr("onclick"))
-                            ?.groupValues?.get(1)?.let { toAbsolute(it) }
-                        if (seasonUrl != null) {
-                            val seasonDoc = try {
-                                smartGet(seasonUrl, referer = pageUrl)
-                            } catch (e: Exception) {
-                                null
-                            }
-                            seasonDoc?.select("#epAll a[href]")?.forEach { addEpisode(it, episodes, seasonNumber, poster) }
-                        }
+                        passiveDocs[i]?.select("#epAll a[href]")
+                            ?.forEach { addEpisode(it, episodes, seasonNumber, poster) }
                     }
                 }
             } else {
