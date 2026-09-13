@@ -1,56 +1,111 @@
-<h1 align="center">📺 mehdigm-stream — إضافات Cloudstream</h1>
+<p align="center">
+  <img src="images/fav.png" alt="mehdigm-stream" width="96" />
+</p>
 
-<h3 align="center">
-مستودع إضافات شخصي لتطبيق <b>Cloudstream</b> على أندرويد.
-<br>
-يحتوي حالياً على إضافة موقع <b>انمي زد (AnimeZid)</b> لمشاهدة الأنمي والكرتون المدبلج والمترجم.
-</h3>
+<h1 align="center">📺 mehdigm-stream</h1>
 
 <p align="center">
-✨ <b>سهلة الاستخدام • خفيفة • ودية للـ Android TV</b><br>
-🎬 يدعم: قائمة رئيسية، بحث، تفاصيل، حلقات متعددة، وعدّة سيرفرات لكل حلقة.
+  <b>مستودع الإضافات العربية لتطبيق CloudStream3</b>
+  <br><br>
+  <img src="https://img.shields.io/badge/platform-Android%20%7C%20Android%20TV-black?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/features-6-blue?style=flat-square" alt="Features">
+</p>
+
+<p align="center">
+  🎬 <b>أفلام</b> • 📺 <b>مسلسلات</b> • 🎌 <b>أنمي</b> • 🧸 <b>كرتون</b>
+  <br>
+  مجاناً، بدون إعلانات، وبجودة عالية — مباشرة من أشهر مواقع البث العربية.
+</p>
+
+<p align="center">
+  🇸🇦 🇪🇬 🇲🇦 🇩🇿 🇮🇶 🇯🇴 🇱🇧 🇸🇾 🇦🇪 🇾🇪 🇶🇦 🇰🇼 🇧🇭 🇴🇲
 </p>
 
 ---
 
-## ⬇️ كيفية التثبيت في Cloudstream
+## ✨ لمحة سريعة
 
-انسخ الرابط التالي والصقه داخل تطبيق Cloudstream من خلال:
-**Settings → Extensions → الزر "+" → Add Repository**
+**mehdigm-stream** هو مستودع إضافات عربي متكامل لتطبيق **[CloudStream3](https://github.com/recloudstream/cloudstream)** على أندرويد و Android TV. يوفّر مجموعة من الإضافات التي تجلب المحتوى من **أشهر مواقع مشاهدة الأفلام والمسلسلات العربية**، وتعرضه لك داخل تطبيق واحد أنيق — سريع، بدون إعلانات، وبواجهة عربية بالكامل.
+
+لا نستضيف أي محتوى؛ نحن نُوفّر فقط **الجسر** بينك وبين المحتوى المتاح أصلاً على الإنترنت.
+
+---
+
+## 🖥️ الدعم
+
+| المنصة | الحالة |
+|--------|---------|
+| 📱 Android | ✅ مُدعَم بالكامل |
+| 📺 Android TV / Firestick | ✅ مُدعَم بالكامل |
+
+---
+
+## 🍿 ماذا ستجد في هذا المستودع؟
+
+مجموعة إضافات عربية تغطي احتياجاتك المعتادة:
+
+- 🎬 **الأفلام** — الأجنبية، العربية، الآسيوية، المدبلجة، والأفلام الأجنبية مترجمة
+- 📺 **المسلسلات** — الأجنبية، العربية، التركية المدبلجة والمترجمة، والآسيوية
+- 🎌 **الأنمي** — مترجم ومدبلج
+- 🧸 **الكرتون** — للأطفال مدبلج ومترجم
+
+كل إضافة تعمل كبوابة إلى موقع عربي شهير، مع تجربة موحّدة ودعم متعدد السيرفرات.
+
+---
+
+## ⚙️ المميزات
+
+- 🎯 **بحث سريع وفوري** — نتائج تظهر أثناء الكتابة
+- 🗂️ **صفحة رئيسية كاملة** — أقسام: الأحدث، الأفلام، المسلسلات، الأنمي، وأكثر
+- 🔀 **سيرفرات متعددة لكل حلقة/فيلم** — مع استخراج تلقائي للروابط المباشرة (m3u8 / MP4)
+- ⚡ **جودة تلقائية (Auto)** — تبديل الجودة حسب سرعة الإنترنت لتفادي الـ buffering
+- 🎨 **بوسترات ونبذات** — بيانات تفصيلية لكل عمل
+- 🛡️ **معالجة ذكية لتحديات الحماية** — بلا أي تدخل منك
+- 🆓 **بدون إعلانات نهائياً** — مشاهدة نقية 100%
+- 🌙 **واجهة عربية** — متوافقة مع اتجاه RTL
+
+---
+
+## ⬇️ التثبيت
+
+### المتطلبات
+- 📲 تطبيق **CloudStream3** (من [الموقع الرسمي](https://github.com/recloudstream/cloudstream/releases))
+
+### خطوات التثبيت
+
+1. افتح تطبيق **CloudStream3**
+2. انتقل إلى: **الإعدادات (Settings) ← الإضافات (Extensions)**
+3. اضغط زر **「+」** لإضافة مستودع جديد
+4. الصق الرابط التالي:
 
 ```text
 https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/repo
 ```
 
-أو استخدم رابط `plugins.json` مباشرة:
+5. ستظهر قائمة الإضافات العربية — ثبّت ما تريد، وابدأ المشاهدة فوراً
 
-```text
-https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json
-```
+> ✅ بعد التثبيت ستجد المصدر الجديد في التبويب الرئيسي (Home) للتطبيق.
 
 ---
 
-## 🧩 الإضافات المتوفرة
+## 🛠️ البناء من المصدر
 
-| الإضافة      | الموقع                                              | النوع                |
-| ------------ | --------------------------------------------------- | -------------------- |
-| **Animezid** | [animezid.cam](https://animezid.cam)                | أنمي + كرتون (عربي)  |
+### المتطلبات
+- JDK 17+
+- Android SDK
+- Gradle (أو `./gradlew`)
 
----
-
-## 🛠️ البناء (Build)
-
-المشروع يعتمد على [Cloudstream Gradle Plugin](https://github.com/recloudstream/gradle).
+### أوامر البناء
 
 ```bash
-# بناء كل الإضافات
+# بناء جميع الإضافات
 ./gradlew make
 
-# بناء إضافة واحدة فقط (Animezid)
-./gradlew :Animezid:make
+# بناء إضافة واحدة فقط
+./gradlew :YourPlugin:make
 ```
 
-ملفات `.cs3` الناتجة توضع تلقائياً داخل المجلد `build/` في جذر المشروع، وهي الملفات التي يقرأها التطبيق فعلياً.
+الملفات الناتجة (`.cs3`) تُوضع تلقائياً في مجلد `build/`، وهي ما يستهلكه التطبيق فعلياً. يوجد أيضاً نشر تلقائي عبر **GitHub Actions** عند أي تعديل على الكود.
 
 ---
 
@@ -58,35 +113,60 @@ https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json
 
 ```
 mehdigm-stream/
-├── Animezid/                       # كود إضافة موقع animezid.cam
-│   ├── build.gradle.kts
-│   └── src/main/
-│       ├── AndroidManifest.xml
-│       └── kotlin/com/animezid/
-│           ├── Animezid.kt         # MainAPI: scraping كامل للموقع
-│           └── AnimezidPlugin.kt   # نقطة دخول CloudstreamPlugin
-├── build/                          # ملفات .cs3 الجاهزة (يقرؤها التطبيق)
-│   └── Animezid.cs3
-├── plugins.json                    # فهرس الإضافات (يقرؤه Cloudstream)
-├── repo                            # ملف الـ repo (الرابط القصير)
-├── build.gradle.kts                # الإعدادات العامة للـ Gradle
-├── settings.gradle.kts             # يُدرج كل المجلدات تلقائياً
-└── README.md
+│
+├── AddonOne/                         # كود إضافة (كل مجلد = إضافة مستقلة)
+├── AddonTwo/
+├── AddonThree/
+│
+├── build/                            # 📦 ملفات .cs3 الجاهزة (يقرؤها التطبيق)
+├── docs/
+│   └── BUILDING.md                   # دليل البناء
+├── .github/workflows/                # ⚙️ CI — بناء ونشر تلقائي
+├── plugins.json                      # 📑 فهرس الإضافات (يعرضها CloudStream)
+├── repo                              # 🔗 رابط المستودع القصير
+├── build.gradle.kts                  # إعدادات Gradle العامة
+├── settings.gradle.kts               # تسجيل الوحدات تلقائياً
+└── gradle.properties                 # إعدادات JVM / Android
+```
+
+كل إضافة تتبع نفس النمط:
+
+```
+AddonOne/
+└── src/main/kotlin/com/addonone/
+    ├── AddonOne.kt          # منطق السكرابينغ (MainAPI)
+    └── AddonOnePlugin.kt    # نقطة دخول الإضافة (CloudstreamPlugin)
 ```
 
 ---
 
-## ⚖️ DMCA Disclaimer
+## 👥 المساهمة
 
-These extensions work like a regular web browser: they fetch publicly available video resources from third-party websites.
+نرحّب بأي مساهمة لتحسين الإضافات:
 
-- ❌ No content is hosted by this repository or by the Cloudstream application.
-- 🌐 All content is hosted by third-party websites.
-- 👤 Users are solely responsible for their usage and must comply with their local laws.
-- 📩 For copyright concerns please contact the actual file hosts, not the developers of this repository.
+1. 🍴 Fork المشروع
+2. 🔀 أنشئ فرعاً: `git checkout -b feature/تحسين`
+3. ✍️ عدّل الكود
+4. 💾 احفظ: `git commit -m "وصف التغيير"`
+5. 📤 انشر: `git push origin feature/تحسين`
+6. 🎉 افتح **Pull Request**
+
+> 📌 عند إرسال تعديل، تأكد من أن الإضافة تُبنى بنجاح: `./gradlew :YourPlugin:make`
+
+---
+
+## ⚖️ إخلاء المسؤولية (DMCA)
+
+- ✋ هذه الإضافات تعمل تماماً مثل متصفح ويب عادي: تجلب **محتوى فيديو متاح للعموم** من مواقع طرف ثالث.
+- ❌ **لا يُستضاف أي محتوى** في هذا المستودع أو في تطبيق CloudStream.
+- 🌐 جميع الفيديوهات مستضافة على مواقع طرف ثالث خارجية.
+- 👤 **المستخدم وحدَه المسؤول** عن استخدامه، ويجب عليه الالتزام بقوانين بلده.
+- 📩 لأي استفسار متعلق بحقوق النشر، يُرجى التواصل مع **مستضيفي الملفات الفعليين** وليس مطوّري هذا المستودع.
 
 ---
 
 <p align="center">
-💖 <b>استمتع بالمشاهدة!</b>
+  <b>mehdigm-stream</b> — مشروع تعليمي مفتوح المصدر.
+  <br>
+  صُمم بحب ❤️ لمجتمع البث العربي
 </p>
