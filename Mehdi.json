@@ -1,6 +1,6 @@
 {
   "name": "Mehdi الوجهة العربية",
-  "description": "بوابتك العربية الأولى لمشاهدة الأفلام والمسلسلات والأنمي — بجودة عالية، بدون إعلانات، ومن أشهر مواقع البث العربي.",
+  "description": "بوابتك العربية الأولى لمشاهدة الأفلام والمسلسلات والأنمي والكرتون — بجودة عالية، بدون إعلانات، ومن أشهر مواقع البث العربي.",
   "iconUrl": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/refs/heads/Images/images/mehdigm.jpg",
   "manifestVersion": 1,
   "pluginLists": ["https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json"]
