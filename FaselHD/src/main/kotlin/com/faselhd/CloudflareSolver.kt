@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -62,6 +63,10 @@ object CloudflareSolver {
                 dialog.setCancelable(false)
                 dialog.setCanceledOnTouchOutside(false)
                 dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+                dialog.window?.let { w ->
+                    w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+                    w.setGravity(Gravity.CENTER)
+                }
 
                 val webView = WebView(activity)
                 webViewRef = webView

@@ -33,6 +33,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
@@ -84,6 +85,10 @@ class FaselHD(private val context: Context) : MainAPI() {
     private val userAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
+    private val cloudflareKiller by lazy { CloudflareKiller() }
+    private val cfInterceptor: okhttp3.Interceptor
+        get() = cloudflareKiller
+
     private val httpClient by lazy {
         app.baseClient.newBuilder()
             .followRedirects(true)
@@ -119,10 +124,17 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
-        val cookies = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() ?: ""
-        return mutableMapOf(
-            "Cookie" to cookies,
-            "User-Agent" to userAgent,
+        // كوكيز و UA رسمية من CloudflareKiller (إن تم الحل بها)، ثم كوكيز الـ WebView الشخصية
+        var cfCookie: String? = null
+        var cfUa: String? = null
+        runCatching {
+            val cfkHeaders = cloudflareKiller.getCookieHeaders(url)
+            cfUa = cfkHeaders["user-agent"]?.takeIf { it.isNotBlank() }
+            cfCookie = cfkHeaders["cookie"]?.takeIf { it.isNotBlank() }
+        }
+
+        val headers = mutableMapOf(
+            "User-Agent" to (cfUa ?: userAgent),
             "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
             "sec-ch-ua-mobile" to "?1",
             "sec-ch-ua-platform" to "\"Android\"",
@@ -134,6 +146,9 @@ class FaselHD(private val context: Context) : MainAPI() {
             "accept-language" to "ar-EG,ar;q=0.9",
             "priority" to "u=0, i"
         )
+        val cookies = cfCookie ?: runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
+        if (!cookies.isNullOrBlank()) headers["Cookie"] = cookies
+        return headers
     }
 
     private fun getProtectedHeaders(): Map<String, String> = getModernHeaders(mainUrl)
@@ -152,7 +167,8 @@ class FaselHD(private val context: Context) : MainAPI() {
                     cleanUrl,
                     headers = headers,
                     timeout = 30L,
-                    allowRedirects = true
+                    allowRedirects = true,
+                    interceptor = cfInterceptor
                 )
 
                 if (response.code == 200 || response.code in 300..308) {
