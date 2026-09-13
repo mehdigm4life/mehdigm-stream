@@ -122,7 +122,8 @@ class FaselHD(private val context: Context) : MainAPI() {
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
         val cookies = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() ?: ""
-        val headers = mutableMapOf(
+        return mutableMapOf(
+            "Cookie" to cookies,
             "User-Agent" to userAgent,
             "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
             "sec-ch-ua-mobile" to "?1",
@@ -135,8 +136,6 @@ class FaselHD(private val context: Context) : MainAPI() {
             "accept-language" to "ar-EG,ar;q=0.9",
             "priority" to "u=0, i"
         )
-        if (cookies.isNotBlank()) headers["Cookie"] = cookies
-        return headers
     }
 
     private fun getProtectedHeaders(): Map<String, String> = getModernHeaders(mainUrl)
@@ -174,32 +173,8 @@ class FaselHD(private val context: Context) : MainAPI() {
         }
 
         return cfLock.withLock {
-            val solved = runCatching {
-                CloudflareSolver.solve(context as? Activity, cleanUrl, userAgent)
-            }.getOrDefault(false)
-
-            // بعد الحل أُعيد نفس الطلب عادياً — الكوكيز (cf_clearance) الآن في CookieManager
-            if (solved) {
-                try {
-                    val headers = getModernHeaders(cleanUrl)
-                    if (referer != null) headers["Referer"] = referer
-                    val response = app.get(
-                        cleanUrl,
-                        headers = headers,
-                        timeout = 30L,
-                        allowRedirects = true
-                    )
-                    if (response.code == 200 || response.code in 300..308) {
-                        response.document
-                    } else {
-                        Jsoup.parse("", cleanUrl)
-                    }
-                } catch (e: Exception) {
-                    Jsoup.parse("", cleanUrl)
-                }
-            } else {
-                Jsoup.parse("", cleanUrl)
-            }
+            val activity = context as? Activity
+            CloudflareSolver.solve(activity, cleanUrl, userAgent) ?: Jsoup.parse("", cleanUrl)
         }
     }
 
@@ -426,13 +401,6 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
-        // محرك الموقع الفوري (admin-ajax dtc_live) — يعمل بلا Cloudflare ويستجيب فوراً
-        if (page == 1 || query.trim().length >= 3) {
-            val live = liveSearchResults(query)
-            if (live.isNotEmpty()) return newSearchResponseList(live, false)
-        }
-
-        // مسار /?s= (محمي بـ Cloudflare) كاحتياط للصفحات اللاحقة
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
         val originalSearch = if (page == 1) {
@@ -459,8 +427,9 @@ class FaselHD(private val context: Context) : MainAPI() {
 
         var items = document.select("div#postList div.postDiv, div.postDiv, article")
             .mapNotNull { it.toSearchResult() }
-        val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
+        var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
 
+        // إذا فشل /?s= (محمي بـ Cloudflare) نستخدم محرك الموقع الفوري نفسه
         if (items.isEmpty() && page == 1) {
             items = liveSearchResults(query)
         }
