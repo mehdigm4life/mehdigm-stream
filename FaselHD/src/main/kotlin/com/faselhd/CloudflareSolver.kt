@@ -86,7 +86,7 @@ object CloudflareSolver {
                     }
                 }
 
-                pollingHandler.postDelayed({ finishSuccess(null) }, 20000)
+                pollingHandler.postDelayed({ finishSuccess(null) }, 60000)
 
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density

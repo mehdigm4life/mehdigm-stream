@@ -156,7 +156,7 @@ class FaselHD(private val context: Context) : MainAPI() {
                 val response = app.get(
                     cleanUrl,
                     headers = headers,
-                    timeout = 15L,
+                    timeout = 30L,
                     allowRedirects = true
                 )
 
