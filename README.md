@@ -119,8 +119,6 @@ mehdigm-stream/
 ├── AddonThree/
 │
 ├── build/                            # 📦 ملفات .cs3 الجاهزة (يقرؤها التطبيق)
-├── docs/
-│   └── BUILDING.md                   # دليل البناء
 ├── .github/workflows/                # ⚙️ CI — بناء ونشر تلقائي
 ├── plugins.json                      # 📑 فهرس الإضافات (يعرضها CloudStream)
 ├── repo                              # 🔗 رابط المستودع القصير

@@ -47,9 +47,6 @@ mehdigm-stream/
 ├── images/                            # صور الأيقونات
 │   └── fav.png                        # أيقونة إضافة FaselHD
 │
-├── docs/
-│   └── BUILDING.md                    # دليل البناء (بالعربية)
-│
 ├── .github/workflows/
 │   ├── build-*.yml                    # CI: بناء تلقائي لكل إضافة عند push
 │   └── opencode.yml                   # تشغيل OpenCode AI عبر Cloudflare tunnel
