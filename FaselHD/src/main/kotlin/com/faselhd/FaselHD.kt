@@ -41,13 +41,13 @@ import com.lagradost.cloudstream3.newSearchResponseList
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.M3u8Helper
+import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.CookieJar
 import okhttp3.FormBody
@@ -77,10 +77,7 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     // ------------------------------------------------------------------
-    // قاعدة الطلبات + حل Cloudflare (WebView مخفي)
-    // ------------------------------------------------------------------
-
-    private val cfLock = Mutex()
+    // قاعدة الطلبات — الموقع لا يحتاج حل Cloudflare يدوي (الصفحات تعمل مباشرة)
     private val userAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
@@ -171,56 +168,16 @@ class FaselHD(private val context: Context) : MainAPI() {
             }
         }
 
-        return cfLock.withLock {
-            val solved = runCatching {
-                CloudflareSolver.solve(context as? Activity, cleanUrl, userAgent)
-            }.getOrDefault(false)
-
-            // بعد الحل أُعيد نفس الطلب عادياً — الكوكيز (cf_clearance) الآن في CookieManager
-            if (solved) {
-                try {
-                    val headers = getModernHeaders(cleanUrl)
-                    if (referer != null) headers["Referer"] = referer
-                    val response = app.get(
-                        cleanUrl,
-                        headers = headers,
-                        timeout = 30L,
-                        allowRedirects = true
-                    )
-                    if (response.code == 200 || response.code in 300..308) {
-                        response.document
-                    } else {
-                        Jsoup.parse("", cleanUrl)
-                    }
-                } catch (e: Exception) {
-                    Jsoup.parse("", cleanUrl)
-                }
-            } else {
-                Jsoup.parse("", cleanUrl)
-            }
-        }
+        return Jsoup.parse("", cleanUrl)
     }
 
-    // طلب POST (مثل admin-ajax) مع إعادة حل Cloudflare تلقائياً عند 403
+    // طلب POST (مثل admin-ajax) مع إعادة محاولة بسيطة عند 403
     private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
         val base = baseUrl()
-        var currentCookies = runCatching { CookieManager.getInstance().getCookie(base) }.getOrNull() ?: ""
-        try {
-            val result = requestBlock(currentCookies)
-            if (result.isNotBlank()) return result
-        } catch (e: Exception) {
-            if (e.message != "403_FORBIDDEN") return null
-        }
-
-        cfLock.withLock {
-            val activity = context as? Activity
-            CloudflareSolver.solve(activity, base, userAgent)
-        }
-        currentCookies = runCatching { CookieManager.getInstance().getCookie(base) }.getOrNull() ?: ""
-        if (!currentCookies.contains("cf_clearance")) return null
-
+        val currentCookies = runCatching { CookieManager.getInstance().getCookie(base) }.getOrNull() ?: ""
         return try {
-            requestBlock(currentCookies)
+            val result = requestBlock(currentCookies)
+            if (result.isNotBlank()) result else null
         } catch (e: Exception) {
             null
         }
@@ -652,6 +609,7 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     private suspend fun emitStream(m3u8: String, referer: String, callback: (ExtractorLink) -> Unit) {
+        // الرابط الأساسي
         M3u8Helper.generateM3u8(
             source = name,
             streamUrl = m3u8,
@@ -661,6 +619,28 @@ class FaselHD(private val context: Context) : MainAPI() {
                 "Referer" to referer
             )
         ).forEach(callback)
+
+        // مصدر "Auto": رابط مشاهدة إضافي يترك المشغّل يتبدل بين الجودات
+        // تلقائياً على مدار التشغيل حسب سرعة الإنترنت (رفع عند السرعة القوية،
+        // خفض عند الضعيفة) لتفادي الـ buffering — يجري في لمح البصر وبلا تدخل.
+        runCatching {
+            callback(
+                ExtractorLink(
+                    source = "${name} Auto",
+                    name = "${name} Auto",
+                    url = m3u8,
+                    referer = referer,
+                    quality = Qualities.Unknown.value,
+                    headers = mapOf(
+                        "User-Agent" to userAgent,
+                        "Referer" to referer
+                    ),
+                    extractorData = "",
+                    type = ExtractorLinkType.M3U8,
+                    audioTracks = emptyList()
+                )
+            )
+        }
     }
 
     override suspend fun loadLinks(
