@@ -236,10 +236,40 @@ class FaselHD(private val context: Context) : MainAPI() {
     // ------------------------------------------------------------------
 
     override suspend fun quickSearch(query: String): List<SearchResponse>? {
-        return search(query, 1).items
+        // مثل موقع فاصل: البحث الفوري يعمل من 3 أحرف فأكثر عبر محركه ajax (بدون Cloudflare)
+        if (query.trim().length < 3) return emptyList()
+        return ajaxLiveSearch(query).items
+    }
+
+    // محرك البحث الفوري في موقع فاصل نفسه (action=dtc_live) — يعيد بطاقة واحدة
+    // لكل مسلسل برابط /seasons/ الرئيسي، ويعمل بدون الحاجة لحل Cloudflare
+    private suspend fun ajaxLiveSearch(query: String): SearchResponseList {
+        return try {
+            val resp = app.post(
+                "https://www.fasel-hd.co/wp-admin/admin-ajax.php",
+                data = mapOf(
+                    "action" to "dtc_live",
+                    "trsearch" to query
+                ),
+                headers = pageHeaders(mainUrl) + mapOf(
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
+                ),
+                referer = mainUrl,
+                interceptor = cfInterceptor
+            )
+            val doc = resp.document
+            val items = groupResults(
+                doc.select("div.postDiv").mapNotNull { it.toSearchResult() }
+            )
+            newSearchResponseList(items, false)
+        } catch (e: Exception) {
+            newSearchResponseList(emptyList(), false)
+        }
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
+        // أولاً: صفحة البحث الكاملة في الموقع (نفس /?s=) مع حل Cloudflare
         val encoded = URLEncoder.encode(query, "UTF-8")
         val base = mainUrl.trimEnd('/')
         val url = if (page <= 1) {
@@ -250,19 +280,23 @@ class FaselHD(private val context: Context) : MainAPI() {
         val doc = try {
             getDocument(url, referer = mainUrl)
         } catch (e: Exception) {
-            return newSearchResponseList(emptyList(), false)
+            null
         }
 
-        val items = groupResults(
-            doc.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
-                .mapNotNull { it.toSearchResult() }
-        )
-        val hasNext = doc.select("ul.pagination a[href]")
-            .any {
+        val items = doc?.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
+            ?.mapNotNull { it.toSearchResult() } ?: emptyList()
+        val hasNext = doc?.select("ul.pagination a[href]")
+            ?.any {
                 it.attr("href").contains("paged=${page + 1}") ||
                     it.attr("href").contains("page/${page + 1}")
-            }
-        return newSearchResponseList(items, hasNext)
+            } ?: false
+
+        if (items.isNotEmpty()) {
+            return newSearchResponseList(groupResults(items), hasNext)
+        }
+
+        // احتياط: إذا فشل /?s= (Cloudflare) نستخدم محرك الموقع الفوري نفسه
+        return ajaxLiveSearch(query)
     }
 
     // ------------------------------------------------------------------
