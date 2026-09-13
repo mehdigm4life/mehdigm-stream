@@ -609,20 +609,8 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     private suspend fun emitStream(m3u8: String, referer: String, callback: (ExtractorLink) -> Unit) {
-        // الرابط الأساسي
-        M3u8Helper.generateM3u8(
-            source = name,
-            streamUrl = m3u8,
-            referer = referer,
-            headers = mapOf(
-                "User-Agent" to userAgent,
-                "Referer" to referer
-            )
-        ).forEach(callback)
-
-        // مصدر "Auto": رابط مشاهدة إضافي يترك المشغّل يتبدل بين الجودات
-        // تلقائياً على مدار التشغيل حسب سرعة الإنترنت (رفع عند السرعة القوية،
-        // خفض عند الضعيفة) لتفادي الـ buffering — يجري في لمح البصر وبلا تدخل.
+        // المصدر "Auto" أولاً — الافتراضي الذي يُجلب ويُشغَّل تلقائياً في كل حلقة/فيلم.
+        // يترك المشغّل يتبدل بين الجودات لحظياً حسب سرعة الإنترنت (رفع/خفض) لتفادي الـ buffering.
         runCatching {
             callback(
                 ExtractorLink(
@@ -641,6 +629,17 @@ class FaselHD(private val context: Context) : MainAPI() {
                 )
             )
         }
+
+        // الرابط الأساسي البديل (يُعرض بعده في قائمة المصادر)
+        M3u8Helper.generateM3u8(
+            source = name,
+            streamUrl = m3u8,
+            referer = referer,
+            headers = mapOf(
+                "User-Agent" to userAgent,
+                "Referer" to referer
+            )
+        ).forEach(callback)
     }
 
     override suspend fun loadLinks(

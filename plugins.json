@@ -68,7 +68,7 @@
   "iconUrl": "https://static.faselhdcdn.com/wp-content/uploads/2022/06/logo-1.png",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-"fileSize": 42407,
+"fileSize": 42293,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -79,7 +79,7 @@
     "Movie",
     "Anime"
   ],
-  "version": 10,
+  "version": 11,
   "internalName": "FaselHD",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
   "name": "فاصل إعلاني (FaselHD)",
