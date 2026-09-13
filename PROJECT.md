@@ -44,9 +44,6 @@ mehdigm-stream/
 │   ├── ArabSeed.cs3
 │   └── FaselHD.cs3
 │
-├── images/                            # صور الأيقونات
-│   └── fav.png                        # أيقونة إضافة FaselHD
-│
 ├── .github/workflows/
 │   ├── build-*.yml                    # CI: بناء تلقائي لكل إضافة عند push
 │   └── opencode.yml                   # تشغيل OpenCode AI عبر Cloudflare tunnel
