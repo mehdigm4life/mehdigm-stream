@@ -33,7 +33,6 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
@@ -85,10 +84,6 @@ class FaselHD(private val context: Context) : MainAPI() {
     private val userAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-    private val cloudflareKiller by lazy { CloudflareKiller() }
-    private val cfInterceptor: okhttp3.Interceptor
-        get() = cloudflareKiller
-
     private val httpClient by lazy {
         app.baseClient.newBuilder()
             .followRedirects(true)
@@ -124,17 +119,9 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
-        // كوكيز و UA رسمية من CloudflareKiller (إن تم الحل بها)، ثم كوكيز الـ WebView الشخصية
-        var cfCookie: String? = null
-        var cfUa: String? = null
-        runCatching {
-            val cfkHeaders = cloudflareKiller.getCookieHeaders(url)
-            cfUa = cfkHeaders["user-agent"]?.takeIf { it.isNotBlank() }
-            cfCookie = cfkHeaders["cookie"]?.takeIf { it.isNotBlank() }
-        }
-
+        val cookies = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() ?: ""
         val headers = mutableMapOf(
-            "User-Agent" to (cfUa ?: userAgent),
+            "User-Agent" to userAgent,
             "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
             "sec-ch-ua-mobile" to "?1",
             "sec-ch-ua-platform" to "\"Android\"",
@@ -146,8 +133,7 @@ class FaselHD(private val context: Context) : MainAPI() {
             "accept-language" to "ar-EG,ar;q=0.9",
             "priority" to "u=0, i"
         )
-        val cookies = cfCookie ?: runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
-        if (!cookies.isNullOrBlank()) headers["Cookie"] = cookies
+        if (cookies.isNotBlank()) headers["Cookie"] = cookies
         return headers
     }
 
@@ -167,8 +153,7 @@ class FaselHD(private val context: Context) : MainAPI() {
                     cleanUrl,
                     headers = headers,
                     timeout = 30L,
-                    allowRedirects = true,
-                    interceptor = cfInterceptor
+                    allowRedirects = true
                 )
 
                 if (response.code == 200 || response.code in 300..308) {
@@ -439,6 +424,13 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
+        // محرك الموقع الفوري (admin-ajax dtc_live) — يعمل بلا Cloudflare ويستجيب فوراً
+        if (page == 1 || query.trim().length >= 3) {
+            val live = liveSearchResults(query)
+            if (live.isNotEmpty()) return newSearchResponseList(live, false)
+        }
+
+        // مسار /?s= (محمي بـ Cloudflare) كاحتياط للصفحات اللاحقة
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
         val originalSearch = if (page == 1) {
@@ -465,9 +457,8 @@ class FaselHD(private val context: Context) : MainAPI() {
 
         var items = document.select("div#postList div.postDiv, div.postDiv, article")
             .mapNotNull { it.toSearchResult() }
-        var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
+        val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
 
-        // إذا فشل /?s= (محمي بـ Cloudflare) نستخدم محرك الموقع الفوري نفسه
         if (items.isEmpty() && page == 1) {
             items = liveSearchResults(query)
         }
