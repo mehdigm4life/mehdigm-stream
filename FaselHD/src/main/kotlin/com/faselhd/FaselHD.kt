@@ -33,7 +33,6 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
@@ -44,9 +43,17 @@ import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.loadExtractor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.CookieJar
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -64,38 +71,177 @@ class FaselHD(private val context: Context) : MainAPI() {
     override var sequentialMainPage = true
     override var sequentialMainPageDelay = 100L
 
+    companion object {
+        @Volatile
+        var redirectUrl: String? = null
+    }
+
+    // ------------------------------------------------------------------
+    // قاعدة الطلبات + حل Cloudflare (WebView مخفي)
+    // ------------------------------------------------------------------
+
+    private val cfLock = Mutex()
     private val userAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-    private val cloudflareKiller by lazy { CloudflareKiller() }
-    private val cfInterceptor: okhttp3.Interceptor
-        get() = cloudflareKiller
-
-    private val httpClient: OkHttpClient by lazy {
+    private val httpClient by lazy {
         app.baseClient.newBuilder()
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
     }
 
-    override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية",
-        "$mainUrl/movies" to "أفلام أجنبية",
-        "$mainUrl/series" to "مسلسلات أجنبية",
-        "$mainUrl/episodes" to "أحدث الحلقات",
-        "$mainUrl/anime" to "الأنمي",
-        "$mainUrl/asian-movies" to "أفلام آسيوية",
-        "$mainUrl/asian-series" to "مسلسلات آسيوية",
-        "$mainUrl/tvshows" to "البرامج",
-        "$mainUrl/anime-movies" to "أفلام الأنمي",
-        "$mainUrl/dubbed-movies" to "أفلام مدبلجة",
-        "$mainUrl/hindi" to "أفلام هندية",
-        "$mainUrl/most_recent" to "أحدث الإضافات"
-    )
+    private val noRedirectClient by lazy {
+        app.baseClient.newBuilder()
+            .cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
 
-    // ------------------------------------------------------------------
-    // أدوات مساعدة
-    // ------------------------------------------------------------------
+    // الموقع يعيد التوجيه بين مرايا متغيرة باستمرار، فنتتبع الرابط الأساسي مرة واحدة
+    private suspend fun baseUrl(): String {
+        redirectUrl?.let { return it }
+        return try {
+            val response = app.get(mainUrl, allowRedirects = true)
+            val finalUrl = response.url
+            val base = try {
+                val uri = java.net.URI(finalUrl)
+                "${uri.scheme}://${uri.host}"
+            } catch (e: Exception) {
+                mainUrl
+            }
+            redirectUrl = base
+            base
+        } catch (e: Exception) {
+            mainUrl
+        }
+    }
+
+    private fun getModernHeaders(url: String): MutableMap<String, String> {
+        val cookies = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() ?: ""
+        return mutableMapOf(
+            "Cookie" to cookies,
+            "User-Agent" to userAgent,
+            "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile" to "?1",
+            "sec-ch-ua-platform" to "\"Android\"",
+            "upgrade-insecure-requests" to "1",
+            "accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "sec-fetch-site" to "none",
+            "sec-fetch-mode" to "navigate",
+            "sec-fetch-dest" to "document",
+            "accept-language" to "ar-EG,ar;q=0.9",
+            "priority" to "u=0, i"
+        )
+    }
+
+    private fun getProtectedHeaders(): Map<String, String> = getModernHeaders(mainUrl)
+
+    // ثلاث محاولات عادية، ثم حل Cloudflare عبر WebView كحل أخير
+    private suspend fun smartGet(url: String, referer: String? = null): Document {
+        val cleanUrl =
+            if (!url.contains("?") && !url.endsWith("/") && !url.substringAfterLast("/").contains(".")) "$url/" else url
+
+        for (attempt in 1..3) {
+            try {
+                val headers = getModernHeaders(cleanUrl)
+                if (referer != null) headers["Referer"] = referer
+
+                val response = app.get(
+                    cleanUrl,
+                    headers = headers,
+                    timeout = 30L,
+                    allowRedirects = true
+                )
+
+                if (response.code == 200 || response.code in 300..308) {
+                    return response.document
+                }
+                if (response.code == 429) {
+                    delay(1000L * attempt)
+                    continue
+                }
+            } catch (e: Exception) {
+                if (e.message?.contains("429") == true) {
+                    delay(1000L * attempt)
+                    continue
+                }
+            }
+        }
+
+        return cfLock.withLock {
+            val activity = context as? Activity
+            CloudflareSolver.solve(activity, cleanUrl, userAgent) ?: Jsoup.parse("", cleanUrl)
+        }
+    }
+
+    // طلب POST (مثل admin-ajax) مع إعادة حل Cloudflare تلقائياً عند 403
+    private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
+        val base = baseUrl()
+        var currentCookies = runCatching { CookieManager.getInstance().getCookie(base) }.getOrNull() ?: ""
+        try {
+            val result = requestBlock(currentCookies)
+            if (result.isNotBlank()) return result
+        } catch (e: Exception) {
+            if (e.message != "403_FORBIDDEN") return null
+        }
+
+        cfLock.withLock {
+            val activity = context as? Activity
+            CloudflareSolver.solve(activity, base, userAgent)
+        }
+        currentCookies = runCatching { CookieManager.getInstance().getCookie(base) }.getOrNull() ?: ""
+        if (!currentCookies.contains("cf_clearance")) return null
+
+        return try {
+            requestBlock(currentCookies)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private suspend fun makeAjaxRequest(
+        ajaxUrl: String,
+        referer: String,
+        formBody: FormBody,
+        cookies: String
+    ): String {
+        var currentUrl = ajaxUrl
+        var redirectCount = 0
+
+        while (redirectCount < 5) {
+            val requestBuilder = OkRequest.Builder()
+                .url(currentUrl)
+                .post(formBody)
+                .header("User-Agent", userAgent)
+                .header("Referer", referer)
+                .header("X-Requested-With", "XMLHttpRequest")
+            if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
+
+            val response = withContext(Dispatchers.IO) {
+                noRedirectClient.newCall(requestBuilder.build()).execute()
+            }
+
+            response.use { res ->
+                when (res.code) {
+                    403 -> throw IllegalStateException("403_FORBIDDEN")
+                    301, 302, 307, 308 -> {
+                        val location = res.header("Location")
+                        if (location != null) {
+                            currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
+                            redirectCount++
+                        } else {
+                            return ""
+                        }
+                    }
+                    200 -> return res.body?.string() ?: ""
+                    else -> return ""
+                }
+            }
+        }
+        return ""
+    }
 
     private fun toAbsolute(url: String?): String? {
         val value = url?.trim() ?: return null
@@ -105,30 +251,6 @@ class FaselHD(private val context: Context) : MainAPI() {
             value.startsWith("//") -> "https:$value"
             else -> mainUrl.trimEnd('/') + "/" + value.trimStart('/')
         }
-    }
-
-    private fun pageHeaders(url: String): Map<String, String> {
-        val headers = mutableMapOf(
-            "User-Agent" to userAgent,
-            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
-            "Upgrade-Insecure-Requests" to "1"
-        )
-        runCatching {
-            cloudflareKiller.getCookieHeaders(url).toMultimap()
-                .mapValues { it.value.joinToString("; ") }
-                .forEach { (k, v) -> headers.putIfAbsent(k, v) }
-        }
-        return headers
-    }
-
-    private suspend fun getDocument(url: String, referer: String? = null): Document {
-        return app.get(
-            url,
-            headers = pageHeaders(url),
-            referer = referer ?: mainUrl,
-            interceptor = cfInterceptor
-        ).document
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -176,7 +298,6 @@ class FaselHD(private val context: Context) : MainAPI() {
             val existing = grouped[base]
             when {
                 existing == null -> grouped[base] = item
-                // في حال ورود بطاقة المسلسل الرئيسية (بدون موسم) في نفس المجموعة
                 existing.name != base && item.name == base -> grouped[base] = item
             }
         }
@@ -187,6 +308,21 @@ class FaselHD(private val context: Context) : MainAPI() {
     // الصفحة الرئيسية + الأقسام
     // ------------------------------------------------------------------
 
+    override val mainPage = mainPageOf(
+        "$mainUrl/main" to "الرئيسية",
+        "$mainUrl/movies" to "أفلام أجنبية",
+        "$mainUrl/series" to "مسلسلات أجنبية",
+        "$mainUrl/episodes" to "أحدث الحلقات",
+        "$mainUrl/anime" to "الأنمي",
+        "$mainUrl/asian-movies" to "أفلام آسيوية",
+        "$mainUrl/asian-series" to "مسلسلات آسيوية",
+        "$mainUrl/tvshows" to "البرامج",
+        "$mainUrl/anime-movies" to "أفلام الأنمي",
+        "$mainUrl/dubbed-movies" to "أفلام مدبلجة",
+        "$mainUrl/hindi" to "أفلام هندية",
+        "$mainUrl/most_recent" to "أحدث الإضافات"
+    )
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val isHome = request.data.endsWith("/main")
         val url = when {
@@ -194,7 +330,7 @@ class FaselHD(private val context: Context) : MainAPI() {
             else -> request.data.trimEnd('/') + "/page/$page"
         }
 
-        val doc = getDocument(url)
+        val doc = smartGet(url)
 
         if (isHome) {
             val lists = mutableListOf<HomePageList>()
@@ -219,8 +355,9 @@ class FaselHD(private val context: Context) : MainAPI() {
                 }
             }
 
-            val flat = lists.flatMap { it.list }
-            return newHomePageResponse(request.name, flat, false)
+            if (lists.isNotEmpty()) {
+                return newHomePageResponse(lists)
+            }
         }
 
         val items = groupResults(
@@ -232,71 +369,70 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     // ------------------------------------------------------------------
-    // البحث
+    // البحث (نفس آلية موقع فاصل)
     // ------------------------------------------------------------------
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? {
-        // مثل موقع فاصل: البحث الفوري يعمل من 3 أحرف فأكثر عبر محركه ajax (بدون Cloudflare)
-        if (query.trim().length < 3) return emptyList()
-        return ajaxLiveSearch(query).items
+    private suspend fun liveSearchResults(query: String): List<SearchResponse> {
+        return try {
+            val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
+            val formBody = FormBody.Builder()
+                .add("action", "dtc_live")
+                .add("trsearch", query)
+                .build()
+            val bodyStr = executeRequestWithCloudflareRetry { cookies ->
+                makeAjaxRequest(ajaxUrl, mainUrl, formBody, cookies)
+            }
+            if (bodyStr.isNullOrBlank()) return emptyList()
+            val doc = Jsoup.parse(bodyStr, baseUrl())
+            groupResults(
+                doc.select("div.postDiv, article, .result, .search-item")
+                    .mapNotNull { it.toSearchResult() }
+            )
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
-    // محرك البحث الفوري في موقع فاصل نفسه (action=dtc_live) — يعيد بطاقة واحدة
-    // لكل مسلسل برابط /seasons/ الرئيسي، ويعمل بدون الحاجة لحل Cloudflare
-    private suspend fun ajaxLiveSearch(query: String): SearchResponseList {
-        return try {
-            val resp = app.post(
-                "https://www.fasel-hd.co/wp-admin/admin-ajax.php",
-                data = mapOf(
-                    "action" to "dtc_live",
-                    "trsearch" to query
-                ),
-                headers = pageHeaders(mainUrl) + mapOf(
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
-                ),
-                referer = mainUrl,
-                interceptor = cfInterceptor
-            )
-            val doc = resp.document
-            val items = groupResults(
-                doc.select("div.postDiv").mapNotNull { it.toSearchResult() }
-            )
-            newSearchResponseList(items, false)
-        } catch (e: Exception) {
-            newSearchResponseList(emptyList(), false)
-        }
+    override suspend fun quickSearch(query: String): List<SearchResponse>? {
+        if (query.trim().length < 3) return emptyList()
+        return liveSearchResults(query)
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
-        // أولاً: صفحة البحث الكاملة في الموقع (نفس /?s=) مع حل Cloudflare
+        val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val base = mainUrl.trimEnd('/')
-        val url = if (page <= 1) {
+        val originalSearch = if (page == 1) {
             "$base/?s=$encoded"
         } else {
-            "$base/?s=$encoded&paged=$page"
+            "$base/page/$page/?s=$encoded"
         }
-        val doc = try {
-            getDocument(url, referer = mainUrl)
+
+        var finalSearchUrl = originalSearch
+        try {
+            val resp = app.get(originalSearch, allowRedirects = true)
+            val final = resp.url
+            finalSearchUrl =
+                if (final.contains("?s=", ignoreCase = true)) final else "$final?s=$encoded"
+        } catch (_: Exception) {
+            finalSearchUrl = originalSearch
+        }
+
+        val document = try {
+            smartGet(finalSearchUrl, referer = base)
         } catch (e: Exception) {
-            null
+            Jsoup.parse("", finalSearchUrl)
         }
 
-        val items = doc?.select("div.postDiv, div#postList div.postDiv, div.blockMovie")
-            ?.mapNotNull { it.toSearchResult() } ?: emptyList()
-        val hasNext = doc?.select("ul.pagination a[href]")
-            ?.any {
-                it.attr("href").contains("paged=${page + 1}") ||
-                    it.attr("href").contains("page/${page + 1}")
-            } ?: false
+        var items = document.select("div#postList div.postDiv, div.postDiv, article")
+            .mapNotNull { it.toSearchResult() }
+        var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
 
-        if (items.isNotEmpty()) {
-            return newSearchResponseList(groupResults(items), hasNext)
+        // إذا فشل /?s= (محمي بـ Cloudflare) نستخدم محرك الموقع الفوري نفسه
+        if (items.isEmpty() && page == 1) {
+            items = liveSearchResults(query)
         }
 
-        // احتياط: إذا فشل /?s= (Cloudflare) نستخدم محرك الموقع الفوري نفسه
-        return ajaxLiveSearch(query)
+        return newSearchResponseList(groupResults(items), hasNext)
     }
 
     // ------------------------------------------------------------------
@@ -340,7 +476,7 @@ class FaselHD(private val context: Context) : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val pageUrl = toAbsolute(url) ?: return null
-        val doc = getDocument(pageUrl)
+        val doc = smartGet(pageUrl)
 
         val title = doc.selectFirst(".singleInfo h1.title, h1.title")?.ownText()
             ?.replace(Regex("\\s+"), " ")?.trim()
@@ -375,7 +511,7 @@ class FaselHD(private val context: Context) : MainAPI() {
                             ?.groupValues?.get(1)?.let { toAbsolute(it) }
                         if (seasonUrl != null) {
                             val seasonDoc = try {
-                                getDocument(seasonUrl, referer = pageUrl)
+                                smartGet(seasonUrl, referer = pageUrl)
                             } catch (e: Exception) {
                                 null
                             }
@@ -467,7 +603,7 @@ class FaselHD(private val context: Context) : MainAPI() {
 
     private suspend fun fetchPlayerSource(playerUrl: String, referer: String): String? {
         return try {
-            val html = getDocument(playerUrl, referer = referer).outerHtml()
+            val html = smartGet(playerUrl, referer = referer).outerHtml()
 
             Regex("""enc:[A-Za-z0-9+/=_%]+""").findAll(html).forEach { match ->
                 val decrypted = decryptEncryptedUrl(match.value)
@@ -503,7 +639,7 @@ class FaselHD(private val context: Context) : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val doc = try {
-            getDocument(data)
+            smartGet(data)
         } catch (e: Exception) {
             return false
         }
