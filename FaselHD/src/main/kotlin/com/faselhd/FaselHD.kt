@@ -652,6 +652,28 @@ class FaselHD(private val context: Context) : MainAPI() {
     }
 
     private suspend fun emitStream(m3u8: String, referer: String, callback: (ExtractorLink) -> Unit) {
+        // المصدر "Auto" أولاً — الافتراضي الذي يُجلب ويُشغَّل تلقائياً في كل حلقة/فيلم.
+        // يترك المشغّل يتبدل بين الجودات لحظياً حسب سرعة الإنترنت (رفع/خفض) لتفادي الـ buffering.
+        runCatching {
+            callback(
+                ExtractorLink(
+                    source = "${name} Auto",
+                    name = "${name} Auto",
+                    url = m3u8,
+                    referer = referer,
+                    quality = Qualities.Unknown.value,
+                    headers = mapOf(
+                        "User-Agent" to userAgent,
+                        "Referer" to referer
+                    ),
+                    extractorData = "",
+                    type = ExtractorLinkType.M3U8,
+                    audioTracks = emptyList()
+                )
+            )
+        }
+
+        // الرابط الأساسي البديل (يُعرض بعده في قائمة المصادر)
         M3u8Helper.generateM3u8(
             source = name,
             streamUrl = m3u8,
