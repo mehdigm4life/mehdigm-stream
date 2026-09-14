@@ -464,78 +464,143 @@ class Animezid : MainAPI() {
         if (sessionId.isBlank()) return false
         val sources = sessionJson.optJSONArray("sources") ?: return false
 
+        val all = (0 until sources.length()).mapNotNull { sources.optJSONObject(it) }
+        val embedded = all.filter { it.optString("type") == "embedded_web" }
+        val downloads = all.filter { it.optString("type") == "download" }
+            .distinctBy { it.optString("provider") + "|" + it.optString("quality") }
+
         var found = false
 
-        for (i in 0 until sources.length()) {
-            val src = sources.optJSONObject(i) ?: continue
-            val srcType = src.optString("type")
-            if (srcType != "embedded_web") continue
+        // Watch sources first (sequential + gentle pacing so the API never rate-limits us)
+        for (src in embedded) {
+            val ok = handlePlaybackSource(
+                src, createUrl, sessionId, headers, playUrl,
+                isDownload = false, subtitleCallback, callback
+            )
+            if (ok) found = true
+            delay(900L)
+        }
 
-            val srcId = src.optString("id")
-            val providerName = src.optString("provider")
-
-            // 1) Resolve source → launch_url
-            val resolveUrl = "$createUrl/$sessionId/sources/$srcId/resolve"
-            val resolveJson = retryPost(resolveUrl, headers, mapOf<String, String>(), playUrl)
-                ?: continue
-            val launchUrl = resolveJson.optString("launch_url").ifBlank { continue }
-
-            // 2) Follow redirect to real embed host
-            val finalUrl = try {
-                val resp = app.get(
-                    launchUrl,
-                    headers = pageHeaders(playUrl) + cookies,
-                    referer = playUrl
-                )
-                resp.url
-            } catch (_: Exception) {
-                launchUrl
-            }
-
-            if (finalUrl.isBlank() || isSelfHost(finalUrl)) continue
-
-            // 3) Try registered extractors (Uqload, Dood, StreamWish, etc.)
-            var extracted = false
-            val extractorUrl = normalizeEmbedUrl(finalUrl)
-            try {
-                extracted = loadExtractor(
-                    extractorUrl, playUrl, subtitleCallback
-                ) { link ->
-                    callback(link)
-                }
-            } catch (_: Exception) {
-                // ignore
-            }
-
-            // 4) Provider-aware m3u8/mp4 extraction from embed page
-            //    (direct regex + packed-JS decode for Uqload/StreamRuby/StreamWish...)
-            if (!extracted) {
-                extracted = tryProviderExtract(finalUrl, providerName, playUrl, callback)
-            }
-
-            // 5) Last resort: raw link (won't play for SPA hosts, but keeps menu populated)
-            if (!extracted) {
-                runCatching {
-                    callback(
-                        newExtractorLink(
-                            source = this.name,
-                            name = "$name $providerName",
-                            url = finalUrl,
-                            type = ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = playUrl
-                            this.quality = Qualities.Unknown.value
-                            this.headers = mapOf("User-Agent" to browserUA)
-                        }
-                    )
-                    extracted = true
-                }
-            }
-
-            if (extracted) found = true
+        // Download-type sources resolve to file-host pages; only surfaced when a
+        // real media URL can be produced, otherwise silently skipped.
+        for (src in downloads.take(10)) {
+            val ok = handlePlaybackSource(
+                src, createUrl, sessionId, headers, playUrl,
+                isDownload = true, subtitleCallback, callback
+            )
+            if (ok) found = true
+            delay(1100L)
         }
 
         return found
+    }
+
+    /**
+     * Resolve a single source and produce an [ExtractorLink].
+     * 1) Resolve source -> launch_url (with rate-limit backoff)
+     * 2) Follow redirect to the real embed host
+     * 3) Run the registered custom/built-in extractors
+     * 4) Generic m3u8/mp4 scrape of the embed page
+     * 5) Raw link fallback only for direct media URLs (prevents HTTP-status
+     *    playback errors like ERROR_CODE_IO_BAD_HTTP_STATUS 2004)
+     */
+    private suspend fun handlePlaybackSource(
+        src: JSONObject,
+        createUrl: String,
+        sessionId: String,
+        headers: Map<String, String>,
+        playUrl: String,
+        isDownload: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val srcId = src.optString("id")
+        if (srcId.isBlank()) return false
+        val providerName = src.optString("provider")
+        val qualityInt = src.optString("quality").toIntOrNull()
+
+        // 1) Resolve source → launch_url
+        val resolveUrl = "$createUrl/$sessionId/sources/$srcId/resolve"
+        val resolveJson = retryResolve(resolveUrl, headers, playUrl) ?: return false
+        val launchUrl = resolveJson.optString("launch_url").ifBlank { return false }
+
+        // 2) Follow redirect to real embed host
+        val finalUrl = try {
+            val resp = app.get(
+                launchUrl,
+                headers = headers + pageHeaders(playUrl),
+                referer = playUrl
+            )
+            resp.url
+        } catch (_: Exception) {
+            launchUrl
+        }
+
+        if (finalUrl.isBlank() || isSelfHost(finalUrl)) return false
+
+        // Download sources that resolve straight to a media file can be used as-is.
+        if (isDownload && looksLikeMedia(finalUrl)) {
+            emitRawMediaLink(finalUrl, providerName, qualityInt, playUrl, callback)
+            return true
+        }
+
+        // 3) Try registered extractors (custom + built-ins)
+        var extracted = false
+        val extractorUrl = normalizeEmbedUrl(finalUrl)
+        try {
+            extracted = loadExtractor(
+                extractorUrl, playUrl, subtitleCallback
+            ) { link ->
+                callback(link)
+            }
+        } catch (_: Exception) {
+            // ignore
+        }
+
+        // 4) Provider-aware m3u8/mp4 extraction from embed page
+        //    (direct regex + packed-JS decode for protected hosts)
+        if (!extracted) {
+            extracted = tryProviderExtract(finalUrl, providerName, playUrl, callback)
+        }
+
+        // 5) Raw fallback only for direct media URLs; page-based hosts are dropped
+        //    so the menu never shows links that fail with HTTP-status errors.
+        if (!extracted && looksLikeMedia(finalUrl)) {
+            runCatching {
+                emitRawMediaLink(finalUrl, providerName, qualityInt, playUrl, callback)
+                extracted = true
+            }
+        }
+
+        return extracted
+    }
+
+    private suspend fun emitRawMediaLink(
+        url: String,
+        providerName: String,
+        qualityInt: Int?,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val isM3u8 = url.contains(".m3u8") || url.contains(".txt")
+        callback(
+            newExtractorLink(
+                source = this.name,
+                name = "$name $providerName",
+                url = url,
+                type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+            ) {
+                this.referer = referer
+                this.quality = qualityInt ?: Qualities.Unknown.value
+                this.headers = mapOf("User-Agent" to browserUA)
+            }
+        )
+    }
+
+    private fun looksLikeMedia(url: String): Boolean {
+        val clean = Regex("""([^?#]+)""").find(url)?.groupValues?.get(1) ?: url
+        return clean.endsWith(".m3u8") || clean.endsWith(".mp4") ||
+            clean.endsWith(".mkv") || clean.endsWith(".webm") || clean.endsWith(".txt")
     }
 
     /** Regex extraction of m3u8/mp4 URLs from an embed page.
@@ -677,6 +742,36 @@ class Animezid : MainAPI() {
         return null
     }
 
+    /** Resolve a playback source with back-off when the API replies "rate_limited". */
+    private suspend fun retryResolve(
+        url: String,
+        headers: Map<String, String>,
+        referer: String,
+        maxRetries: Int = 4
+    ): JSONObject? {
+        repeat(maxRetries) { attempt ->
+            try {
+                val resp = app.post(
+                    url,
+                    headers = headers,
+                    json = mapOf<String, String>(),
+                    referer = referer
+                )
+                if (resp.code == 200 || resp.code == 201) {
+                    val obj = try { JSONObject(resp.text) } catch (_: Exception) { return null }
+                    // The API answers 200 + {"error":"rate_limited"}; keep retrying.
+                    if (obj.optString("error") != "rate_limited") return obj
+                } else if (resp.code != 429) {
+                    return null
+                }
+            } catch (_: Exception) {
+                // transient network error -> retry
+            }
+            delay(1200L * (attempt + 1))
+        }
+        return null
+    }
+
     private fun playbackHeaders(csrf: String, referer: String, cookies: Map<String, String>) =
         mapOf(
             "User-Agent" to browserUA,
@@ -750,14 +845,8 @@ private fun buildCookieHeader(cookies: Map<String, String>): Map<String, String>
                 host.contains("animezid.net")
     }
 
-    /** Map embed hosts to domains handled by Cloudstream's built-in extractors. */
-    private fun normalizeEmbedUrl(url: String): String {
-        // uqload accepts the same embed id on any uqload domain;
-        // uqload.com is handled by Cloudstream's built-in Uqload extractor.
-        return url
-            .replace("uqload.vc", "uqload.com")
-            .replace("uqload.to", "uqload.com")
-    }
+    /** Embed hosts that need rewriting to a domain handled by Cloudstream's extractors. */
+    private fun normalizeEmbedUrl(url: String): String = url
 
     private fun getHostFromUrl(url: String): String {
         return try {

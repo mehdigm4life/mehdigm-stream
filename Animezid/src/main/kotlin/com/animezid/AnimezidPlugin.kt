@@ -7,6 +7,23 @@ import android.content.Context
 @CloudstreamPlugin
 class AnimezidPlugin : Plugin() {
     override fun load(context: Context) {
+        registerExtractorAPI(AnimezidStreamRubyExtractor())
+        registerExtractorAPI(AnimezidStreamRubyComExtractor())
+
+        registerExtractorAPI(AnimezidTurboViPlayExtractor())
+        registerExtractorAPI(AnimezidTurboViPlayComExtractor())
+
+        registerExtractorAPI(AnimezidRpmHostExtractor())
+        registerExtractorAPI(AnimezidUpnShareExtractor())
+        registerExtractorAPI(AnimezidStreamP2PExtractor())
+        registerExtractorAPI(AnimezidEasyVidPlayExtractor())
+
+        registerExtractorAPI(AnimezidUqloadExtractor())
+        registerExtractorAPI(AnimezidUqloadToExtractor())
+
+        registerExtractorAPI(AnimezidMegaMaxExtractor())
+        registerExtractorAPI(AnimezidVidTubeExtractor())
+
         registerMainAPI(Animezid())
     }
 }
