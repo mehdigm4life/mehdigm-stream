@@ -505,4 +505,5 @@ jobs:
       # -----------------------------------------------------------------------
       - name: 🧹 Shutdown cloudflared
         if: ${{ always() }}
+        continue-on-error: true
         uses: AnimMouse/setup-cloudflared/shutdown@v2
