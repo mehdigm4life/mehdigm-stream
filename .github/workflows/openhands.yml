@@ -1,0 +1,418 @@
+name: 🤖 OpenHands AI Web (OpenCode Alternative)
+
+# بديل احترافي لـ OpenCode — OpenHands Agent Canvas
+# ---------------------------------------------------------------
+# OpenHands هو أقوى وكيل برمجي مفتوح المصدر (MIT، ~75k★، 72.8% SWE-bench)
+# - واجهة ويب أصلية (أفضل من opencode serve)
+# - وكيل مستقل: يخطط، يكتب، يختبر، ويتصفح الويب
+# - عزل كامل عبر Docker Sandbox
+# - يعمل مجاناً مع نماذج Zen Free / Gemini / Groq / OpenRouter
+# يفتح عبر Cloudflare Tunnel ويطبع رابطاً عاماً.
+# أي تعديل على الملفات يتم commit + push تلقائياً.
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "كم دقيقة يبقى السيرفر شغّال (الحد الأقصى ≈ 350 دقيقة)"
+        required: true
+        default: "350"
+        type: string
+      auto_commit:
+        description: "هل تريد commit + push تلقائي لأي تعديلات يقوم بها الوكيل؟"
+        required: true
+        default: true
+        type: boolean
+      commit_interval_seconds:
+        description: "كل كم ثانية يتم فحص التغييرات وعمل commit (افتراضي 60)"
+        required: true
+        default: "60"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  openhands-web:
+    name: 🚀 Run OpenHands Web + Cloudflare Tunnel
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    env:
+      # ===== نماذج مجانية (اختيارية — الأفضل توفرها في Secrets) =====
+      # Zen Free (big-pickle, deepseek-v4-flash-free, ...)
+      ZEN_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      # Gemini Free Tier (1500 req/day)
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # Groq Free Tier
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      # OpenRouter Free Models
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1) جلب كود الـ repository
+      # -----------------------------------------------------------------------
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 2) تثبيت cloudflared
+      # -----------------------------------------------------------------------
+      - name: ☁️ Install cloudflared
+        uses: AnimMouse/setup-cloudflared@v2
+
+      - name: ✅ Verify cloudflared
+        run: cloudflared --version
+
+      # -----------------------------------------------------------------------
+      # 3) اختيار النموذج المجاني المتاح تلقائياً
+      # -----------------------------------------------------------------------
+      - name: 🧠 Configure free LLM (auto-detect)
+        run: |
+          set -euo pipefail
+          # الأفضل أولاً: Zen Free (big-pickle و غيره مجاناً عبر opencode zen)
+          if [ -n "$ZEN_API_KEY" ]; then
+            {
+              echo "LLM_API_KEY=$ZEN_API_KEY"
+              echo "LLM_MODEL=openai/big-pickle"
+              echo "LLM_BASE_URL=https://opencode.ai/zen/v1"
+              echo "LLM_PROVIDER=Zen Free (big-pickle)"
+            } >> "$GITHUB_ENV"
+            echo "✅ Using OpenCode Zen free model: big-pickle"
+          elif [ -n "$GEMINI_API_KEY" ]; then
+            {
+              echo "LLM_API_KEY=$GEMINI_API_KEY"
+              echo "LLM_MODEL=google/gemini-2.5-flash"
+              echo "LLM_PROVIDER=Google Gemini Free"
+            } >> "$GITHUB_ENV"
+            echo "✅ Using Google Gemini free tier"
+          elif [ -n "$GROQ_API_KEY" ]; then
+            {
+              echo "LLM_API_KEY=$GROQ_API_KEY"
+              echo "LLM_MODEL=groq/llama-3.3-70b-versatile"
+              echo "LLM_PROVIDER=Groq Free"
+            } >> "$GITHUB_ENV"
+            echo "✅ Using Groq free tier"
+          elif [ -n "$OPENROUTER_API_KEY" ]; then
+            {
+              echo "LLM_API_KEY=$OPENROUTER_API_KEY"
+              echo "LLM_MODEL=openrouter/deepseek/deepseek-chat-v3-0324:free"
+              echo "LLM_PROVIDER=OpenRouter Free"
+            } >> "$GITHUB_ENV"
+            echo "✅ Using OpenRouter free model"
+          else
+            echo "⚠️ No free-model API key found in secrets."
+            echo "   You can still add one later from the OpenHands Settings UI (⚙️)."
+            echo "LLM_PROVIDER=Not configured (set in UI)" >> "$GITHUB_ENV"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 4) سحب صور Docker مسبقاً (لتسريع أول محادثة)
+      # -----------------------------------------------------------------------
+      - name: 🐳 Pre-pull OpenHands Docker images
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          echo "::group::Pull openhands app image"
+          docker pull docker.openhands.dev/openhands/openhands:1.8
+          echo "::endgroup::"
+          echo "::group::Pull agent-server sandbox image"
+          docker pull ghcr.io/openhands/agent-server:1.26.0-python || true
+          echo "::endgroup::"
+          docker images | grep -E "openhands|agent-server" || true
+
+      # -----------------------------------------------------------------------
+      # 5) تشغيل OpenHands (Web UI على المنفذ 3000)
+      # -----------------------------------------------------------------------
+      - name: 🚀 Start OpenHands server (background)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$HOME/.openhands" "$RUNNER_TEMP/openhands-logs"
+          LOG_FILE="$RUNNER_TEMP/openhands-logs/server.log"
+          : > "$LOG_FILE"
+
+          echo "Starting OpenHands on 127.0.0.1:3000 ..."
+          echo "LLM: ${LLM_PROVIDER:-not configured}"
+
+          # تجهيز أوامر إضافية للنموذج إن وُجد
+          LLM_ENV_ARGS=()
+          if [ -n "${LLM_API_KEY:-}" ]; then
+            LLM_ENV_ARGS+=(-e "LLM_API_KEY=$LLM_API_KEY")
+          fi
+          if [ -n "${LLM_MODEL:-}" ]; then
+            LLM_ENV_ARGS+=(-e "LLM_MODEL=$LLM_MODEL")
+          fi
+          if [ -n "${LLM_BASE_URL:-}" ]; then
+            LLM_ENV_ARGS+=(-e "LLM_BASE_URL=$LLM_BASE_URL")
+            # دعم صيغة OpenAI-compatible قياسية أيضاً
+            LLM_ENV_ARGS+=(-e "OPENAI_BASE_URL=$LLM_BASE_URL")
+            LLM_ENV_ARGS+=(-e "OPENAI_API_KEY=$LLM_API_KEY")
+          fi
+
+          # إزالة حاوية قديمة إن وُجدت
+          docker rm -f openhands-app 2>/dev/null || true
+
+          # ⭐ الإطلاق — مطابق لتوصية OpenHands الرسمية + SANDBOX_VOLUMES
+          #  - docker.sock     : لتشغيل حاويات الوكيل المعزولة (sandbox)
+          #  - SANDBOX_VOLUMES : لربط مستودعك بالـ sandbox ليعمل الوكيل على ملفاتك
+          #  - 127.0.0.1:3000  : ربط محلي فقط (الإنترنت عبر cloudflared)
+          docker run -d \
+            --name openhands-app \
+            --restart unless-stopped \
+            -p 127.0.0.1:3000:3000 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.openhands:/home/openhands/.openhands" \
+            -v "$GITHUB_WORKSPACE:/workspace-host" \
+            --add-host host.docker.internal:host-gateway \
+            -e AGENT_SERVER_IMAGE_REPOSITORY=ghcr.io/openhands/agent-server \
+            -e AGENT_SERVER_IMAGE_TAG=1.26.0-python \
+            -e LOG_ALL_EVENTS=true \
+            -e "SANDBOX_VOLUMES=$GITHUB_WORKSPACE:/workspace:rw" \
+            -e "SANDBOX_USER_ID=$(id -u)" \
+            "${LLM_ENV_ARGS[@]}" \
+            docker.openhands.dev/openhands/openhands:1.8 \
+            >> "$LOG_FILE" 2>&1
+
+          echo "OpenHands container started."
+          docker ps --filter name=openhands-app --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+          # انتظار حتى يستجيب الواجهة على المنفذ
+          UP=0
+          for i in $(seq 1 120); do
+            if ! docker ps --filter name=openhands-app --filter status=running -q | grep -q .; then
+              echo "❌ OpenHands container exited. Logs:"
+              docker logs openhands-app --tail 100 2>&1 || true
+              cat "$LOG_FILE" || true
+              exit 1
+            fi
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:3000/ || echo "000")
+            if [ "$CODE" != "000" ] && [ "$CODE" != "502" ]; then
+              UP=1
+              echo "✅ OpenHands responding on :3000 (HTTP $CODE) after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$UP" -ne 1 ]; then
+            echo "❌ OpenHands failed to become reachable in 120s. Logs:"
+            docker logs openhands-app --tail 200 2>&1 || true
+            docker rm -f openhands-app 2>/dev/null || true
+            exit 1
+          fi
+
+          # حفظ معرف الحاوية للتحقق لاحقاً
+          docker inspect -f '{{.Id}}' openhands-app > "$RUNNER_TEMP/openhands.cid"
+
+      # -----------------------------------------------------------------------
+      # 6) فتح Cloudflare Quick Tunnel نحو منفذ 3000
+      # -----------------------------------------------------------------------
+      - name: 🌐 Start Cloudflare Quick Tunnel
+        id: tunnel
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cloudflared-logs"
+          TUN_LOG="$RUNNER_TEMP/cloudflared-logs/tunnel.log"
+          : > "$TUN_LOG"
+
+          setsid bash -c "cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 </dev/null >>'$TUN_LOG' 2>&1" &
+          TUN_PID=$!
+          disown || true
+          echo "$TUN_PID" > "$RUNNER_TEMP/cloudflared.pid"
+          echo "cloudflared PID = $TUN_PID"
+
+          PUBLIC_URL=""
+          for i in $(seq 1 90); do
+            if grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$TUN_LOG" | head -n1 > /tmp/url.txt 2>/dev/null; then
+              PUBLIC_URL=$(cat /tmp/url.txt || true)
+              if [ -n "$PUBLIC_URL" ]; then break; fi
+            fi
+            if ! kill -0 "$TUN_PID" 2>/dev/null; then
+              echo "❌ cloudflared exited prematurely. Logs:"
+              cat "$TUN_LOG" || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "❌ Failed to get tunnel URL in 90s. Tunnel log:"
+            cat "$TUN_LOG"
+            exit 1
+          fi
+
+          echo "PUBLIC_URL=$PUBLIC_URL" >> "$GITHUB_ENV"
+          echo "public_url=$PUBLIC_URL" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════════╗"
+          echo "║           🎉 OpenHands AI is LIVE on the Web 🎉                ║"
+          echo "╠════════════════════════════════════════════════════════════════╣"
+          printf  "║  URL:  %-55s ║\n" "$PUBLIC_URL"
+          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo ""
+
+      # -----------------------------------------------------------------------
+      # 7) كتابة الرابط في Summary
+      # -----------------------------------------------------------------------
+      - name: 📌 Publish URL to Job Summary
+        run: |
+          {
+            echo "# 🤖 OpenHands AI — Live Session"
+            echo ""
+            echo "## 🌐 الرابط العام"
+            echo ""
+            echo "### 👉 [${PUBLIC_URL}](${PUBLIC_URL})"
+            echo ""
+            echo "| الحقل | القيمة |"
+            echo "|------|--------|"
+            echo "| **Repository** | \`${GITHUB_REPOSITORY}\` |"
+            echo "| **Branch** | \`${GITHUB_REF_NAME}\` |"
+            echo "| **النموذج** | ${LLM_PROVIDER:-غير محدد} |"
+            echo "| **مدة التشغيل** | ${{ github.event.inputs.duration_minutes }} دقيقة |"
+            echo "| **Auto commit** | ${{ github.event.inputs.auto_commit }} |"
+            echo ""
+            echo "## ⚙️ إعداد النموذج (إن لم يكن مُعدّاً مسبقاً)"
+            echo "افتح الرابط → علامة ⚙️ Settings → تبويب LLM:"
+            echo "- **Provider**: OpenAI Compatible (لـ Zen) أو Google / Groq"
+            echo "- **Model**: \`openai/big-pickle\` أو \`google/gemini-2.5-flash\`"
+            echo "- **Base URL**: \`https://opencode.ai/zen/v1\` (لـ Zen Free)"
+            echo "- **API Key**: مفتاحك من <https://opencode.ai/zen>"
+            echo ""
+            echo "## 📂 مساحة العمل"
+            echo "الوكيل يعمل على \`/workspace\` داخل الـ sandbox وهو مربوط بمستودعك مباشرة."
+            echo ""
+            echo "## ✏️ التعديلات"
+            echo "أي تعديل يقوم به الوكيل على الملفات سيتم رفعه تلقائياً (commit + push)"
+            echo "إلى branch: \`${GITHUB_REF_NAME}\` كل ${{ github.event.inputs.commit_interval_seconds }} ثانية."
+            echo ""
+            echo "## 🛑 لإيقاف الجلسة"
+            echo "اضغط على زر **Cancel workflow** في صفحة الـ Actions."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # 8) Auto-commit loop في الخلفية
+      # -----------------------------------------------------------------------
+      - name: 🔁 Start auto-commit loop (background)
+        if: ${{ github.event.inputs.auto_commit == 'true' }}
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          git config --global user.email "openhands-bot@users.noreply.github.com"
+          git config --global user.name  "openhands-bot"
+
+          INTERVAL="${{ github.event.inputs.commit_interval_seconds }}"
+          BRANCH="${GITHUB_REF_NAME}"
+          LOG="$RUNNER_TEMP/autocommit.log"
+          : > "$LOG"
+
+          cat > "$RUNNER_TEMP/autocommit.sh" <<EOF
+          #!/usr/bin/env bash
+          cd "$GITHUB_WORKSPACE"
+          while true; do
+            sleep $INTERVAL
+            if [ -n "\$(git status --porcelain)" ]; then
+              git add -A
+              MSG="🤖 openhands: auto-commit \$(date -u +'%Y-%m-%d %H:%M:%SZ')"
+              git commit -m "\$MSG" >> "$LOG" 2>&1 || true
+              git push origin "$BRANCH" >> "$LOG" 2>&1 || true
+              echo "[\$(date -u)] pushed: \$MSG" >> "$LOG"
+            fi
+          done
+          EOF
+          chmod +x "$RUNNER_TEMP/autocommit.sh"
+
+          setsid bash -c "bash '$RUNNER_TEMP/autocommit.sh' </dev/null >>'$LOG' 2>&1" &
+          AC_PID=$!
+          disown || true
+          echo "$AC_PID" > "$RUNNER_TEMP/autocommit.pid"
+          echo "✅ Auto-commit loop started (PID=$AC_PID, every ${INTERVAL}s) on branch ${BRANCH}"
+
+      # -----------------------------------------------------------------------
+      # 9) إبقاء الـ job حياً للمدة المطلوبة
+      # -----------------------------------------------------------------------
+      - name: ⏳ Keep session alive
+        run: |
+          DURATION_MIN="${{ github.event.inputs.duration_minutes }}"
+          DURATION_SEC=$(( DURATION_MIN * 60 ))
+          echo "Session will run for ${DURATION_MIN} minutes (${DURATION_SEC}s)."
+          echo "Public URL: ${PUBLIC_URL}"
+          echo "LLM: ${LLM_PROVIDER:-not configured}"
+          echo ""
+
+          ELAPSED=0
+          STEP=300
+          while [ "$ELAPSED" -lt "$DURATION_SEC" ]; do
+            sleep "$STEP"
+            ELAPSED=$(( ELAPSED + STEP ))
+            REMAIN_MIN=$(( (DURATION_SEC - ELAPSED) / 60 ))
+            echo "⏱️ Heartbeat — elapsed=$((ELAPSED/60))min  remaining=${REMAIN_MIN}min"
+            echo "🌐 ${PUBLIC_URL}"
+
+            if ! docker ps --filter name=openhands-app --filter status=running -q | grep -q .; then
+              echo "⚠️ OpenHands container died — logs:"
+              docker logs openhands-app --tail 100 2>&1 || true
+              exit 1
+            fi
+            if [ -f "$RUNNER_TEMP/cloudflared.pid" ] && ! kill -0 "$(cat $RUNNER_TEMP/cloudflared.pid)" 2>/dev/null; then
+              echo "⚠️ cloudflared process died — exiting."
+              exit 1
+            fi
+          done
+
+          echo "✅ Session duration reached. Shutting down."
+
+      # -----------------------------------------------------------------------
+      # 10) commit أخير
+      # -----------------------------------------------------------------------
+      - name: 💾 Final commit & push
+        if: ${{ always() && github.event.inputs.auto_commit == 'true' }}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config --global user.email "openhands-bot@users.noreply.github.com"
+          git config --global user.name  "openhands-bot"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "🤖 openhands: final auto-commit $(date -u +'%Y-%m-%d %H:%M:%SZ')" || true
+            git push origin "${GITHUB_REF_NAME}" || true
+          else
+            echo "No pending changes to commit."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 11) عرض اللوجات
+      # -----------------------------------------------------------------------
+      - name: 📜 Show logs (debug)
+        if: ${{ always() }}
+        run: |
+          echo "===== openhands container logs (tail 100) ====="
+          docker logs openhands-app --tail 100 2>&1 || true
+          echo ""
+          echo "===== cloudflared tunnel log (tail 60) ====="
+          tail -n 60  "$RUNNER_TEMP/cloudflared-logs/tunnel.log" 2>/dev/null || true
+          echo ""
+          echo "===== autocommit log (tail 60) ====="
+          tail -n 60  "$RUNNER_TEMP/autocommit.log" 2>/dev/null || true
+
+      # -----------------------------------------------------------------------
+      # 12) إغلاق نظيف
+      # -----------------------------------------------------------------------
+      - name: 🧹 Shutdown OpenHands + cloudflared
+        if: ${{ always() }}
+        run: |
+          docker rm -f openhands-app 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/cloudflared.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/cloudflared.pid")" 2>/dev/null || true
+          fi
+          echo "Cleanup done."
+
+      - name: 🧹 Shutdown cloudflared (action)
+        if: ${{ always() }}
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
