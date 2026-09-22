@@ -133,7 +133,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p "$HOME/.openhands" "$RUNNER_TEMP/openhands-logs"
+          # دليل الثبات — الحاوية تشغّل التطبيق كمستخدم enduser (uid = (id -u))
+          # لذلك يجب أن يكون OH_PERSISTENCE_DIR عند /home/enduser/.openhands
+          # (وليس /home/openhands) وإلا فشل sqlite (unable to open database file)
+          PERSIST_DIR="$HOME/.openhands"
+          mkdir -p "$PERSIST_DIR" "$RUNNER_TEMP/openhands-logs"
+          chmod 777 "$PERSIST_DIR"
           LOG_FILE="$RUNNER_TEMP/openhands-logs/server.log"
           : > "$LOG_FILE"
 
@@ -167,12 +172,13 @@ jobs:
             --restart unless-stopped \
             -p 127.0.0.1:3000:3000 \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$HOME/.openhands:/home/openhands/.openhands" \
+            -v "$PERSIST_DIR:/home/enduser/.openhands" \
             -v "$GITHUB_WORKSPACE:/workspace-host" \
             --add-host host.docker.internal:host-gateway \
             -e AGENT_SERVER_IMAGE_REPOSITORY=ghcr.io/openhands/agent-server \
             -e AGENT_SERVER_IMAGE_TAG=1.26.0-python \
             -e LOG_ALL_EVENTS=true \
+            -e "OH_PERSISTENCE_DIR=/home/enduser/.openhands" \
             -e "SANDBOX_VOLUMES=$GITHUB_WORKSPACE:/workspace:rw" \
             -e "SANDBOX_USER_ID=$(id -u)" \
             "${LLM_ENV_ARGS[@]}" \
@@ -356,10 +362,21 @@ jobs:
             echo "⏱️ Heartbeat — elapsed=$((ELAPSED/60))min  remaining=${REMAIN_MIN}min"
             echo "🌐 ${PUBLIC_URL}"
 
+            # إعادة تشغيل تلقائية للحاوية إن وقع أي عطل (وقائية)
             if ! docker ps --filter name=openhands-app --filter status=running -q | grep -q .; then
-              echo "⚠️ OpenHands container died — logs:"
-              docker logs openhands-app --tail 100 2>&1 || true
-              exit 1
+              echo "⚠️ OpenHands container not running — attempting auto-restart..."
+              docker start openhands-app 2>&1 || true
+              sleep 20
+              if [ ! -s "$RUNNER_TEMP/openhands.cid" ] || [ "$(docker inspect -f '{{.Id}}' openhands-app 2>/dev/null)" != "$(cat "$RUNNER_TEMP/openhands.cid" 2>/dev/null)" ]; then
+                echo "❌ OpenHands container missing/recreated — logs:"
+                docker logs openhands-app --tail 100 2>&1 || true
+                exit 1
+              fi
+            fi
+            # مستوى إعادة التشغيل المتزايد = مشكلة متكررة
+            RESTARTS=$(docker inspect -f '{{.RestartCount}}' openhands-app 2>/dev/null || echo 0)
+            if [ "$RESTARTS" -gt 0 ]; then
+              echo "ℹ️ OpenHands auto-restarted $RESTARTS time(s). Session continues."
             fi
             if [ -f "$RUNNER_TEMP/cloudflared.pid" ] && ! kill -0 "$(cat $RUNNER_TEMP/cloudflared.pid)" 2>/dev/null; then
               echo "⚠️ cloudflared process died — exiting."
@@ -415,4 +432,5 @@ jobs:
 
       - name: 🧹 Shutdown cloudflared (action)
         if: ${{ always() }}
+        continue-on-error: true
         uses: AnimMouse/setup-cloudflared/shutdown@v2
