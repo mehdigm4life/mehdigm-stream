@@ -56,6 +56,9 @@ jobs:
           python3 "$RUNNER_TEMP/git-filter-repo" \
             --path .opencode-vault --invert-paths --force
 
+          # git-filter-repo يحذف الـ remote الأصلية → نعيدها joy برای push
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
           # --- 3) أعد إضافة آخر نسخة فقط (commit جديد فوق التاريخ المنظف) ---
           if [ -f "$BACKUP_DIR/vault.bin" ]; then
             mkdir -p .opencode-vault
