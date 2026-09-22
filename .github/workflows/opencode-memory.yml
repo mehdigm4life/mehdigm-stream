@@ -118,7 +118,16 @@ jobs:
             # (نتجنب بطاقة endless commits من الـ openssl salt)
             local plain="${RUNNER_TEMP}/vault.plain.tar.gz"
             local tmp="${RUNNER_TEMP}/vault.bin.tmp"
-            ( cd "${RUNNER_TEMP}" && tar -czf "$plain" occonfig ocdata 2>/dev/null ) || return 0
+            # 🧹 نوافق دائماً على ملف صغير أبدي:
+            # نستبعد المجلدات المتضخمة (log / tool-output / snapshot / repos)
+            # التي تُبنى من جديد تلقائياً، ونحتفظ بالذاكرة الحقيقية:
+            # opencode.db + auth + state + config — فلا يصل vault.bin أبداً لحد 100MB
+            ( cd "${RUNNER_TEMP}" && tar -czf "$plain" \
+                --exclude='ocdata/opencode/log' \
+                --exclude='ocdata/opencode/tool-output' \
+                --exclude='ocdata/opencode/snapshot' \
+                --exclude='ocdata/opencode/repos' \
+                occonfig ocdata 2>/dev/null ) || return 0
             local fp; fp=$(sha256sum "$plain" | cut -d' ' -f1)
             local prev; prev=$(cat "${VAULT_DIR}/vault.sha256" 2>/dev/null || echo "")
             if [ "$fp" = "$prev" ] && [ -f "$VAULT_FILE" ]; then

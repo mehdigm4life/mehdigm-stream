@@ -1,0 +1,80 @@
+name: 🧹 OpenCode Memory Maintenance
+
+# 🔧 صيانة تلقائية للخزنة — تعمل منفردة بدون حاجة لجلسة opencode.
+# المهمة: منع تضخم تاريخ الـ repo بسبب نسخ vault.bin المتكررة،
+# بحيث تبقى دائماً آخر نسخة واحدة فقط في التاريخ (بدون فشل الـ 100MB أبداً).
+
+on:
+  schedule:
+    # كل يوم أحد الساعة 03:00 UTC (وقت خمول — لا جلسة نشطة عادةً)
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  maintenance:
+    name: 🧹 Prune vault history
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🧹 Compress history (keep only latest vault.bin)
+        run: |
+          set -euo pipefail
+
+          git config --global user.email "opencode-bot@users.noreply.github.com"
+          git config --global user.name  "opencode-bot"
+
+          echo "::group::Before"
+          echo "All commits: $(git rev-list --count HEAD)"
+          echo "Total pack size: $(du -sh .git 2>/dev/null | cut -f1 || echo 0)"
+          echo "::endgroup::"
+
+          # --- 1) احفظ أحدث نسخة من الخزنة على القرص (بعيداً عن git) ---
+          BACKUP_DIR="$RUNNER_TEMP/vault-backup"
+          mkdir -p "$BACKUP_DIR"
+          if [ -f ".opencode-vault/vault.bin" ]; then
+            cp ".opencode-vault/vault.bin" "$BACKUP_DIR/vault.bin"
+            cp ".opencode-vault/vault.sha256" "$BACKUP_DIR/vault.sha256"
+            echo "Saved latest vault.bin ($(stat -c%s "$BACKUP_DIR/vault.bin" 2>/dev/null || echo 0) bytes)"
+          else
+            echo "No vault.bin in working tree — skipping vault preserves."
+          fi
+
+          # --- 2) حذف كل مجلد .opencode-vault من كامل التاريخ ---
+          # استخدم git-filter-repo (أداة أمان قياسية) عبر تنزيله المباشر:
+          curl -fsSL -o "$RUNNER_TEMP/git-filter-repo" \
+            https://raw.githubusercontent.com/newren/git-filter-repo/main/git-filter-repo
+          chmod +x "$RUNNER_TEMP/git-filter-repo"
+          python3 "$RUNNER_TEMP/git-filter-repo" \
+            --path .opencode-vault --invert-paths --force
+
+          # --- 3) أعد إضافة آخر نسخة فقط (commit جديد فوق التاريخ المنظف) ---
+          if [ -f "$BACKUP_DIR/vault.bin" ]; then
+            mkdir -p .opencode-vault
+            cp "$BACKUP_DIR/vault.bin" ".opencode-vault/vault.bin"
+            cp "$BACKUP_DIR/vault.sha256" ".opencode-vault/vault.sha256"
+            git add -A
+            git commit -m "🧹 memory: restore latest vault.bin (history compressed)"
+            echo "Re-committed the single latest vault.bin."
+          fi
+
+          # --- 4) force-push التاريخ المضغوط ---
+          # (اختياري حماية: لا force-push إذا كان git clean على أي شيء آخر)
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "⚠️ Working tree dirty after rewrite — skipping push."
+            exit 0
+          fi
+          git push --force origin HEAD:"${GITHUB_REF_NAME}"
+
+          echo "::group::After"
+          echo "All commits now: $(git rev-list --count HEAD)"
+          echo "Total pack size: $(du -sh .git 2>/dev/null | cut -f1 || echo 0)"
+          echo "::endgroup::"
