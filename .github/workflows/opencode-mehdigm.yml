@@ -1,0 +1,1375 @@
+name: 🤖 OpenCode AI Cloud — Persistent
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "مدة تشغيل OpenCode بالدقائق"
+        required: true
+        default: "350"
+        type: string
+
+      auto_commit:
+        description: "Commit + push تلقائي لتعديلات المشروع"
+        required: true
+        default: true
+        type: boolean
+
+      commit_interval_seconds:
+        description: "الفاصل بين عمليات فحص Git"
+        required: true
+        default: "60"
+        type: string
+
+      backup_interval_minutes:
+        description: "حفظ حالة OpenCode كل كم دقيقة"
+        required: true
+        default: "5"
+        type: string
+
+permissions:
+  contents: write
+
+# يمنع تشغيل جلستين لنفس المستودع في الوقت نفسه.
+concurrency:
+  group: opencode-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  # ============================================================
+  # OpenCode Web authentication
+  # ============================================================
+
+  OPENCODE_WEB_USERNAME: ${{ secrets.OPENCODE_WEB_USERNAME }}
+  OPENCODE_WEB_PASSWORD: ${{ secrets.OPENCODE_WEB_PASSWORD }}
+
+  # ============================================================
+  # AI providers
+  # ============================================================
+
+  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+  GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+  MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+
+  XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+  COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+
+  TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+
+  PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+
+jobs:
+  opencode-web:
+
+    name: 🚀 OpenCode Web + Persistent State
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 355
+
+    steps:
+
+      # ============================================================
+      # 1. Checkout repository
+      # ============================================================
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 2. Node.js
+      # ============================================================
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ============================================================
+      # 3. System dependencies
+      # ============================================================
+
+      - name: 🛠️ Install dependencies
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update -qq
+
+          sudo apt-get install -y -qq \
+            curl \
+            jq \
+            git \
+            ca-certificates \
+            procps \
+            openssl \
+            sqlite3 \
+            zstd
+
+      # ============================================================
+      # 4. Install OpenCode
+      # ============================================================
+
+      - name: 🤖 Install OpenCode
+        run: |
+          set -euo pipefail
+
+          curl -fsSL https://opencode.ai/install | bash
+
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          echo "=========================================="
+          echo "OpenCode version"
+          echo "=========================================="
+
+          opencode --version
+
+      # ============================================================
+      # 5. Create OpenCode directories
+      # ============================================================
+
+      - name: 📁 Prepare OpenCode directories
+        run: |
+          mkdir -p "$HOME/.config/opencode"
+          mkdir -p "$HOME/.local/share/opencode"
+
+      # ============================================================
+      # 6. Discover OpenCode paths
+      #
+      # FIX: newer OpenCode releases removed / renamed the
+      # `opencode debug paths` subcommand, which made this step
+      # fail with `set -e` and killed the whole run.
+      # The step is now fully tolerant: it uses CLI-reported paths
+      # when available and otherwise falls back to the standard
+      # XDG locations, and exports the result via $GITHUB_ENV so
+      # every later step uses ONE consistent DB path.
+      # ============================================================
+
+      - name: 🔎 Discover OpenCode paths
+        run: |
+          set -uo pipefail
+
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+          DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/opencode"
+          DB_PATH="$DATA_DIR/opencode.db"
+
+          echo "===== OpenCode paths ====="
+
+          if opencode debug paths > "$RUNNER_TEMP/oc-paths.txt" 2>&1; then
+
+            cat "$RUNNER_TEMP/oc-paths.txt"
+
+            CLI_DB="$(opencode debug paths db 2>/dev/null | tail -n1 || true)"
+
+            if [ -n "${CLI_DB:-}" ] && [ "$CLI_DB" != ":memory:" ]; then
+              DB_PATH="$CLI_DB"
+            fi
+
+          else
+
+            echo "ℹ️ 'opencode debug paths' is not available in this OpenCode version."
+            echo "ℹ️ Falling back to standard XDG paths."
+
+          fi
+
+          echo ""
+          echo "===== Resolved paths ====="
+          echo "Config: $CONFIG_DIR"
+          echo "Data:   $DATA_DIR"
+          echo "DB:     $DB_PATH"
+
+          echo "OPENCODE_CONFIG_DIR=$CONFIG_DIR" >> "$GITHUB_ENV"
+          echo "OPENCODE_DATA_DIR=$DATA_DIR"     >> "$GITHUB_ENV"
+          echo "OPENCODE_DB_PATH=$DB_PATH"       >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 7. Restore persistent state
+      # ============================================================
+
+      - name: ♻️ Restore OpenCode state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATE_KEY: ${{ secrets.OPENCODE_STATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${STATE_KEY:-}" ]; then
+            echo "⚠️ OPENCODE_STATE_KEY is not configured — skipping state restore."
+            exit 0
+          fi
+
+          RELEASE_TAG="opencode-state"
+
+          echo "🔎 Looking for previous OpenCode state..."
+
+          RELEASE_JSON="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+              2>/dev/null || true
+          )"
+
+          if [ -z "$RELEASE_JSON" ]; then
+            echo "ℹ️ No previous state found."
+            exit 0
+          fi
+
+          GENERATION="$(
+            echo "$RELEASE_JSON" |
+            jq -r '.body // ""' |
+            sed -n 's/^CURRENT_GENERATION=//p' |
+            head -n1
+          )"
+
+          if [ -z "$GENERATION" ]; then
+            echo "ℹ️ Release exists but has no valid generation."
+            exit 0
+          fi
+
+          echo "📦 Restoring generation: $GENERATION"
+
+          mkdir -p "$RUNNER_TEMP/state-parts"
+
+          echo "$RELEASE_JSON" |
+          jq -r --arg prefix "state-${GENERATION}-" '
+            .assets[]
+            | select(.name | startswith($prefix))
+            | .name
+          ' |
+          sort |
+          while read -r ASSET; do
+
+            [ -z "$ASSET" ] && continue
+
+            echo "⬇️ Downloading: $ASSET"
+
+            gh release download "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "$ASSET" \
+              --dir "$RUNNER_TEMP/state-parts" \
+              --clobber
+
+          done
+
+          PARTS="$(
+            find "$RUNNER_TEMP/state-parts" \
+              -type f \
+              -name "state-${GENERATION}-*.part" |
+            sort
+          )"
+
+          if [ -z "$PARTS" ]; then
+            echo "⚠️ No state parts found for generation $GENERATION — starting fresh."
+            exit 0
+          fi
+
+          echo "🔗 Reassembling encrypted state..."
+
+          # shellcheck disable=SC2086
+          cat $PARTS \
+            > "$RUNNER_TEMP/opencode-state.enc"
+
+          echo "🔐 Decrypting..."
+
+          if ! openssl enc \
+            -d \
+            -aes-256-cbc \
+            -pbkdf2 \
+            -iter 200000 \
+            -pass env:STATE_KEY \
+            -in "$RUNNER_TEMP/opencode-state.enc" \
+            -out "$RUNNER_TEMP/opencode-state.tar.zst"; then
+
+            echo "⚠️ Decryption failed (wrong OPENCODE_STATE_KEY?) — starting fresh."
+            exit 0
+
+          fi
+
+          echo "📦 Extracting..."
+
+          # The backup archive is created with `tar -cf .` inside a
+          # directory tree rooted at `home/`, so member names look
+          # like `./home/.config/opencode/...`. GNU tar counts the
+          # leading `./` as a component, so TWO components must be
+          # stripped to restore `~/.config` and `~/.local/share`
+          # (a single strip would leave a stray `home/` directory).
+          tar \
+            --zstd \
+            --strip-components=2 \
+            -xf "$RUNNER_TEMP/opencode-state.tar.zst" \
+            -C "$HOME"
+
+          echo "✅ OpenCode state restored."
+
+      # ============================================================
+      # 8. Prepare project OpenCode configuration
+      # ============================================================
+
+      - name: 📝 Prepare OpenCode configuration
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "opencode.json" ] &&
+             [ ! -f "opencode.jsonc" ] &&
+             [ ! -f ".opencode/opencode.json" ] &&
+             [ ! -f ".opencode/opencode.jsonc" ]; then
+
+            cat > opencode.json <<'JSON'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "theme": "opencode",
+            "autoshare": false,
+            "autoupdate": false
+          }
+          JSON
+
+            echo "Created default opencode.json."
+
+          else
+
+            echo "Using existing OpenCode configuration."
+
+          fi
+
+      # ============================================================
+      # 9. Verify restored database / sessions
+      # ============================================================
+
+      - name: 🧠 Verify OpenCode state
+        run: |
+          set +e
+
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          DB_PATH="${OPENCODE_DB_PATH:-$HOME/.local/share/opencode/opencode.db}"
+
+          echo "Database:"
+          echo "$DB_PATH"
+
+          if [ -f "$DB_PATH" ]; then
+
+            echo "✅ Database found."
+
+            ls -lh "$DB_PATH"
+
+          else
+
+            echo "ℹ️ No previous database."
+
+          fi
+
+          echo ""
+          echo "===== Recent sessions ====="
+
+          opencode session list \
+            --max-count 20 \
+            --format json 2>/dev/null || true
+
+      # ============================================================
+      # 10. Cloudflare
+      # ============================================================
+
+      - name: ☁️ Install cloudflared
+        uses: AnimMouse/setup-cloudflared@v2
+
+      # ============================================================
+      # 11. Start OpenCode Web
+      #
+      # FIX: detects whether this OpenCode build exposes the web
+      # server as `opencode web` or `opencode serve`, and the
+      # readiness probe accepts any live HTTP response instead of
+      # depending on a single health endpoint path.
+      # ============================================================
+
+      - name: 🚀 Start OpenCode Web
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          mkdir -p "$RUNNER_TEMP/opencode-logs"
+
+          LOG_FILE="$RUNNER_TEMP/opencode-logs/server.log"
+
+          : > "$LOG_FILE"
+
+          export OPENCODE_SERVER_USERNAME="${OPENCODE_WEB_USERNAME:-opencode}"
+
+          export OPENCODE_SERVER_PASSWORD="${OPENCODE_WEB_PASSWORD:-}"
+
+          if [ -z "$OPENCODE_SERVER_PASSWORD" ]; then
+            echo "⚠️ OPENCODE_WEB_PASSWORD is not configured."
+          fi
+
+          # --------------------------------------------------------
+          # Detect the correct server subcommand for this version.
+          # --------------------------------------------------------
+
+          SERVE_CMD=""
+
+          if opencode web --help >/dev/null 2>&1; then
+            SERVE_CMD="opencode web"
+          elif opencode serve --help >/dev/null 2>&1; then
+            SERVE_CMD="opencode serve"
+          else
+            echo "❌ Neither 'opencode web' nor 'opencode serve' is available."
+            opencode --help || true
+            exit 1
+          fi
+
+          echo "🚀 Starting OpenCode with: $SERVE_CMD"
+
+          setsid bash -c \
+            "$SERVE_CMD \
+              --hostname 0.0.0.0 \
+              --port 4096 \
+              </dev/null \
+              >>'$LOG_FILE' 2>&1" &
+
+          PID=$!
+
+          echo "$PID" > "$RUNNER_TEMP/opencode.pid"
+
+          disown || true
+
+          echo "OpenCode PID=$PID"
+
+          UP=0
+
+          for i in $(seq 1 120); do
+
+            HTTP_CODE="$(
+              curl \
+                -s \
+                -o /dev/null \
+                --max-time 2 \
+                -w '%{http_code}' \
+                http://127.0.0.1:4096/global/health \
+                2>/dev/null || echo '000'
+            )"
+
+            if [ "$HTTP_CODE" = "000" ]; then
+
+              HTTP_CODE="$(
+                curl \
+                  -s \
+                  -o /dev/null \
+                  --max-time 2 \
+                  -w '%{http_code}' \
+                  http://127.0.0.1:4096/ \
+                  2>/dev/null || echo '000'
+              )"
+
+            fi
+
+            if [ "$HTTP_CODE" != "000" ]; then
+
+              UP=1
+
+              echo "✅ OpenCode is ready (HTTP $HTTP_CODE)."
+
+              break
+
+            fi
+
+            if ! kill -0 "$PID" 2>/dev/null; then
+
+              echo "❌ OpenCode exited."
+
+              cat "$LOG_FILE" || true
+
+              exit 1
+
+            fi
+
+            sleep 1
+
+          done
+
+          if [ "$UP" -ne 1 ]; then
+
+            echo "❌ OpenCode did not become ready."
+
+            tail -n 200 "$LOG_FILE" || true
+
+            exit 1
+
+          fi
+
+      # ============================================================
+      # 12. Cloudflare Tunnel
+      # ============================================================
+
+      - name: 🌐 Start Cloudflare Tunnel
+        id: tunnel
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/cloudflared-logs"
+
+          LOG_FILE="$RUNNER_TEMP/cloudflared-logs/tunnel.log"
+
+          : > "$LOG_FILE"
+
+          echo "🌐 Starting Cloudflare Tunnel..."
+
+          setsid bash -c \
+            "cloudflared tunnel \
+              --no-autoupdate \
+              --url http://127.0.0.1:4096 \
+              </dev/null \
+              >>'$LOG_FILE' 2>&1" &
+
+          PID=$!
+
+          echo "$PID" > "$RUNNER_TEMP/cloudflared.pid"
+
+          disown || true
+
+          PUBLIC_URL=""
+
+          for i in $(seq 1 90); do
+
+            PUBLIC_URL="$(
+              grep -Eo \
+              'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' \
+              "$LOG_FILE" |
+              head -n1 || true
+            )"
+
+            if [ -n "$PUBLIC_URL" ]; then
+              break
+            fi
+
+            if ! kill -0 "$PID" 2>/dev/null; then
+
+              echo "❌ Cloudflare exited."
+
+              cat "$LOG_FILE" || true
+
+              exit 1
+
+            fi
+
+            sleep 1
+
+          done
+
+          if [ -z "$PUBLIC_URL" ]; then
+
+            echo "❌ Could not obtain Cloudflare URL."
+
+            cat "$LOG_FILE" || true
+
+            exit 1
+
+          fi
+
+          echo "PUBLIC_URL=$PUBLIC_URL" >> "$GITHUB_ENV"
+
+          echo "=============================================="
+          echo "🤖 OpenCode Web is LIVE"
+          echo ""
+          echo "$PUBLIC_URL"
+          echo "=============================================="
+
+      # ============================================================
+      # 13. GitHub Summary
+      # ============================================================
+
+      - name: 📌 Publish OpenCode URL
+        run: |
+          {
+            echo "# 🤖 OpenCode AI — Persistent Session"
+            echo ""
+            echo "## 🌐 Web Interface"
+            echo ""
+            echo "### [$PUBLIC_URL]($PUBLIC_URL)"
+            echo ""
+            echo "## 📦 Persistent State"
+            echo ""
+            echo "OpenCode sessions and persistent data are backed up periodically."
+            echo ""
+            echo "## 📁 Repository"
+            echo ""
+            echo "\`$GITHUB_REPOSITORY\`"
+            echo ""
+            echo "## 🌿 Branch"
+            echo ""
+            echo "\`$GITHUB_REF_NAME\`"
+            echo ""
+            echo "## ⏱️ Duration"
+            echo ""
+            echo "${{ github.event.inputs.duration_minutes }} minutes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ============================================================
+      # 14. Auto commit / push
+      # ============================================================
+
+      - name: 🔁 Start Git auto-commit
+        if: ${{ github.event.inputs.auto_commit == 'true' }}
+        run: |
+          set -euo pipefail
+
+          git config --global user.email \
+            "opencode-bot@users.noreply.github.com"
+
+          git config --global user.name \
+            "opencode-bot"
+
+          INTERVAL="${{ github.event.inputs.commit_interval_seconds }}"
+
+          LOG_FILE="$RUNNER_TEMP/autocommit.log"
+
+          : > "$LOG_FILE"
+
+          cat > "$RUNNER_TEMP/autocommit.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+
+          set -u
+
+          cd "$GITHUB_WORKSPACE"
+
+          while true; do
+
+            sleep "$INTERVAL"
+
+            if [ -n "$(git status --porcelain)" ]; then
+
+              git add -A
+
+              MSG="🤖 opencode: auto-commit $(date -u +'%Y-%m-%d %H:%M:%SZ')"
+
+              git commit \
+                -m "$MSG" \
+                >> "$LOG_FILE" 2>&1 || true
+
+              git push \
+                origin "$GITHUB_REF_NAME" \
+                >> "$LOG_FILE" 2>&1 || true
+
+            fi
+
+          done
+          SCRIPT
+
+          chmod +x "$RUNNER_TEMP/autocommit.sh"
+
+          export INTERVAL
+          export LOG_FILE
+
+          setsid bash \
+            "$RUNNER_TEMP/autocommit.sh" \
+            </dev/null \
+            >> "$LOG_FILE" 2>&1 &
+
+          echo "$!" > "$RUNNER_TEMP/autocommit.pid"
+
+          echo "✅ Auto-commit started."
+
+      # ============================================================
+      # 15. Persistent OpenCode backup service
+      #
+      # FIX: uses the resolved OPENCODE_DB_PATH / OPENCODE_*_DIR
+      # exported by the discovery step instead of calling the
+      # removed `opencode debug paths db` command.
+      # ============================================================
+
+      - name: 💾 Prepare persistent backup service
+        env:
+          STATE_KEY: ${{ secrets.OPENCODE_STATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${STATE_KEY:-}" ]; then
+            echo "⚠️ OPENCODE_STATE_KEY is not configured — persistent backup disabled."
+            exit 0
+          fi
+
+          BACKUP_INTERVAL="${{ github.event.inputs.backup_interval_minutes }}"
+
+          BACKUP_SECONDS=$((BACKUP_INTERVAL * 60))
+
+          cat > "$RUNNER_TEMP/backup-opencode.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+
+          set -euo pipefail
+
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          RELEASE_TAG="opencode-state"
+
+          CONFIG_DIR="${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
+          DATA_SRC="${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}"
+          DB_PATH="${OPENCODE_DB_PATH:-$DATA_SRC/opencode.db}"
+
+          create_backup() {
+
+            echo ""
+            echo "=============================================="
+            echo "💾 Creating OpenCode persistent backup"
+            echo "=============================================="
+
+            if [ "$DB_PATH" = ":memory:" ]; then
+              echo "❌ OpenCode is using an in-memory database."
+              return 1
+            fi
+
+            WORK="$RUNNER_TEMP/opencode-backup-work"
+
+            rm -rf "$WORK"
+
+            mkdir -p \
+              "$WORK/home/.config" \
+              "$WORK/home/.local/share"
+
+            # ----------------------------------------------------
+            # Copy OpenCode configuration.
+            # ----------------------------------------------------
+
+            if [ -d "$CONFIG_DIR" ]; then
+
+              cp -a \
+                "$CONFIG_DIR" \
+                "$WORK/home/.config/"
+
+            fi
+
+            # ----------------------------------------------------
+            # Copy OpenCode data.
+            # ----------------------------------------------------
+
+            if [ -d "$DATA_SRC" ]; then
+
+              cp -a \
+                "$DATA_SRC" \
+                "$WORK/home/.local/share/"
+
+            fi
+
+            DATA_DIR="$WORK/home/.local/share/opencode"
+
+            # ----------------------------------------------------
+            # NEVER store credentials.
+            # ----------------------------------------------------
+
+            rm -f \
+              "$DATA_DIR/auth.json" \
+              2>/dev/null || true
+
+            # ----------------------------------------------------
+            # Logs are not needed for persistent state.
+            # ----------------------------------------------------
+
+            rm -rf \
+              "$DATA_DIR/log" \
+              "$DATA_DIR/cache" \
+              "$DATA_DIR/tmp" \
+              2>/dev/null || true
+
+            # ----------------------------------------------------
+            # Create a consistent SQLite backup.
+            #
+            # This is important:
+            # do NOT simply cp the live SQLite DB.
+            # ----------------------------------------------------
+
+            if [ -f "$DB_PATH" ]; then
+
+              DB_BACKUP="$DATA_DIR/opencode.db.backup"
+
+              rm -f "$DB_BACKUP"
+
+              sqlite3 "$DB_PATH" \
+                ".backup '$DB_BACKUP'"
+
+              # Replace the copied live DB with the consistent backup.
+
+              rm -f \
+                "$DATA_DIR/opencode.db" \
+                "$DATA_DIR/opencode.db-wal" \
+                "$DATA_DIR/opencode.db-shm" \
+                2>/dev/null || true
+
+              mv \
+                "$DB_BACKUP" \
+                "$DATA_DIR/opencode.db"
+
+            fi
+
+            # ----------------------------------------------------
+            # Compress.
+            # ----------------------------------------------------
+
+            rm -f \
+              "$RUNNER_TEMP/opencode-state.tar.zst" \
+              "$RUNNER_TEMP/opencode-state.enc"
+
+            tar \
+              --zstd \
+              -cf "$RUNNER_TEMP/opencode-state.tar.zst" \
+              -C "$WORK" \
+              .
+
+            # ----------------------------------------------------
+            # Encrypt.
+            # ----------------------------------------------------
+
+            openssl enc \
+              -aes-256-cbc \
+              -pbkdf2 \
+              -iter 200000 \
+              -pass env:STATE_KEY \
+              -in "$RUNNER_TEMP/opencode-state.tar.zst" \
+              -out "$RUNNER_TEMP/opencode-state.enc"
+
+            # ----------------------------------------------------
+            # Unique generation.
+            # ----------------------------------------------------
+
+            GENERATION="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}-${RANDOM}"
+
+            PREFIX="state-${GENERATION}-"
+
+            UPLOAD_DIR="$RUNNER_TEMP/opencode-state-upload"
+
+            rm -rf "$UPLOAD_DIR"
+
+            mkdir -p "$UPLOAD_DIR"
+
+            # GitHub limit is < 2 GiB per release asset.
+            # Use 1900 MiB chunks for safety.
+
+            split \
+              -b 1900M \
+              -d \
+              -a 4 \
+              "$RUNNER_TEMP/opencode-state.enc" \
+              "$UPLOAD_DIR/$PREFIX"
+
+            INDEX=0
+
+            for FILE in "$UPLOAD_DIR/$PREFIX"*; do
+
+              NEW_NAME="$UPLOAD_DIR/${PREFIX}$(printf '%04d' "$INDEX").part"
+
+              mv "$FILE" "$NEW_NAME"
+
+              INDEX=$((INDEX + 1))
+
+            done
+
+            # ----------------------------------------------------
+            # Create persistent release if necessary.
+            # ----------------------------------------------------
+
+            if ! gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              >/dev/null 2>&1; then
+
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "🤖 OpenCode Persistent State" \
+                --notes "CURRENT_GENERATION=${GENERATION}" \
+                --latest=false
+
+            fi
+
+            # ----------------------------------------------------
+            # Upload all parts.
+            # ----------------------------------------------------
+
+            for FILE in "$UPLOAD_DIR/${PREFIX}"*.part; do
+
+              echo "⬆️ Uploading $(basename "$FILE")"
+
+              gh release upload \
+                "$RELEASE_TAG" \
+                "$FILE" \
+                --repo "$GITHUB_REPOSITORY"
+
+            done
+
+            # ----------------------------------------------------
+            # Only after ALL parts are uploaded:
+            # publish the new generation.
+            # ----------------------------------------------------
+
+            gh release edit \
+              "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes "CURRENT_GENERATION=${GENERATION}"
+
+            # ----------------------------------------------------
+            # Delete old state assets.
+            #
+            # Note: GitHub has no `/releases/tags/{tag}/assets`
+            # endpoint (it returns 404). Resolve the release ID
+            # first, then list the assets of that release.
+            # ----------------------------------------------------
+
+            RELEASE_ID="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+                --jq '.id'
+            )"
+
+            ASSETS_JSON="$(
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+                --paginate
+            )"
+
+            echo "$ASSETS_JSON" |
+            jq -r --arg current "$GENERATION" '
+              .[]
+              | select(
+                  (.name | startswith("state-"))
+                  and
+                  (.name | startswith("state-\($current)-") | not)
+                )
+              | .id
+            ' |
+            while read -r ASSET_ID; do
+
+              [ -z "$ASSET_ID" ] && continue
+
+              echo "🗑️ Removing old asset $ASSET_ID"
+
+              gh api \
+                --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+                || true
+
+            done
+
+            echo "✅ OpenCode state successfully persisted."
+
+          }
+
+          while true; do
+
+            sleep "$BACKUP_SECONDS"
+
+            create_backup || true
+
+          done
+          SCRIPT
+
+          chmod +x "$RUNNER_TEMP/backup-opencode.sh"
+
+          export STATE_KEY
+          export BACKUP_SECONDS
+
+          setsid bash \
+            "$RUNNER_TEMP/backup-opencode.sh" \
+            </dev/null \
+            >> "$RUNNER_TEMP/opencode-backup.log" 2>&1 &
+
+          echo "$!" > "$RUNNER_TEMP/opencode-backup.pid"
+
+          echo "💾 Persistent OpenCode backup service started."
+          echo "⏱️ Backup interval: ${BACKUP_INTERVAL} minutes."
+
+      # ============================================================
+      # 16. Keep session alive
+      # ============================================================
+
+      - name: ⏳ Keep OpenCode alive
+        run: |
+          set -euo pipefail
+
+          DURATION_MIN="${{ github.event.inputs.duration_minutes }}"
+
+          DURATION_SEC=$((DURATION_MIN * 60))
+
+          ELAPSED=0
+
+          STEP=300
+
+          echo "=============================================="
+          echo "🤖 OpenCode session started"
+          echo "=============================================="
+          echo ""
+          echo "🌐 $PUBLIC_URL"
+          echo ""
+          echo "⏱️ Duration: ${DURATION_MIN} minutes"
+          echo ""
+
+          while [ "$ELAPSED" -lt "$DURATION_SEC" ]; do
+
+            sleep "$STEP"
+
+            ELAPSED=$((ELAPSED + STEP))
+
+            REMAINING=$((DURATION_SEC - ELAPSED))
+
+            if [ "$REMAINING" -lt 0 ]; then
+              REMAINING=0
+            fi
+
+            echo ""
+            echo "⏱️ Elapsed: $((ELAPSED / 60)) minutes"
+            echo "⏳ Remaining: $((REMAINING / 60)) minutes"
+            echo "🌐 $PUBLIC_URL"
+
+            if [ -f "$RUNNER_TEMP/opencode.pid" ]; then
+
+              PID="$(cat "$RUNNER_TEMP/opencode.pid")"
+
+              if ! kill -0 "$PID" 2>/dev/null; then
+
+                echo "❌ OpenCode process died."
+
+                exit 1
+
+              fi
+
+            fi
+
+            if [ -f "$RUNNER_TEMP/cloudflared.pid" ]; then
+
+              PID="$(cat "$RUNNER_TEMP/cloudflared.pid")"
+
+              if ! kill -0 "$PID" 2>/dev/null; then
+
+                echo "❌ Cloudflare process died."
+
+                exit 1
+
+              fi
+
+            fi
+
+          done
+
+          echo ""
+          echo "✅ Requested session duration reached."
+
+      # ============================================================
+      # 17. Final Git commit
+      # ============================================================
+
+      - name: 💾 Final project commit and push
+        if: ${{ always() && github.event.inputs.auto_commit == 'true' }}
+        run: |
+          set +e
+
+          git config --global user.email \
+            "opencode-bot@users.noreply.github.com"
+
+          git config --global user.name \
+            "opencode-bot"
+
+          git add -A
+
+          if ! git diff --cached --quiet; then
+
+            git commit \
+              -m "🤖 opencode: final auto-commit $(date -u +'%Y-%m-%d %H:%M:%SZ')"
+
+            git push \
+              origin "$GITHUB_REF_NAME"
+
+          else
+
+            echo "No pending project changes."
+
+          fi
+
+      # ============================================================
+      # 18. Final state backup
+      #
+      # FIX: uses OPENCODE_DB_PATH / OPENCODE_*_DIR from the
+      # discovery step, and skips gracefully (instead of failing
+      # the whole run) when there is nothing to back up.
+      # ============================================================
+
+      - name: 💾 Final OpenCode state backup
+        if: ${{ always() }}
+        env:
+          STATE_KEY: ${{ secrets.OPENCODE_STATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${STATE_KEY:-}" ]; then
+            echo "⚠️ OPENCODE_STATE_KEY is not configured — skipping final backup."
+            exit 0
+          fi
+
+          CONFIG_DIR="${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
+          DATA_SRC="${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}"
+          DB_PATH="${OPENCODE_DB_PATH:-$DATA_SRC/opencode.db}"
+
+          if [ "$DB_PATH" = ":memory:" ]; then
+            echo "⚠️ OpenCode is using an in-memory database — nothing to persist."
+            exit 0
+          fi
+
+          if [ ! -d "$DATA_SRC" ] && [ ! -d "$CONFIG_DIR" ]; then
+            echo "ℹ️ No OpenCode state exists — skipping final backup."
+            exit 0
+          fi
+
+          WORK="$RUNNER_TEMP/final-opencode-state"
+
+          rm -rf "$WORK"
+
+          mkdir -p \
+            "$WORK/home/.config" \
+            "$WORK/home/.local/share"
+
+          # Configuration
+
+          if [ -d "$CONFIG_DIR" ]; then
+
+            cp -a \
+              "$CONFIG_DIR" \
+              "$WORK/home/.config/"
+
+          fi
+
+          # Data
+
+          if [ -d "$DATA_SRC" ]; then
+
+            cp -a \
+              "$DATA_SRC" \
+              "$WORK/home/.local/share/"
+
+          fi
+
+          DATA_DIR="$WORK/home/.local/share/opencode"
+
+          mkdir -p "$DATA_DIR"
+
+          # Never persist credentials.
+
+          rm -f \
+            "$DATA_DIR/auth.json" \
+            2>/dev/null || true
+
+          # Logs/cache are not needed.
+
+          rm -rf \
+            "$DATA_DIR/log" \
+            "$DATA_DIR/cache" \
+            "$DATA_DIR/tmp" \
+            2>/dev/null || true
+
+          # Consistent SQLite backup.
+
+          if [ -f "$DB_PATH" ]; then
+
+            sqlite3 "$DB_PATH" \
+              ".backup '$DATA_DIR/opencode.db.backup'"
+
+            rm -f \
+              "$DATA_DIR/opencode.db" \
+              "$DATA_DIR/opencode.db-wal" \
+              "$DATA_DIR/opencode.db-shm" \
+              2>/dev/null || true
+
+            mv \
+              "$DATA_DIR/opencode.db.backup" \
+              "$DATA_DIR/opencode.db"
+
+          fi
+
+          # Compress
+
+          tar \
+            --zstd \
+            -cf "$RUNNER_TEMP/final-opencode-state.tar.zst" \
+            -C "$WORK" \
+            .
+
+          # Encrypt
+
+          openssl enc \
+            -aes-256-cbc \
+            -pbkdf2 \
+            -iter 200000 \
+            -pass env:STATE_KEY \
+            -in "$RUNNER_TEMP/final-opencode-state.tar.zst" \
+            -out "$RUNNER_TEMP/final-opencode-state.enc"
+
+          GENERATION="final-${GITHUB_RUN_ID}-$(date -u +%Y%m%dT%H%M%SZ)"
+
+          PREFIX="state-${GENERATION}-"
+
+          UPLOAD_DIR="$RUNNER_TEMP/final-state-upload"
+
+          rm -rf "$UPLOAD_DIR"
+
+          mkdir -p "$UPLOAD_DIR"
+
+          split \
+            -b 1900M \
+            -d \
+            -a 4 \
+            "$RUNNER_TEMP/final-opencode-state.enc" \
+            "$UPLOAD_DIR/$PREFIX"
+
+          INDEX=0
+
+          for FILE in "$UPLOAD_DIR/$PREFIX"*; do
+
+            NEW_NAME="$UPLOAD_DIR/${PREFIX}$(printf '%04d' "$INDEX").part"
+
+            mv "$FILE" "$NEW_NAME"
+
+            INDEX=$((INDEX + 1))
+
+          done
+
+          if ! gh release view "opencode-state" \
+            --repo "$GITHUB_REPOSITORY" \
+            >/dev/null 2>&1; then
+
+            gh release create "opencode-state" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "🤖 OpenCode Persistent State" \
+              --notes "CURRENT_GENERATION=${GENERATION}" \
+              --latest=false
+
+          fi
+
+          for FILE in "$UPLOAD_DIR/${PREFIX}"*.part; do
+
+            echo "⬆️ Uploading $(basename "$FILE")"
+
+            gh release upload \
+              "opencode-state" \
+              "$FILE" \
+              --repo "$GITHUB_REPOSITORY"
+
+          done
+
+          # Publish only after every part succeeded.
+
+          gh release edit \
+            "opencode-state" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes "CURRENT_GENERATION=${GENERATION}"
+
+          # Remove previous generations.
+          #
+          # Note: GitHub has no `/releases/tags/{tag}/assets`
+          # endpoint (it returns 404). Resolve the release ID
+          # first, then list the assets of that release.
+
+          RELEASE_ID="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/opencode-state" \
+              --jq '.id'
+          )"
+
+          ASSETS_JSON="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --paginate
+          )"
+
+          echo "$ASSETS_JSON" |
+          jq -r --arg current "$GENERATION" '
+            .[]
+            | select(
+                (.name | startswith("state-"))
+                and
+                (.name | startswith("state-\($current)-") | not)
+              )
+            | .id
+          ' |
+          while read -r ASSET_ID; do
+
+            [ -z "$ASSET_ID" ] && continue
+
+            gh api \
+              --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+              || true
+
+          done
+
+          echo "✅ Final OpenCode state saved."
+
+      # ============================================================
+      # 19. Debug logs
+      # ============================================================
+
+      - name: 📜 Show logs
+        if: always()
+        run: |
+
+          echo "=============================================="
+          echo "===== OpenCode server log ====="
+          echo "=============================================="
+
+          tail -n 100 \
+            "$RUNNER_TEMP/opencode-logs/server.log" \
+            2>/dev/null || true
+
+          echo ""
+          echo "=============================================="
+          echo "===== Persistent backup log ====="
+          echo "=============================================="
+
+          tail -n 100 \
+            "$RUNNER_TEMP/opencode-backup.log" \
+            2>/dev/null || true
+
+          echo ""
+          echo "=============================================="
+          echo "===== Auto commit log ====="
+          echo "=============================================="
+
+          tail -n 100 \
+            "$RUNNER_TEMP/autocommit.log" \
+            2>/dev/null || true
+
+          echo ""
+          echo "=============================================="
+          echo "===== Cloudflare log ====="
+          echo "=============================================="
+
+          tail -n 100 \
+            "$RUNNER_TEMP/cloudflared-logs/tunnel.log" \
+            2>/dev/null || true
+
+      # ============================================================
+      # 20. Cloudflare cleanup
+      #
+      # FIX: continue-on-error so the cleanup never marks the run
+      # as failed when cloudflared was never started.
+      # ============================================================
+
+      - name: 🧹 Shutdown cloudflared
+        if: always()
+        continue-on-error: true
+        uses: AnimMouse/setup-cloudflared/shutdown@v2
