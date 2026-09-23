@@ -45,12 +45,9 @@ jobs:
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             git add -f build/Animezid.cs3
-            if ! git diff --staged --quiet; then
-              git commit -m "🤖 Build Animezid.cs3"
-              git push
-            else
-              echo "No changes to commit"
-            fi
+            git commit --allow-empty -m "🤖 Build Animezid.cs3"
+            git pull --rebase origin "$GITHUB_REF_NAME" || true
+            git push
           else
             echo "Animezid.cs3 not found!"
           fi
