@@ -971,6 +971,21 @@ jobs:
 
           }
 
+          final_backup_on_term() {
+
+            echo ""
+            echo "=============================================="
+            echo "🛑 Shutdown signal received — final backup"
+            echo "=============================================="
+
+            create_backup || true
+
+            exit 0
+
+          }
+
+          trap final_backup_on_term TERM INT HUP
+
           while true; do
 
             sleep "$BACKUP_SECONDS"
@@ -1002,6 +1017,39 @@ jobs:
       - name: ⏳ Keep OpenCode alive
         run: |
           set -euo pipefail
+
+          shutdown_final_backup() {
+
+            echo ""
+            echo "=============================================="
+            echo "🛑 Session cancelled — final backup..."
+            echo "=============================================="
+
+            BPID="$(cat "$RUNNER_TEMP/opencode-backup.pid" 2>/dev/null || true)"
+
+            if [ -n "${BPID:-}" ] && kill -0 "$BPID" 2>/dev/null; then
+
+              echo "💾 Asking backup service (pid $BPID) to save final state..."
+
+              kill -TERM "$BPID" 2>/dev/null || true
+
+              for _ in $(seq 1 90); do
+
+                if ! kill -0 "$BPID" 2>/dev/null; then
+                  break
+                fi
+
+                sleep 1
+
+              done
+
+            fi
+
+            exit 0
+
+          }
+
+          trap shutdown_final_backup TERM INT HUP
 
           DURATION_MIN="${{ github.event.inputs.duration_minutes }}"
 
