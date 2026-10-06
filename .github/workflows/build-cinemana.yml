@@ -1,0 +1,53 @@
+name: Build Cinemana Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Cinemana/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Cinemana plugin
+        run: ./gradlew :Cinemana:make
+
+      - name: Upload Cinemana.cs3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cinemana
+          path: Cinemana/build/Cinemana.cs3
+
+      - name: Commit and push built cs3 to build/
+        run: |
+          if [ -f "Cinemana/build/Cinemana.cs3" ]; then
+            cp Cinemana/build/Cinemana.cs3 build/Cinemana.cs3
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/Cinemana.cs3
+            git commit --allow-empty -m "🤖 Build Cinemana.cs3"
+            git pull --rebase origin "$GITHUB_REF_NAME" || true
+            git push
+          else
+            echo "Cinemana.cs3 not found!"
+          fi
