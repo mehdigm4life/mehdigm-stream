@@ -402,8 +402,28 @@ class Shahid4u : MainAPI() {
         val watchUrl = toWatchUrl(data)
         val browserHeaders = buildBrowserHeaders(watchUrl)
 
+        // تمريرة أولى: جلب السيرفرات ثم حلّها بالتتابع (وليس بالتوازي).
+        // CloudflareKiller يستخدم WebView وذاكرة كوكيز مشتركة غير آمنة للتوازي،
+        // لذا الحل المتوازي يسبب فشل/challenge لمعظم السيرفرات.
+        var anyEmitted = resolveAllServers(watchUrl, browserHeaders, subtitleCallback, callback)
+
+        // تمريرة ثانية بجلسة/توكنات جديدة إذا لم يُستخرج أي رابط.
+        if (!anyEmitted) {
+            Log.w(logTag, "loadLinks -> first pass yielded nothing, retrying with a fresh watch page")
+            anyEmitted = resolveAllServers(watchUrl, browserHeaders, subtitleCallback, callback)
+        }
+
+        return anyEmitted
+    }
+
+    private suspend fun resolveAllServers(
+        watchUrl: String,
+        browserHeaders: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val servers: List<ServerEntry>
-        var cookies: Map<String, String> = emptyMap()
+        val cookies: Map<String, String>
         try {
             val watchResponse = app.get(
                 watchUrl,
@@ -423,28 +443,43 @@ class Shahid4u : MainAPI() {
             return false
         }
 
-        val results = servers.amap { server ->
-            try {
-                val mUrl = makeAbsoluteUrl(server.url) ?: return@amap false
-                val resp = app.get(
-                    mUrl,
-                    headers = browserHeaders,
-                    cookies = cookies,
-                    interceptor = cfInterceptor,
-                    timeout = 60L
-                )
-                val finalUrl = resp.url
-                if (finalUrl.isBlank() || sameHost(finalUrl, mainUrl)) {
-                    Log.w(logTag, "server '${server.name}' did not resolve (final=$finalUrl)")
-                    return@amap false
-                }
-                emitServerLink(server.name, finalUrl, watchUrl, subtitleCallback, callback)
-            } catch (e: Exception) {
-                Log.w(logTag, "server '${server.name}' failed: ${e.message}")
-                false
+        var any = false
+        for (server in servers) {
+            if (resolveServer(server, watchUrl, browserHeaders, cookies, subtitleCallback, callback)) {
+                any = true
             }
         }
-        return results.any { it }
+        return any
+    }
+
+    private suspend fun resolveServer(
+        server: ServerEntry,
+        watchUrl: String,
+        browserHeaders: Map<String, String>,
+        cookies: Map<String, String>,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            val mUrl = makeAbsoluteUrl(server.url) ?: return false
+            val resp = app.get(
+                mUrl,
+                headers = browserHeaders,
+                cookies = cookies,
+                interceptor = cfInterceptor,
+                timeout = 90L
+            )
+            val finalUrl = resp.url
+            if (finalUrl.isBlank() || sameHost(finalUrl, mainUrl)) {
+                Log.w(logTag, "server '${server.name}' did not resolve (final=$finalUrl)")
+                false
+            } else {
+                emitServerLink(server.name, finalUrl, watchUrl, subtitleCallback, callback)
+            }
+        } catch (e: Exception) {
+            Log.w(logTag, "server '${server.name}' failed: ${e.message}")
+            false
+        }
     }
 
     private fun toWatchUrl(url: String): String = url
