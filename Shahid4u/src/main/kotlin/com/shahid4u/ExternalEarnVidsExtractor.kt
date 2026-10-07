@@ -35,9 +35,9 @@ open class ExternalEarnVidsExtractor : ExtractorApi() {
                 "Connection" to "keep-alive"
             )
             val resolvedReferer = if (url.contains("fdewsdc.sbs", true)) {
-                "https://shhahid4u.cam"
+                "https://shaheid4u.name"
             } else {
-                referer ?: mainUrl
+                referer ?: "https://shaheid4u.name"
             }
 
             val safeReferer = safeEncodeUrl(resolvedReferer)

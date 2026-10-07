@@ -8,13 +8,11 @@ import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.network.CloudflareKiller
 import okhttp3.Interceptor
 import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
 import java.net.URI
 import java.net.URLEncoder
 
 class Shahid4u : MainAPI() {
-    override var mainUrl = "https://shhaiid4u.net/"
+    override var mainUrl = "https://shaheid4u.name/"
     override var name = "شاهد فور يو (Shahid4u)"
     override val hasMainPage = true
     override var lang = "ar"
@@ -126,29 +124,35 @@ class Shahid4u : MainAPI() {
     }
 
     private fun parseCard(element: Element): SearchResponse? {
-        val linkElement = element.selectFirst("a.show.card, a.glide_post, a")
-        if (linkElement == null) return null
+        val linkElement = element.selectFirst("a.show-card, a.glide_post, a.glide-item, a")
+            ?: return null
 
         val href = linkElement.attr("href").ifBlank { linkElement.absUrl("href") }
+        if (href.isBlank()) return null
 
         val mainTitle = element.selectFirst("p.title")?.text()?.trim()
+            ?: linkElement.selectFirst("p.title")?.text()?.trim()
         val description = element.selectFirst("p.description")?.text()?.trim()
         val title = if (!mainTitle.isNullOrBlank()) {
             if (!description.isNullOrBlank()) "$mainTitle - $description" else mainTitle
         } else {
             element.selectFirst("div.card-content")?.text()?.trim()
                 ?: element.selectFirst("h3")?.text()?.trim()
+                ?: element.selectFirst("img")?.attr("alt")?.trim()
         }
         if (title.isNullOrBlank()) return null
 
         val posterStyle = linkElement.attr("style")
-        var posterUrl = Regex("""url\(['"]?(.*?)['"]?\)""").find(posterStyle)?.groupValues?.get(1)
+        var posterUrl = Regex("""(?:--background-image-url|background-image)\s*:\s*url\(['"]?(.*?)['"]?\)""")
+            .find(posterStyle)?.groupValues?.get(1)
+        if (posterUrl.isNullOrBlank()) posterUrl = Regex("""url\(['"]?(.*?)['"]?\)""")
+            .find(posterStyle)?.groupValues?.get(1)
         if (posterUrl.isNullOrBlank()) posterUrl = element.selectFirst("img")?.attr("data-src")
         if (posterUrl.isNullOrBlank()) posterUrl = element.selectFirst("img")?.attr("src")
         posterUrl = makeAbsoluteUrl(posterUrl) ?: TRANSPARENT_PNG_DATA_URI
 
-        val isTvSeries =
-            element.selectFirst(".ep_num, .الحلقة") != null || href.contains("/episode/")
+        val isTvSeries = href.contains("/episode/") || href.contains("/series/") ||
+                href.contains("/season/") || element.selectFirst(".ep_num, .ep, .الحلقة") != null
 
         return if (isTvSeries) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -241,56 +245,52 @@ class Shahid4u : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = httpGet(url)
 
-        val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
+        val title = document.selectFirst("span.title")?.text()?.trim()
+            ?: document.selectFirst("h1")?.text()?.trim()
+            ?: document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+            ?: document.title().trim().ifBlank { null }
+            ?: "غير متوفر"
         val posterStyle = document.selectFirst("div.poster-side div.poster")?.attr("style").orEmpty()
-        val poster = document.selectFirst("div.poster-side img")?.attr("src")
-            ?: Regex("""--background-image-url:\s*url\(['"]?(.*?)['"]?\)""")
-                .find(posterStyle)?.groupValues?.get(1)
+        val poster = Regex("""(?:--background-image-url|background-image)\s*:\s*url\(['"]?(.*?)['"]?\)""")
+            .find(posterStyle)?.groupValues?.get(1)
+            ?: document.selectFirst("div.poster-side img")?.attr("src")
             ?: document.selectFirst("meta[property='og:image']")?.attr("content")
         val plot = document.selectFirst("span.description")?.text()?.trim()
-        val tags = document.select("div.qualities span.q-tag a").map { it.text() }
+            ?: document.selectFirst("div.description")?.text()?.trim()
+        val tags = document.select("span.qualities a, div.qualities a, a.btn.btn-gray")
+            .map { it.text().trim() }.filter { it.isNotBlank() }.distinct()
         val isAnime = url.contains("انمي") || title.contains("انمي") ||
                 url.contains("anime", ignoreCase = true)
 
-        val seasons = document.select("div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']")
-        val episodes = ArrayList<Episode>()
+        val base = url.trimEnd('/')
+        val episodes: List<Episode> = when {
+            url.contains("/series/") -> collectSeriesEpisodes(base, poster)
 
-        if (seasons.isNotEmpty()) {
-            seasons.amap { seasonElement ->
-                val seasonUrl = seasonElement.attr("href")
-                val seasonDoc = httpGet(seasonUrl, referer = url)
-
-                seasonDoc.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                    .forEach { episodeElement ->
-                        val epName = episodeElement.text().trim()
-                        val epUrl = episodeElement.attr("href")
-                        val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
-                        val seasonNumber =
-                            Regex("""الموسم\s*(\d+)""").find(seasonElement.text())?.groupValues?.get(
-                                1
-                            )?.toIntOrNull()
-
-                        episodes.add(newEpisode(epUrl) {
-                            this.name = epName
-                            episode = episodeNumber
-                            season = seasonNumber
-                            posterUrl = poster
-                        })
-                    }
+            url.contains("/season/") -> {
+                val seasonNumber = parseSeasonNumber(title, url)
+                collectSeasonEpisodes(base, seasonNumber, poster)
             }
-        } else {
-            document.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                .forEach { episodeElement ->
-                    val epName = episodeElement.text().trim()
-                    val epUrl = episodeElement.attr("href")
-                    val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
 
-                    episodes.add(newEpisode(epUrl) {
-                        this.name = epName
+            url.contains("/episode/") -> {
+                val seriesLink = document.selectFirst("a[href*='/series/']")
+                    ?.let { absHref(it) }
+                val fromSeries = if (!seriesLink.isNullOrBlank()) {
+                    collectSeriesEpisodes(seriesLink.trimEnd('/'), poster)
+                } else emptyList()
+
+                if (fromSeries.isNotEmpty()) fromSeries
+                else {
+                    val episodeNumber = Regex("""(?:الحلقة|حلقة|Episode)\s*([0-9٠-٩]+)""")
+                        .find(title)?.groupValues?.get(1)?.let { toIntLoose(it) }
+                    listOf(newEpisode(url) {
+                        this.name = title
                         this.episode = episodeNumber
                         this.posterUrl = poster
                     })
                 }
+            }
+
+            else -> emptyList()
         }
 
         val sortedEpisodes = episodes.sortedWith(compareBy({ it.season }, { it.episode }))
@@ -312,88 +312,203 @@ class Shahid4u : MainAPI() {
         }
     }
 
+    /**
+     * يجمع كل حلقات المسلسل عبر صفحة المواسم [seriesUrl]/seasons ثم [seasonUrl]/episodes.
+     */
+    private suspend fun collectSeriesEpisodes(seriesUrl: String, poster: String?): List<Episode> {
+        val seasonsDoc = httpGet(seriesUrl.trimEnd('/') + "/seasons", referer = seriesUrl)
+        val seasonAnchors = seasonsDoc.select("a.show-card[href*='/season/']").ifEmpty {
+            seasonsDoc.select("a[href*='/season/']")
+        }
+        val seen = HashSet<String>()
+        val seasonCards = seasonAnchors.filter { a ->
+            val h = absHref(a) ?: return@filter false
+            seen.add(h)
+        }
+
+        val perSeason = seasonCards.amap { a ->
+            val seasonUrl = absHref(a) ?: return@amap emptyList()
+            val seasonTitle = a.selectFirst("p.title")?.text()?.trim() ?: a.text().trim()
+            val seasonNumber = parseSeasonNumber(seasonTitle, seasonUrl)
+            collectSeasonEpisodes(seasonUrl, seasonNumber, poster)
+        }
+        return perSeason.flatten()
+    }
+
+    /**
+     * يجمع حلقات موسم واحد عبر صفحة [seasonUrl]/episodes.
+     */
+    private suspend fun collectSeasonEpisodes(
+        seasonUrl: String,
+        seasonNumber: Int?,
+        poster: String?
+    ): List<Episode> {
+        val doc = httpGet(seasonUrl.trimEnd('/') + "/episodes", referer = seasonUrl)
+        val anchors = doc.select("a.show-card[href*='/episode/']").ifEmpty {
+            doc.select("a[href*='/episode/']")
+        }
+        val seen = HashSet<String>()
+        return anchors.mapNotNull { a ->
+            val epUrl = absHref(a) ?: return@mapNotNull null
+            if (!seen.add(epUrl)) return@mapNotNull null
+            val epTitle = a.selectFirst("p.title")?.text()?.trim()
+                ?: a.selectFirst("img")?.attr("alt")?.trim()
+            val name = epTitle?.takeIf { it.isNotBlank() } ?: "حلقة"
+            val episodeNumber = Regex("""(?:الحلقة|حلقة|Episode)\s*([0-9٠-٩]+)""")
+                .find(name)?.groupValues?.get(1)?.let { toIntLoose(it) }
+            newEpisode(epUrl) {
+                this.name = name
+                this.episode = episodeNumber
+                this.season = seasonNumber
+                this.posterUrl = poster
+            }
+        }
+    }
+
+    private fun absHref(a: Element?): String? {
+        if (a == null) return null
+        val abs = a.absUrl("href")
+        return when {
+            abs.isNotBlank() -> abs
+            else -> makeAbsoluteUrl(a.attr("href"))
+        }
+    }
+
+    private fun parseSeasonNumber(title: String?, url: String): Int? {
+        val text = "${title.orEmpty()} $url"
+        Regex("""(?:الموسم|season)\s*([0-9٠-٩]+)""", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.get(1)?.let { return toIntLoose(it) }
+        val ordinals = listOf(
+            "الاول" to 1, "الأول" to 1, "الثاني" to 2, "الثالث" to 3, "الرابع" to 4,
+            "الخامس" to 5, "السادس" to 6, "السابع" to 7, "الثامن" to 8, "التاسع" to 9,
+            "العاشر" to 10
+        )
+        for ((k, v) in ordinals) if (text.contains(k)) return v
+        return null
+    }
+
+    private fun toIntLoose(value: String): Int? {
+        val normalized = value.map { c -> if (c in '\u0660'..'\u0669') ('0' + (c - '\u0660')) else c }
+            .joinToString("")
+        return normalized.toIntOrNull()
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val watchUrl = data
-            .replace("/film/", "/watch/")
-            .replace("/episode/", "/watch/")
-            .replace("/download/", "/watch/")
-            .replace("/season/", "/watch/")
+        val watchUrl = toWatchUrl(data)
+        val browserHeaders = buildBrowserHeaders(watchUrl)
 
-        val embedUrls = linkedSetOf<String>()
-        val browserHeaders = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36",
-            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language" to "en-US,en;q=0.9",
-            "Upgrade-Insecure-Requests" to "1"
-        )
-
-        // ---- 1) صفحة المشاهدة: قراءة مصفوفة السيرفرات المضمّنة + أي iframe ظاهر ----
+        val servers: List<ServerEntry>
+        var cookies: Map<String, String> = emptyMap()
         try {
             val watchResponse = app.get(
                 watchUrl,
                 headers = browserHeaders,
-                interceptor = cfInterceptor
+                interceptor = cfInterceptor,
+                timeout = 60L
             )
-            val htmlContent = watchResponse.text
-            embedUrls.addAll(parseEmbedUrls(htmlContent))
-            watchResponse.document.select("iframe[src]").forEach { iframe ->
-                val src = iframe.absUrl("src").ifBlank { iframe.attr("src") }
-                if (src.isNotBlank()) embedUrls.add(src)
-            }
+            cookies = watchResponse.cookies
+            servers = parseServers(watchResponse.text)
         } catch (e: Exception) {
             Log.e(logTag, "loadLinks -> failed to fetch watch page $watchUrl: ${e.message}")
-        }
-
-        // ---- 2) صفحة التحميل: روابط {host}/d/{code} لمختلف الجودات ----
-        try {
-            val downloadUrl = watchUrl.replace("/watch/", "/download/")
-            if (downloadUrl != watchUrl) {
-                val dlResponse = app.get(
-                    downloadUrl,
-                    headers = browserHeaders + ("Referer" to watchUrl),
-                    interceptor = cfInterceptor
-                )
-                if (dlResponse.isSuccessful) {
-                    dlResponse.document.select("a.btn-down[href], a[href*='/d/']").forEach { a ->
-                        val href = a.absUrl("href").ifBlank { a.attr("href") }
-                        val link = makeAbsoluteUrl(href)
-                        if (!link.isNullOrBlank()) embedUrls.add(link)
-                    }
-                } else {
-                    Log.w(logTag, "download page $downloadUrl returned code ${dlResponse.code}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(logTag, "loadLinks -> download page failed: ${e.message}")
-        }
-
-        if (embedUrls.isEmpty()) {
-            Log.e(logTag, "loadLinks -> no embed urls found on $watchUrl")
             return false
         }
 
-        val results = embedUrls.toList().amap { embedUrl ->
+        if (servers.isEmpty()) {
+            Log.e(logTag, "loadLinks -> no servers found on $watchUrl")
+            return false
+        }
+
+        val results = servers.amap { server ->
             try {
-                resolveEmbedUrl(embedUrl, watchUrl, subtitleCallback, callback)
+                val mUrl = makeAbsoluteUrl(server.url) ?: return@amap false
+                val resp = app.get(
+                    mUrl,
+                    headers = browserHeaders,
+                    cookies = cookies,
+                    interceptor = cfInterceptor,
+                    timeout = 60L
+                )
+                val finalUrl = resp.url
+                if (finalUrl.isBlank() || sameHost(finalUrl, mainUrl)) {
+                    Log.w(logTag, "server '${server.name}' did not resolve (final=$finalUrl)")
+                    return@amap false
+                }
+                emitServerLink(server.name, finalUrl, watchUrl, subtitleCallback, callback)
             } catch (e: Exception) {
-                Log.w(logTag, "resolveEmbedUrl failed ($embedUrl): ${e.message}")
+                Log.w(logTag, "server '${server.name}' failed: ${e.message}")
                 false
             }
         }
-
         return results.any { it }
+    }
+
+    private fun toWatchUrl(url: String): String = url
+        .replace("/film/", "/watch/")
+        .replace("/episode/", "/watch/")
+        .replace("/series/", "/watch/")
+        .replace("/season/", "/watch/")
+        .replace("/download/", "/watch/")
+
+    private fun sameHost(a: String, b: String): Boolean {
+        val ha = runCatching { URI(a).host }.getOrNull() ?: return false
+        val hb = runCatching { URI(b).host }.getOrNull() ?: return false
+        return ha.equals(hb, ignoreCase = true)
+    }
+
+    private data class ServerEntry(val name: String, val url: String, val rank: Int)
+
+    /**
+     * استخراج مصفوفة السيرفرات `let servers = [...]` من صفحة المشاهدة.
+     * كل عنصر: {"name":"earnvids","url":"/m/<hash>","rank":2,...}
+     */
+    private fun parseServers(html: String): List<ServerEntry> {
+        val out = LinkedHashMap<String, ServerEntry>()
+        val cleaned = html
+            .replace("&quot;", "\"")
+            .replace("&#039;", "'")
+            .replace("&amp;", "&")
+
+        val blockRegex = Regex("""(?:let|var|const)\s+servers\s*=\s*(\[[\s\S]*?\])\s*;""")
+        val block = blockRegex.find(cleaned)?.groupValues?.get(1)
+
+        if (block != null) {
+            try {
+                val array = JSONArray(block.replace("\\/", "/"))
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val url = obj.optString("url").ifBlank { obj.optString("src") }
+                    if (url.isBlank()) continue
+                    val name = obj.optString("name").ifBlank { "Server ${i + 1}" }
+                    val rank = obj.optInt("rank", i)
+                    if (!isCanaryServer(rank, name, url)) out[url] = ServerEntry(name, url, rank)
+                }
+            } catch (e: Exception) {
+                Log.w(logTag, "parseServers -> JSON parse failed: ${e.message}")
+            }
+        }
+
+        if (out.isEmpty()) {
+            Regex("""["']url["']\s*:\s*["']((?:\\.|[^"'\\])+)["']""")
+                .findAll(cleaned)
+                .forEachIndexed { index, m ->
+                    val u = m.groupValues[1].replace("\\/", "/")
+                    if (u.isNotBlank()) out[u] = ServerEntry("Server ${index + 1}", u, index)
+                }
+        }
+
+        return out.values.sortedBy { it.rank }
     }
 
     /**
      * فحص إدخالات سيرفرات الفخ (canary) التي يضيفها الموقع ولا تمثل سيرفراً حقيقياً.
      */
-    private fun isCanaryServer(name: String?, rank: Int?, url: String?): Boolean {
-        if (rank != null && rank >= 900000) return true
+    private fun isCanaryServer(rank: Int, name: String?, url: String?): Boolean {
+        if (rank >= 900000) return true
         val n = (name ?: "").lowercase()
         if (n.contains("backup") || n.contains("mirror") || n.contains("cdn player")) return true
         val u = (url ?: "").lowercase()
@@ -401,104 +516,33 @@ class Shahid4u : MainAPI() {
     }
 
     /**
-     * استخراج روابط السيرفرات من كتل JSON.parse المضمّنة في الصفحة.
+     * إرسال رابط السيرفر النهائي: رابط m3u8/mp4 مباشر، أو تمريره إلى loadExtractor
+     * (مثل fastvid.cam عبر ExternalEarnVidsExtractor).
      */
-    private fun parseEmbedUrls(html: String): List<String> {
-        val out = linkedSetOf<String>()
-        val cleaned = html
-            .replace("&quot;", "\"")
-            .replace("&#039;", "'")
-            .replace("&amp;", "&")
-
-        val jsonParseRegex = Regex("""JSON\.parse\(\s*['"]([\s\S]*?)['"]\s*\)""")
-        for (match in jsonParseRegex.findAll(cleaned)) {
-            val raw = match.groupValues[1].replace("\\/", "/")
-            try {
-                val array = JSONArray(raw)
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val url = obj.optString("url").ifBlank { obj.optString("src") }
-                    val name = obj.optString("name")
-                    val rank = obj.optInt("rank", 0)
-                    if (url.isNotBlank() && !isCanaryServer(name, rank, url)) {
-                        out.add(url)
-                    }
-                }
-            } catch (e1: JSONException) {
-                try {
-                    val obj = JSONObject(raw)
-                    val url = obj.optString("url").ifBlank { obj.optString("src") }
-                    val name = obj.optString("name")
-                    val rank = obj.optInt("rank", 0)
-                    if (url.isNotBlank() && !isCanaryServer(name, rank, url)) out.add(url)
-                } catch (e2: JSONException) {
-                    Log.w(logTag, "parseEmbedUrls -> could not parse JSON block: ${e2.message}")
-                }
-            }
-        }
-
-        if (out.isEmpty()) {
-            Regex("""["']url["']\s*:\s*["']((?:\\.|[^"'])+)["']""")
-                .findAll(cleaned)
-                .forEach { m ->
-                    val u = m.groupValues[1].replace("\\/", "/")
-                    if (u.startsWith("http")) out.add(u)
-                }
-        }
-
-        return out.toList()
-    }
-
-    /**
-     * حلّ رابط سيرفر: إما تمريره إلى loadExtractor، أو فتح صفحة داخلية والبحث عن iframe،
-     * أو إرسال رابط مباشر (m3u8/mp4) كرابط تشغيل.
-     */
-    private suspend fun resolveEmbedUrl(
-        embedUrl: String,
-        watchUrl: String,
+    private suspend fun emitServerLink(
+        serverName: String,
+        target: String,
+        referer: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val target = makeAbsoluteUrl(embedUrl) ?: return false
-        val targetHost = runCatching { URI(target).host }.getOrNull()
-        val mainHost = runCatching { URI(mainUrl).host }.getOrNull()
-
-        if (targetHost != null && mainHost != null && targetHost.equals(mainHost, ignoreCase = true)) {
-            return runCatching {
-                val page = httpGet(target, referer = watchUrl)
-                val iframe = page.selectFirst("iframe[src]")
-                if (iframe != null) {
-                    val src = iframe.absUrl("src").ifBlank { makeAbsoluteUrl(iframe.attr("src")) }
-                    if (!src.isNullOrBlank()) {
-                        return@runCatching resolveEmbedUrl(src, watchUrl, subtitleCallback, callback)
-                    }
-                }
-                val innerLinks = parseEmbedUrls(page.outerHtml())
-                for (inner in innerLinks) {
-                    if (resolveEmbedUrl(inner, watchUrl, subtitleCallback, callback)) return@runCatching true
-                }
-                false
-            }.getOrDefault(false)
-        }
-
         val lower = target.lowercase()
-        val isM3u8 = lower.endsWith(".m3u8") || lower.contains(".m3u8?") || lower.contains("/hls/")
-        val isVideo = lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm")
+        val isM3u8 = lower.contains(".m3u8") || lower.contains("/hls/")
+        val isVideo = lower.contains(".mp4") || lower.contains(".mkv") || lower.contains(".webm")
         if (isM3u8 || isVideo) {
             callback(
                 newExtractorLink(
                     source = this.name,
-                    name = "مباشر",
+                    name = serverName.ifBlank { "مباشر" },
                     url = target,
                 ) {
-                    this.referer = watchUrl
+                    this.referer = referer
                     this.quality = -1
                     type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                 }
             )
             return true
         }
-
-        return loadExtractor(target, watchUrl, subtitleCallback, callback)
+        return loadExtractor(target, referer, subtitleCallback, callback)
     }
 }

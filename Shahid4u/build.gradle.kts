@@ -1,7 +1,7 @@
-version = 2
+version = 3
 
 cloudstream {
-    description = "إصلاح روابط المشاهدة والتحميل (servers JSON parsing + fastved fastvid)"
+    description = "تحديث الدومين إلى shaheid4u.name ودعم البنية الجديدة للمواسم/الحلقات واستخراج سيرفرات المشاهدة"
     authors = listOf("mehdigm4life")
     language = "ar"
 
@@ -13,5 +13,5 @@ cloudstream {
         "Anime"
     )
 
-    iconUrl = "https://shhaiid4u.net/favicon.png?v=33"
+    iconUrl = "https://shaheid4u.name/faveicon.ico?v=33"
 }
