@@ -71,8 +71,12 @@ class CimaCloud : MainAPI() {
     private fun freshToken(): String? {
         val ctx = appContext ?: return null
         return try {
-            NativeLib.secureId(ctx)
-        } catch (_: Throwable) {
+            android.util.Log.i("CimaNative", "freshToken: calling buildSecure")
+            val t = NativeLib.secureId(ctx)
+            android.util.Log.i("CimaNative", "freshToken: got token len=" + (t?.length ?: -1))
+            t
+        } catch (e: Throwable) {
+            android.util.Log.i("CimaNative", "freshToken: threw " + e)
             null
         }
     }

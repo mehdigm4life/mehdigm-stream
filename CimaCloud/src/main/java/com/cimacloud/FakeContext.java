@@ -15,17 +15,26 @@ public final class FakeContext extends ContextWrapper {
 
     @Override
     public String getPackageName() {
+        FakePackageManager.log("Context.getPackageName");
         return FakePackageManager.PKG;
     }
 
     @Override
     public String getOpPackageName() {
+        FakePackageManager.log("Context.getOpPackageName");
         return FakePackageManager.PKG;
     }
 
     @Override
     public PackageManager getPackageManager() {
+        FakePackageManager.log("Context.getPackageManager");
         return pm;
+    }
+
+    @Override
+    public Object getSystemService(String name) {
+        FakePackageManager.log("Context.getSystemService(" + name + ")");
+        return super.getSystemService(name);
     }
 
     @Override
