@@ -1,6 +1,6 @@
 import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
 
-version = 14
+version = 15
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"

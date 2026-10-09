@@ -37,7 +37,7 @@ class CimaCloud : MainAPI() {
         private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         private const val DEFAULT_API = "https://1654865.xyz/v1.3/api"
         private const val CONFIG_API = "https://config-backup2.animegateshorts.workers.dev/"
-        private const val GP_MANIFEST = "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
+        private const val GP_WATCH_SUFFIX = "=m18"
 
         internal fun randomString(len: Int): String {
             val sb = StringBuilder(len)
@@ -368,18 +368,24 @@ class CimaCloud : MainAPI() {
                 val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
                 val labelName = s.optString("name").ifEmpty { label }
                 val q = s.optString("height").toIntOrNull() ?: quality
-                if (u.isNotEmpty() && seen.add(u)) {
+                val watch = gphotosWatch(u)
+                if (watch.isNotEmpty() && seen.add(watch)) {
                     emitted = true
                     when {
-                        u.contains(".m3u8") -> M3u8Helper.generateM3u8(labelName, u, ref).forEach { callback(it) }
-                        u.contains(".mpd") -> callback(
-                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.DASH) {
+                        watch.contains(".m3u8") -> {
+                            for (v in M3u8Helper.generateM3u8(labelName, watch, ref)) {
+                                seen.add(v.url)
+                                callback(v)
+                            }
+                        }
+                        watch.contains(".mpd") -> callback(
+                            newExtractorLink(labelName, labelName, watch, ExtractorLinkType.DASH) {
                                 this.referer = ref
                                 if (q != null) this.quality = q
                             }
                         )
                         else -> callback(
-                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
+                            newExtractorLink(labelName, labelName, watch, ExtractorLinkType.VIDEO) {
                                 this.referer = ref
                                 if (q != null) this.quality = q
                             }
@@ -423,33 +429,24 @@ class CimaCloud : MainAPI() {
         return false
     }
 
-    /** Google Photos DASH manifest (mirrors the app's google_photos.mp4_version exactly, NO referer). Falls back to the full MP4. */
+    /** Google Photos MPD URLs are unplayable for third-party players (their segments return 403). Use the range-capable progressive MP4 (Accept-Ranges: bytes, moov-first). */
+    private fun gphotosWatch(url: String): String =
+        if (url.contains("lh3.googleusercontent.com") && url.contains("=mm,")) url.substringBefore("=") + GP_WATCH_SUFFIX else url
+
+    /** Google Photos progressive MP4 (mirrors the web player's stream). No referer. */
     private suspend fun emitGphotosLocal(
         base: String,
         label: String,
         quality: Int?,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val mpd = base + GP_MANIFEST
-        val mpdOk = try {
-            app.get(mpd, headers = gpHtmlHeaders()).text.trimStart().startsWith("<?xml")
-        } catch (_: Throwable) {
-            false
-        }
-        android.util.Log.i("CimaCloud", "loadLinks gphotos local: mpdOk=$mpdOk")
-        if (mpdOk) {
-            callback(
-                newExtractorLink(label, label, mpd, ExtractorLinkType.DASH) {
-                    if (quality != null) this.quality = quality
-                }
-            )
-        } else {
-            callback(
-                newExtractorLink(label, label, base + "=dv", ExtractorLinkType.VIDEO) {
-                    if (quality != null) this.quality = quality
-                }
-            )
-        }
+        val video = base + GP_WATCH_SUFFIX
+        android.util.Log.i("CimaCloud", "loadLinks gphotos local: $video")
+        callback(
+            newExtractorLink(label, label, video, ExtractorLinkType.VIDEO) {
+                if (quality != null) this.quality = quality
+            }
+        )
         return true
     }
 
