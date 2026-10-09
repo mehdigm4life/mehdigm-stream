@@ -166,6 +166,16 @@ class CimaCloud : MainAPI() {
             }
             try {
                 val t = app.get(u, headers = getHeaders()).text
+                val j = safeJson(t)
+                if (j != null) return Pair(t, j)
+            } catch (e: Exception) {
+            }
+            try {
+                val h2 = mapOf(
+                    "User-Agent" to "okhttp/4.10.0",
+                    "Accept" to "application/json, text/plain, */*"
+                )
+                val t = app.get(u, headers = h2).text
                 return Pair(t, safeJson(t))
             } catch (e: Exception) {
                 return Pair("", null)
