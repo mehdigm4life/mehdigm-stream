@@ -133,6 +133,8 @@ class CimaCloud : MainAPI() {
 
         suspend fun fetchDetail(u: String): Pair<String, JSONObject?> {
             val fbIds = listOf(
+                "847f414e42596944",
+                "29b1b1201dd5ae7b",
                 "1ecf0bf45eb04ff8b6445c3a36a3966a",
                 "0123456789abcdef",
                 "1234567890123456",
