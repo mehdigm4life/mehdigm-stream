@@ -21,7 +21,7 @@ import kotlin.random.Random
  *    1. Direct streams ....... .m3u8 (expanded), .mp4 / .mkv, .mpd
  *    2. Google Photos ........ lh3.googleusercontent.com/pw/... (+ wrappers)
  *    3. CimaCloud PHP chain .. extractor.php / html_extractor.php / advanced_extractor.php
- *    4. vidspeed ............. vidspeed.org JWPlayer embed pages (P.A.C.K.E.R.)
+ *    4. P.A.C.K.E.R. embeds ... vidspeed.org + uqload (JWPlayer pages, JsUnpacker)
  *    5. Fallback ............. CloudStream's global loadExtractor
  *
  *  Google Photos note: the backend exposes every quality through a single DASH
@@ -125,21 +125,21 @@ object CimaCloudExtractors {
                 link.contains("googleusercontent.com") || link.contains("googlefinal") ||
                 link.contains("hrrejhp")
 
-    // ------------------------------------------------------------------ vidspeed (JWPlayer P.A.C.K.E.R. embeds)
+    // ------------------------------------------------- P.A.C.K.E.R. embeds (vidspeed / uqload)
 
     private val PACKER_EVAL_RE = Regex(
         """(?s)\}\s*\('(.*)',\s*(.*?),\s*(\d+),\s*'(.*?)'\.split\('\|'\)"""
     )
     private val PACKER_WORD_RE = Regex("""\b[a-zA-Z0-9_]+\b""")
-    private val VIDSPEED_STREAM_RE =
+    private val PACKER_STREAM_RE =
         Regex("""[:=]\s*"([^"\s]+(?:\.m3u8|master\.txt)[^"\s]*)""")
 
     /**
-     * vidspeed.org (and mirror hosts) serve their real HLS master inside a
-     * P.A.C.K.E.R.-obfuscated JWPlayer script:
-     * `eval(function(p,a,c,k,e,d){...}('payload',36,345,'symtab'|...))`. The CDN
-     * answers 403 unless the fetch is referer-pinned to the fresh embed page, so
-     * the page must be re-fetched and its token re-decoded at play time.
+     * vidspeed.org and uqload (uqload.is → uqload.vc) serve their real HLS master
+     * inside a P.A.C.K.E.R.-obfuscated JWPlayer script:
+     * `eval(function(p,a,c,k,e,d){...}('payload',36,N,'symtab'|...))`. The CDN
+     * answers 403 unless the fetch is referer-pinned to the freshly fetched embed
+     * page, so it must be re-fetched and its token re-decoded at play time.
      *
      * This is the faithful port of CloudStream's own JsUnpacker.unpack(): it walks
      * the payload's base-N words in order and substitutes each index that exists
@@ -167,18 +167,21 @@ object CimaCloudExtractors {
     }
 
     /** Pull the first HLS URL out of a decoded JWPlayer setup script. */
-    private fun vidspeedStreamUrl(script: String?): String? {
+    private fun packerStreamUrl(script: String?): String? {
         if (script.isNullOrBlank()) return null
-        return VIDSPEED_STREAM_RE.find(script)?.groupValues?.get(1)
+        return PACKER_STREAM_RE.find(script)?.groupValues?.get(1)
     }
 
-    /** True for a vidspeed embed page (the JWPlayer-in-packer host). */
-    fun isVidspeedLink(link: String): Boolean =
-        runCatching { Uri.parse(link.trim()).host?.contains("vidspeed", ignoreCase = true) == true }
+    private fun hostContains(link: String, needle: String): Boolean =
+        runCatching { Uri.parse(link.trim()).host?.contains(needle, ignoreCase = true) == true }
             .getOrDefault(false)
 
+    /** True for any P.A.C.K.E.R. JWPlayer embed host handled by [emit]. */
+    fun isPackerEmbed(link: String): Boolean =
+        hostContains(link, "vidspeed") || hostContains(link, "uqload")
+
     /** Fetch the embed page, decode its P.A.C.K.E.R. and emit the real HLS master. */
-    private suspend fun emitVidspeed(
+    private suspend fun emitPackerEmbed(
         embedUrl: String,
         label: String,
         emit: (ExtractorLink) -> Unit
@@ -186,11 +189,11 @@ object CimaCloudExtractors {
         val html = try {
             app.get(embedUrl, headers = pageHeaders()).text
         } catch (e: Throwable) {
-            android.util.Log.i("CimaCloudExtractors", "vidspeed page FAILED ${embedUrl.take(100)}: $e")
+            android.util.Log.i("CimaCloudExtractors", "packer embed FAILED ${embedUrl.take(100)}: $e")
             return false
         }
         val script = unPacker(html)
-        val m3u8 = vidspeedStreamUrl(script)
+        val m3u8 = packerStreamUrl(script)
             ?: return false
         var found = false
         for (v in M3u8Helper.generateM3u8(label, m3u8, embedUrl)) {
@@ -231,8 +234,8 @@ object CimaCloudExtractors {
                 link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd") ->
                     emitDirect(link, referer, label, quality, emit)
 
-                isVidspeedLink(link) ->
-                    emitVidspeed(link, label, emit)
+                isPackerEmbed(link) ->
+                    emitPackerEmbed(link, label, emit)
 
                 isGooglePhotosLink(link) ->
                     emitGooglePhotosLink(link, referer, label, quality, subtitleCallback, emit)
@@ -616,8 +619,8 @@ object CimaCloudExtractors {
                             }
                         )
 
-                        else -> if (isVidspeedLink(u)) {
-                            if (!emitVidspeed(u, labelName, emit)) {
+                        else -> if (isPackerEmbed(u)) {
+                            if (!emitPackerEmbed(u, labelName, emit)) {
                                 emit(
                                     newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
                                         this.referer = ref
