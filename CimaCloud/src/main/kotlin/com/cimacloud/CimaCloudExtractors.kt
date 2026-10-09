@@ -22,7 +22,8 @@ import kotlin.random.Random
  *    2. Google Photos ........ lh3.googleusercontent.com/pw/... (+ wrappers)
  *    3. CimaCloud PHP chain .. extractor.php / html_extractor.php / advanced_extractor.php
  *    4. P.A.C.K.E.R. embeds ... vidspeed.org + uqload (JWPlayer pages, JsUnpacker)
- *    5. Fallback ............. CloudStream's global loadExtractor
+ *    5. FaselHD .............. fasel-hd.com watch pages (enc: decrypt + loadExtractor)
+ *    6. Fallback ............. CloudStream's global loadExtractor
  *
  *  Google Photos note: the backend exposes every quality through a single DASH
  *  manifest (`=mm,dash-vm-vf,...`). Its googlevideo segments are IP-pinned and
@@ -203,6 +204,113 @@ object CimaCloudExtractors {
         return found
     }
 
+    // ------------------------------------------------------------------ FaselHD watch pages
+
+    /** True for any FaselHD watch page handled by [emit]. */
+    fun isFaselHDLink(link: String): Boolean = hostContains(link, "fasel-hd")
+
+    private val FHD_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/"
+    private const val FHD_KEY1 = "V2@%YSU2B]G~"
+    private const val FHD_KEY2 = "bv0fim4qf17"
+
+    private fun fhdIndex(c: Char): Int = FHD_ALPHABET.indexOf(c).let { if (it < 0) 0 else it }
+
+    private fun fhdChar(value: Int): Char = FHD_ALPHABET[value]
+
+    /** Faithful port of the FaselHD plugin's two-key decrypt over the site alphabet. */
+    private fun fhdDecryptString(enc: String, key: String): String {
+        val sb = StringBuilder(enc.length)
+        for (i in enc.indices) {
+            val keyChar = key[i % (key.length - 1)]
+            var diff = fhdIndex(enc[i]) - fhdIndex(keyChar)
+            if (diff < 0) diff += 64
+            sb.append(fhdChar(diff))
+        }
+        return sb.toString()
+    }
+
+    private fun fhdDecryptEncryptedUrl(enc: String): String {
+        val value = enc.removePrefix("enc:")
+        return fhdDecryptString(fhdDecryptString(value, FHD_KEY2), FHD_KEY1)
+    }
+
+    /** Player URLs embedded in a FaselHD watch page (onclick + internal player iframes). */
+    private fun faselhdWatchUrls(html: String): List<String> {
+        val out = linkedSetOf<String>()
+        val blocked = listOf("recaptcha", "google.com/ads", "googlesyndication.com", "googletagmanager.com")
+        fun add(u: String) {
+            val clean = u.replace("&amp;", "&").trim()
+            if (clean.isNotBlank() && blocked.none { clean.contains(it) }) out.add(clean)
+        }
+        Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
+            .findAll(html)
+            .forEach { add(it.groupValues[1]) }
+        Regex("""(?i)<iframe\b[^>]*\b(?:src|data-src)\s*=\s*["']([^"']+)["'][^>]*>""")
+            .findAll(html)
+            .forEach {
+                val src = it.groupValues[1]
+                if (src.contains("video_player") || src.contains("embed") || src.contains("player")) add(src)
+            }
+        return out.toList()
+    }
+
+    /** Resolve a FaselHD internal player page to its real m3u8 (enc: decrypt, then plain link). */
+    private suspend fun fhdPlayerSource(playerUrl: String, referer: String): String? {
+        return try {
+            val html = app.get(playerUrl, headers = pageHeaders()).text
+            for (m in Regex("""enc:[A-Za-z0-9+/=_%]+""").findAll(html)) {
+                val decrypted = fhdDecryptEncryptedUrl(m.value)
+                if (decrypted.startsWith("http")) return decrypted
+            }
+            for (m in Regex("""https?://[^"'\s<>\\]+\.m3u8[^"'\s<>\\]*""").findAll(html)) {
+                return m.value.replace("&amp;", "&")
+            }
+            null
+        } catch (e: Throwable) {
+            android.util.Log.i("CimaCloudExtractors", "faselhd player FAILED ${playerUrl.take(100)}: $e")
+            null
+        }
+    }
+
+    /** Emit every stream of a FaselHD watch page (internal players + external embed hosts). */
+    private suspend fun emitFaselHD(
+        pageUrl: String,
+        label: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        emit: (ExtractorLink) -> Unit
+    ): Boolean {
+        val clean = if (!pageUrl.contains("?") && !pageUrl.endsWith("/") && !pageUrl.substringAfterLast("/").contains("."))
+            "$pageUrl/"
+        else pageUrl
+        val html = try {
+            app.get(clean, headers = pageHeaders()).text
+        } catch (e: Throwable) {
+            android.util.Log.i("CimaCloudExtractors", "faselhd page FAILED ${pageUrl.take(100)}: $e")
+            return false
+        }
+        val playerUrls = faselhdWatchUrls(html)
+        if (playerUrls.isEmpty()) return false
+
+        var found = false
+        for (raw in playerUrls) {
+            val playerUrl = raw.replace("&amp;", "&")
+            if (isFaselHDLink(playerUrl)) {
+                val direct = fhdPlayerSource(playerUrl, pageUrl)
+                if (direct != null) {
+                    for (v in M3u8Helper.generateM3u8("$label (FaselHD)", direct, playerUrl)) {
+                        found = true
+                        emit(v)
+                    }
+                }
+            } else {
+                runCatching {
+                    if (loadExtractor(playerUrl, pageUrl, subtitleCallback, emit)) found = true
+                }
+            }
+        }
+        return found
+    }
+
     // ------------------------------------------------------------------ entry point
 
     /**
@@ -289,6 +397,9 @@ object CimaCloudExtractors {
         } catch (_: Throwable) {
         }
         if (emitPhpChain(link, referer, label, quality, done, emit)) found = true
+        if (!found && isFaselHDLink(link)) {
+            if (emitFaselHD(link, label, subtitleCallback, emit)) found = true
+        }
         return found
     }
 
@@ -621,6 +732,15 @@ object CimaCloudExtractors {
 
                         else -> if (isPackerEmbed(u)) {
                             if (!emitPackerEmbed(u, labelName, emit)) {
+                                emit(
+                                    newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
+                                        this.referer = ref
+                                        if (q != null) this.quality = q
+                                    }
+                                )
+                            }
+                        } else if (isFaselHDLink(u)) {
+                            if (!emitFaselHD(u, labelName, {}, emit)) {
                                 emit(
                                     newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
                                         this.referer = ref
