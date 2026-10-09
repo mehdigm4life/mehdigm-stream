@@ -400,7 +400,7 @@ class CimaCloud : MainAPI() {
     ): Boolean {
         val attempts = mutableListOf<Map<String,String>>()
         attempts.add(getHeaders())
-        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a").forEach { fid ->
+        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78").forEach { fid ->
             attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid))
         }
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
