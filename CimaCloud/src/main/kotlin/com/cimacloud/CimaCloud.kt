@@ -37,7 +37,11 @@ class CimaCloud : MainAPI() {
         private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         private const val DEFAULT_API = "https://1654865.xyz/v1.3/api"
         private const val CONFIG_API = "https://config-backup2.animegateshorts.workers.dev/"
-        private const val GP_WATCH_SUFFIX = "=m18"
+        private val GP_QUALITIES = listOf(
+            Triple("=m37", 1080, "1080p"),
+            Triple("=m22", 720, "720p"),
+            Triple("=m18", 360, "360p")
+        )
 
         internal fun randomString(len: Int): String {
             val sb = StringBuilder(len)
@@ -368,24 +372,27 @@ class CimaCloud : MainAPI() {
                 val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
                 val labelName = s.optString("name").ifEmpty { label }
                 val q = s.optString("height").toIntOrNull() ?: quality
-                val watch = gphotosWatch(u)
-                if (watch.isNotEmpty() && seen.add(watch)) {
+                val gToken = gphotosToken(u)
+                if (gToken != null) {
+                    emitted = true
+                    emitGphotoLinks(gToken, labelName, callback)
+                } else if (u.isNotEmpty() && seen.add(u)) {
                     emitted = true
                     when {
-                        watch.contains(".m3u8") -> {
-                            for (v in M3u8Helper.generateM3u8(labelName, watch, ref)) {
+                        u.contains(".m3u8") -> {
+                            for (v in M3u8Helper.generateM3u8(labelName, u, ref)) {
                                 seen.add(v.url)
                                 callback(v)
                             }
                         }
-                        watch.contains(".mpd") -> callback(
-                            newExtractorLink(labelName, labelName, watch, ExtractorLinkType.DASH) {
+                        u.contains(".mpd") -> callback(
+                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.DASH) {
                                 this.referer = ref
                                 if (q != null) this.quality = q
                             }
                         )
                         else -> callback(
-                            newExtractorLink(labelName, labelName, watch, ExtractorLinkType.VIDEO) {
+                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
                                 this.referer = ref
                                 if (q != null) this.quality = q
                             }
@@ -393,7 +400,7 @@ class CimaCloud : MainAPI() {
                     }
                 }
                 val dl = s.optString("url_download").trim()
-                if (dl.isNotEmpty() && seen.add(dl)) {
+                if (gToken == null && dl.isNotEmpty() && seen.add(dl)) {
                     emitted = true
                     callback(
                         newExtractorLink("$labelName (تحميل)", labelName + " (download)", dl, ExtractorLinkType.VIDEO) {
@@ -430,25 +437,23 @@ class CimaCloud : MainAPI() {
         return found
     }
 
-    /** Google Photos MPD URLs are unplayable for third-party players (their segments return 403). Use the range-capable progressive MP4 (Accept-Ranges: bytes, moov-first). */
-    private fun gphotosWatch(url: String): String =
-        if (url.contains("lh3.googleusercontent.com") && url.contains("=mm,")) url.substringBefore("=") + GP_WATCH_SUFFIX else url
+    /** Strip any =<suffix> / =mm,... from a Google Photos URL to get its streamable token. */
+    private fun gphotosToken(url: String): String? {
+        val u = url.trim()
+        if (u.isBlank()) return null
+        val base = u.substringBefore("=").trim()
+        return base.takeIf { it.startsWith("https://") && it.contains("googleusercontent.com") && it.contains("/pw/") }
+    }
 
-    /** Google Photos progressive MP4 (mirrors the web player's stream). No referer. */
-    private suspend fun emitGphotosLocal(
-        base: String,
-        label: String,
-        quality: Int?,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val video = base + GP_WATCH_SUFFIX
-        android.util.Log.i("CimaCloud", "loadLinks gphotos local: $video")
-        callback(
-            newExtractorLink(label, label, video, ExtractorLinkType.VIDEO) {
-                if (quality != null) this.quality = quality
-            }
-        )
-        return true
+    /** Every Google Photos token can be streamed + seeked as range-capable progressive MP4s (=m37/=m22/=m18). The original file (=dv / url_download) has no Range support and only buffers in players, so it is not emitted as a stream. */
+    private suspend fun emitGphotoLinks(base: String, label: String, emit: (ExtractorLink) -> Unit) {
+        for ((suffix, q, qname) in GP_QUALITIES) {
+            emit(
+                newExtractorLink(label, "$label ($qname)", base + suffix, ExtractorLinkType.VIDEO) {
+                    this.quality = q
+                }
+            )
+        }
     }
 
     override suspend fun loadLinks(
@@ -520,25 +525,25 @@ class CimaCloud : MainAPI() {
                             if (quality != null) this.quality = quality
                         }
                     )
-                } else if (link.contains("photos.google.com") || (link.contains("lh3.googleusercontent.com") && link.contains("/pw/"))) {
-                    val pageHtml = if (link.contains("photos.google.com")) {
-                        try { app.get(link, headers = gpHtmlHeaders()).text } catch (_: Throwable) { null }
+                } else if (link.contains("photos.google.com") || link.contains("googleusercontent.com") || link.contains("googlefinal")) {
+                    val target = Regex("[?&]url=([^&]+)").find(link)?.groupValues?.get(1)
+                        ?.let { Uri.decode(it) }
+                        ?.takeIf { it.contains("photos.google.com") || it.contains("googleusercontent.com") }
+                        ?: link
+                    val base = if (target.contains("photos.google.com")) {
+                        val pageHtml = try {
+                            app.get(target, headers = gpHtmlHeaders()).text
+                        } catch (_: Throwable) {
+                            null
+                        }
+                        gphotosBase(pageHtml)
                     } else {
-                        null
+                        gphotosToken(target)
                     }
-                    val base = if (pageHtml != null) gphotosBase(pageHtml) else link.substringBefore("=")
-                    android.util.Log.i("CimaCloud", "loadLinks gphotos mirror: base=${base != null} link=$link")
+                    android.util.Log.i("CimaCloud", "loadLinks gphotos mirror: base=${base != null} target=${target.take(140)}")
                     if (base != null) {
                         found = true
-                        emitGphotosLocal(base, label, quality, emit)
-                        val dl = if (pageHtml != null) {
-                            Regex("https://video-downloads[^\"\\s]+").find(pageHtml)?.value
-                        } else null
-                        if (dl != null) {
-                            emit(
-                                newExtractorLink("$label (تحميل)", label + " (download)", dl, ExtractorLinkType.VIDEO)
-                            )
-                        }
+                        emitGphotoLinks(base, label, emit)
                     }
                 } else {
                     try {
