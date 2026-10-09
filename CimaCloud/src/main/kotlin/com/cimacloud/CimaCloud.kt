@@ -132,11 +132,31 @@ class CimaCloud : MainAPI() {
         }
 
         suspend fun fetchDetail(u: String): Pair<String, JSONObject?> {
-            return try {
+            val fbIds = listOf(
+                "1ecf0bf45eb04ff8b6445c3a36a3966a",
+                "0123456789abcdef",
+                "1234567890123456",
+                "abc123def4567890",
+                "0000000000000000"
+            )
+            for (fid in fbIds) {
+                try {
+                    val h = mapOf(
+                        "User-Agent" to "okhttp/4.10.0",
+                        "Accept" to "application/json, text/plain, */*",
+                        "firebase_id" to fid
+                    )
+                    val t = app.get(u, headers = h).text
+                    val j = safeJson(t)
+                    if (j != null) return Pair(t, j)
+                } catch (e: Exception) {
+                }
+            }
+            try {
                 val t = app.get(u, headers = getHeaders()).text
-                Pair(t, safeJson(t))
+                return Pair(t, safeJson(t))
             } catch (e: Exception) {
-                Pair("", null)
+                return Pair("", null)
             }
         }
 
