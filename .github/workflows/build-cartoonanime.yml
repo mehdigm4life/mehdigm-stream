@@ -24,7 +24,11 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          if [ -z "$ANDROID_HOME" ]; then
+            echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          fi
+          echo "Using Android SDK at ${ANDROID_HOME:-/usr/local/lib/android/sdk}"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
