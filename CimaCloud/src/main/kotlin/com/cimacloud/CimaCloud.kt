@@ -384,11 +384,13 @@ class CimaCloud : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val attempts = listOf(
-            getHeaders(),
-            mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"),
-            mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json")
-        )
+        val attempts = mutableListOf<Map<String,String>>()
+        attempts.add(getHeaders())
+        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a").forEach { fid ->
+            attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid))
+        }
+        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
+        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json"))
         for (h in attempts) {
             try {
                 val text = app.get(data, headers = h, allowRedirects = true).text
