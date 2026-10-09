@@ -66,10 +66,10 @@
     },
     {
         "iconUrl": "https://cima-cloud.com/favicon.ico",
-        "fileHash": "sha256-6e1d95f1007660cb22250e0b925a44953a00c2a34110917319795aefb382d77f",
+        "fileHash": "sha256-f21e584cfed5b0fd71b93b4174e4a2a12d6c5fe59194459270764e8bdc5ae249",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
-        "fileSize": 7512,
+        "fileSize": 3248258,
         "status": 1,
         "language": "ar",
         "authors": [
