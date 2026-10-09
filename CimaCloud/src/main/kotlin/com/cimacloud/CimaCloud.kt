@@ -347,19 +347,19 @@ class CimaCloud : MainAPI() {
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     )
 
-    /** Ask the app's own server-side resolver (extractor.php) to turn any source page into playable + download links. */
-    private suspend fun resolvePhp(
+    /** Call one of the app's PHP extractors (extractor/html/advanced) with ?url= and emit the returned playable + download links. */
+    private suspend fun extractPhpServers(
+        endpoint: String,
         pageUrl: String,
         referer: String,
         label: String,
         quality: Int?,
-        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
+        seen: MutableSet<String>,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            val exUrl = "https://cloud-day.online/cimacloud/extractor.php?url=" + Uri.encode(pageUrl)
-            android.util.Log.i("CimaCloud", "loadLinks php resolve $exUrl")
-            val json = safeJson(app.get(exUrl, headers = plainHeaders()).text) ?: return false
+            val headers = plainHeaders() + mapOf("Referer" to referer, "Accept-Language" to "ar,en;q=0.9")
+            val json = safeJson(app.get(endpoint + "?url=" + Uri.encode(pageUrl), headers = headers).text) ?: return false
             val servers = json.optJSONArray("servers") ?: return false
             var emitted = false
             for (i in 0 until servers.length()) {
@@ -368,7 +368,7 @@ class CimaCloud : MainAPI() {
                 val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
                 val labelName = s.optString("name").ifEmpty { label }
                 val q = s.optString("height").toIntOrNull() ?: quality
-                if (u.isNotEmpty()) {
+                if (u.isNotEmpty() && seen.add(u)) {
                     emitted = true
                     when {
                         u.contains(".m3u8") -> M3u8Helper.generateM3u8(labelName, u, ref).forEach { callback(it) }
@@ -387,7 +387,7 @@ class CimaCloud : MainAPI() {
                     }
                 }
                 val dl = s.optString("url_download").trim()
-                if (dl.isNotEmpty() && dl != u) {
+                if (dl.isNotEmpty() && seen.add(dl)) {
                     emitted = true
                     callback(
                         newExtractorLink("$labelName (تحميل)", labelName + " (download)", dl, ExtractorLinkType.VIDEO) {
@@ -398,9 +398,29 @@ class CimaCloud : MainAPI() {
             }
             emitted
         } catch (e: Throwable) {
-            android.util.Log.i("CimaCloud", "loadLinks php resolve FAILED: $e")
+            android.util.Log.i("CimaCloud", "extractPhpServers FAILED $endpoint : $e")
             false
         }
+    }
+
+    /** Mirror the app's extractor chain for ANY source page: PhpExtractor, then HtmlSenderExtractor, then advanced. */
+    private suspend fun resolvePhpMulti(
+        pageUrl: String,
+        referer: String,
+        label: String,
+        quality: Int?,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val seen = mutableSetOf<String>()
+        for (endpoint in listOf(
+            "https://cloud-day.online/cimacloud/extractor.php",
+            "https://cloud-day.online/cimacloud/html_extractor.php",
+            "https://cloud-day.online/cimacloud/advanced_extractor.php"
+        )) {
+            if (extractPhpServers(endpoint, pageUrl, referer, label, quality, seen, callback)) return true
+        }
+        return false
     }
 
     /** Google Photos DASH manifest (mirrors the app's google_photos.mp4_version exactly, NO referer). Falls back to the full MP4. */
@@ -528,7 +548,7 @@ class CimaCloud : MainAPI() {
                     }
                     if (extracted) {
                         found = true
-                    } else if (resolvePhp(link, referer, label, quality, subtitleCallback, callback)) {
+                    } else if (resolvePhpMulti(link, referer, label, quality, subtitleCallback, callback)) {
                         found = true
                     }
                 }
