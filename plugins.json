@@ -212,5 +212,28 @@
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.cs3",
   "name": "AnimeDay",
   "description": "AnimeDay — أنمي وكرتون مدبلج ومترجم"
+ },
+ {
+  "iconUrl": "https://stardima.app/logo.png",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 20056,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "Movie",
+   "TvSeries",
+   "Anime",
+   "Cartoon",
+   "AnimeMovie"
+  ],
+  "version": 1,
+  "internalName": "StarDima",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/StarDima.cs3",
+  "name": "StarDima (ستارديما)",
+  "description": "ستارديما — أفلام ومسلسلات وكرتون مدبلج ومترجم."
  }
 ]
