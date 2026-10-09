@@ -241,8 +241,11 @@ object CimaCloudExtractors {
     }
 
     /**
-     * Emit the full DASH manifest (every real rendition, audio + video) plus the
-     * progressive renditions that actually exist, each labelled with its true height.
+     * Emit one DASH source per real video rendition, each served to the player as a
+     * tiny single-rendition manifest over the loopback [PhotoDashServer]. This makes
+     * every quality an independent, directly-selectable source instead of relying on
+     * the adaptive manifest's "tracks" menu (whose switches intermittently fail).
+     * The adaptive manifest and the progressive renditions are kept as fallbacks.
      */
     internal suspend fun emitGooglePhotos(
         base: String,
@@ -253,15 +256,32 @@ object CimaCloudExtractors {
     ): Boolean {
         var found = false
 
-        val dash = freshDash(
-            dashHint
-                ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
-                ?: (base + DASH_OPTION)
-        )
-        if (done.add(dash)) {
+        val dashUrl = dashHint
+            ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
+            ?: (base + DASH_OPTION)
+        val adaptiveUrl = freshDash(dashUrl)
+
+        val manifest = fetchManifest(dashUrl)
+        if (!manifest.isNullOrBlank()) {
+            for (rep in videoReps(manifest).sortedByDescending { it.height }) {
+                val single = filterToRep(manifest, rep.id)
+                val local = PhotoDashServer.put(single.toByteArray(Charsets.UTF_8)) ?: continue
+                if (!done.add("$adaptiveUrl#${rep.id}")) continue
+                found = true
+                callback(
+                    newExtractorLink(label, "$label (${heightLabel(rep.height)})", local, ExtractorLinkType.DASH) {
+                        this.referer = PHOTO_REFERER
+                        this.headers = PHOTO_HEADERS
+                        this.quality = rep.height
+                    }
+                )
+            }
+        }
+
+        if (done.add(adaptiveUrl)) {
             found = true
             callback(
-                newExtractorLink(label, "$label (كل الجودات)", dash, ExtractorLinkType.DASH) {
+                newExtractorLink(label, "$label (تلقائي)", adaptiveUrl, ExtractorLinkType.DASH) {
                     this.referer = PHOTO_REFERER
                     this.headers = PHOTO_HEADERS
                     this.quality = 1080
@@ -284,6 +304,53 @@ object CimaCloudExtractors {
         }
         return found
     }
+
+    private suspend fun fetchManifest(url: String): String? {
+        return try {
+            val res = app.get(
+                url,
+                headers = mapOf(
+                    "User-Agent" to BROWSER_UA,
+                    "Accept" to "*/*",
+                    "Referer" to PHOTO_REFERER,
+                    "Origin" to PHOTO_ORIGIN
+                ),
+                allowRedirects = true
+            )
+            if (res.code in 200..299) res.text else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    internal data class VideoRep(val id: String, val width: Int, val height: Int)
+
+    private val REP_BLOCK_RE = Regex("(?s)<Representation\\b[^>]*>.*?</Representation>")
+    private val REP_HEIGHT_RE = Regex("\\bheight=\"(\\d+)\"")
+    private val REP_WIDTH_RE = Regex("\\bwidth=\"(\\d+)\"")
+    private val REP_ID_RE = Regex("\\bid=\"(\\d+)\"")
+
+    /** Video renditions (those carrying a `height`), largest first. */
+    internal fun videoReps(manifest: String): List<VideoRep> {
+        val out = ArrayList<VideoRep>()
+        for (m in REP_BLOCK_RE.findAll(manifest)) {
+            val block = m.value
+            val h = REP_HEIGHT_RE.find(block)?.groupValues?.get(1)?.toIntOrNull() ?: continue
+            val id = REP_ID_RE.find(block)?.groupValues?.get(1) ?: continue
+            val w = REP_WIDTH_RE.find(block)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            out.add(VideoRep(id, w, h))
+        }
+        return out
+    }
+
+    /** Drop every video rendition except [keepId], preserving the audio rendition(s). */
+    internal fun filterToRep(manifest: String, keepId: String): String =
+        REP_BLOCK_RE.replace(manifest) { m ->
+            val block = m.value
+            if (!REP_HEIGHT_RE.containsMatchIn(block)) block
+            else if (REP_ID_RE.find(block)?.groupValues?.get(1) == keepId) block
+            else ""
+        }
 
     /** (width, height) when the rendition exists and its MP4 header is readable, otherwise null. */
     private suspend fun probe(url: String): Pair<Int, Int>? {
@@ -485,5 +552,103 @@ class GooglePhotosExtractor : ExtractorApi() {
     ) {
         val base = CimaCloudExtractors.gphotoBase(url) ?: return
         CimaCloudExtractors.emitGooglePhotos(base, name, url, mutableSetOf(), callback)
+    }
+}
+
+/**
+ * Minimal loopback HTTP server that exposes per-rendition DASH manifests.
+ *
+ * CloudStream's player only accepts http(s) manifest URLs (no `data:` / `file:`),
+ * and its track selector ignores an [ExtractorLink]'s quality — so the only way to
+ * turn each rendition into its own *source* is to serve a manifest that contains
+ * only that rendition. The segments inside are absolute googlevideo URLs and are
+ * therefore fetched directly by the player with the link's referer/headers.
+ *
+ * The socket is bound to 127.0.0.1 on an ephemeral port (the same technique
+ * CloudStream uses for its torrent streaming server), so nothing is exposed.
+ */
+internal object PhotoDashServer {
+    private const val TAG = "PhotoDashServer"
+    private const val MAX_ENTRIES = 128
+
+    @Volatile
+    private var server: java.net.ServerSocket? = null
+
+    @Volatile
+    private var port: Int = 0
+
+    private val store = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    @Synchronized
+    private fun ensure(): Int {
+        val current = server
+        if (current != null && !current.isClosed && port > 0) return port
+        return try {
+            val ss = java.net.ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
+            server = ss
+            port = ss.localPort
+            val worker = Thread {
+                while (!ss.isClosed) {
+                    val client = try {
+                        ss.accept()
+                    } catch (_: Throwable) {
+                        break
+                    }
+                    Thread { serve(client) }.apply { isDaemon = true }.start()
+                }
+            }
+            worker.isDaemon = true
+            worker.name = TAG
+            worker.start()
+            port
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "loopback bind failed: $e")
+            server = null
+            port = 0
+            0
+        }
+    }
+
+    /** Publish [body]; returns its loopback URL, or null when the server is unavailable. */
+    fun put(body: ByteArray): String? {
+        val p = ensure()
+        if (p <= 0) return null
+        if (store.size >= MAX_ENTRIES) store.clear()
+        val token = Integer.toHexString(Random.nextInt()) + System.nanoTime().toString(16)
+        store[token] = body
+        return "http://127.0.0.1:$p/dash/$token.mpd"
+    }
+
+    private fun serve(sock: java.net.Socket) {
+        try {
+            sock.soTimeout = 8000
+            val input = sock.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+            val requestLine = input.readLine() ?: return
+            while (true) {
+                val line = input.readLine() ?: break
+                if (line.isEmpty()) break
+            }
+            val path = requestLine.split(' ').getOrNull(1).orEmpty()
+            val token = path.substringBefore('?').substringAfterLast('/').substringBefore('.')
+            val body = store[token]
+            val out = sock.getOutputStream()
+            if (body == null) {
+                out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            } else {
+                val head = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/dash+xml\r\n" +
+                        "Content-Length: ${body.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(head.toByteArray(Charsets.ISO_8859_1))
+                out.write(body)
+            }
+            out.flush()
+        } catch (_: Throwable) {
+        } finally {
+            try {
+                sock.close()
+            } catch (_: Throwable) {
+            }
+        }
     }
 }
