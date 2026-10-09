@@ -37,6 +37,7 @@ class CimaCloud : MainAPI() {
         private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         private const val DEFAULT_API = "https://1654865.xyz/v1.3/api"
         private const val CONFIG_API = "https://config-backup2.animegateshorts.workers.dev/"
+        private const val GP_MANIFEST = "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
 
         internal fun randomString(len: Int): String {
             val sb = StringBuilder(len)
@@ -332,12 +333,19 @@ class CimaCloud : MainAPI() {
         }
     }
 
-    /** Google Photos share pages embed the video as <c-wiz data-url="https://lh3.googleusercontent.com/pw/<TOKEN>" ... data-isvideo="true">. */
+    /** Google Photos share pages embed the video as <c-wiz data-url="https://lh3.googleusercontent.com/pw/<TOKEN>" ...>. */
     private fun gphotosBase(html: String?): String? {
         if (html.isNullOrBlank()) return null
-        val re = Regex("data-url=\"(https://lh3\\.googleusercontent\\.com/pw/[^\"]+)\"[^>]*?data-isvideo=\"true\"")
+        val re = Regex("data-url=\"(https://lh3\\.googleusercontent\\.com/pw/[^\"]+)\"")
         return re.find(html)?.groupValues?.get(1)
     }
+
+    /** Headers the original app uses for the Google Photos share page (mirrors the app config). */
+    private fun gpHtmlHeaders() = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
+        "Accept-Language" to "ar,en;q=0.9",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    )
 
     /** Ask the app's own server-side resolver (extractor.php) to turn any source page into playable + download links. */
     private suspend fun resolvePhp(
@@ -395,32 +403,29 @@ class CimaCloud : MainAPI() {
         }
     }
 
-    /** Build a DASH MPD link from a bare lh3 pw base (fallback when extractor.php is unreachable). */
+    /** Google Photos DASH manifest (mirrors the app's google_photos.mp4_version exactly, NO referer). Falls back to the full MP4. */
     private suspend fun emitGphotosLocal(
         base: String,
         label: String,
-        referer: String,
         quality: Int?,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val mpd = base + "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
+        val mpd = base + GP_MANIFEST
         val mpdOk = try {
-            app.get(mpd, headers = plainHeaders()).text.trimStart().startsWith("<?xml")
+            app.get(mpd, headers = gpHtmlHeaders()).text.trimStart().startsWith("<?xml")
         } catch (_: Throwable) {
             false
         }
         android.util.Log.i("CimaCloud", "loadLinks gphotos local: mpdOk=$mpdOk")
         if (mpdOk) {
             callback(
-                newExtractorLink(label + " (DASH)", label, mpd, ExtractorLinkType.DASH) {
-                    this.referer = "https://photos.google.com/"
+                newExtractorLink(label, label, mpd, ExtractorLinkType.DASH) {
                     if (quality != null) this.quality = quality
                 }
             )
         } else {
             callback(
                 newExtractorLink(label, label, base + "=dv", ExtractorLinkType.VIDEO) {
-                    this.referer = "https://photos.google.com/"
                     if (quality != null) this.quality = quality
                 }
             )
@@ -496,20 +501,24 @@ class CimaCloud : MainAPI() {
                         }
                     )
                 } else if (link.contains("photos.google.com") || (link.contains("lh3.googleusercontent.com") && link.contains("/pw/"))) {
-                    if (!resolvePhp(link, referer, label, quality, subtitleCallback, callback)) {
-                        val base = if (link.contains("photos.google.com")) {
-                            val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
-                            gphotosBase(html)
-                        } else {
-                            link.substringBefore("=")
-                        }
-                        android.util.Log.i("CimaCloud", "loadLinks gphotos local: base=${base != null} link=$link")
-                        if (base != null) {
-                            found = true
-                            emitGphotosLocal(base, label, referer, quality, callback)
-                        }
+                    val pageHtml = if (link.contains("photos.google.com")) {
+                        try { app.get(link, headers = gpHtmlHeaders()).text } catch (_: Throwable) { null }
                     } else {
+                        null
+                    }
+                    val base = if (pageHtml != null) gphotosBase(pageHtml) else link.substringBefore("=")
+                    android.util.Log.i("CimaCloud", "loadLinks gphotos mirror: base=${base != null} link=$link")
+                    if (base != null) {
                         found = true
+                        emitGphotosLocal(base, label, quality, callback)
+                        val dl = if (pageHtml != null) {
+                            Regex("https://video-downloads[^\"\\s]+").find(pageHtml)?.value
+                        } else null
+                        if (dl != null) {
+                            callback(
+                                newExtractorLink("$label (تحميل)", label + " (download)", dl, ExtractorLinkType.VIDEO)
+                            )
+                        }
                     }
                 } else {
                     val extracted = try {
