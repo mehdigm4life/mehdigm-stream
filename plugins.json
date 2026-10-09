@@ -217,7 +217,7 @@
   "iconUrl": "https://stardima.app/logo.png",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 20056,
+  "fileSize": 23309,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -230,7 +230,7 @@
    "Cartoon",
    "AnimeMovie"
   ],
-  "version": 1,
+  "version": 2,
   "internalName": "StarDima",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/StarDima.cs3",
   "name": "StarDima (ستارديما)",

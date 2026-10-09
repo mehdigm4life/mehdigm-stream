@@ -37,11 +37,16 @@ import java.net.URLEncoder
  */
 class StarDima : MainAPI() {
     companion object {
+        private const val TAG = "StarDima"
+
         private const val API_KEY = "vGIu8q9aap55zyANSD3jvmbttClhuRmykbQjzsIQxoWloFmp29W2qqdTSrwR"
         private const val APP_UA = "jcartoonApp/1.0.8 (Android)"
         private const val APP_VERSION = "1.0.8"
         private const val SECURE_TOKEN = "HACKER_DETECTED_TAMPERED_APK"
         private const val DEVICE = "Xiaomi M2006C3MG"
+
+        private const val AES_KEY = "ANASS_ELKADI_SECURE_KEY_2026!!XZ"
+        private const val AES_IV = "ANASS_ELKADI_IV1"
 
         private val BASE_CANDIDATES = listOf(
             "https://f5f-efgeg59852-zfz2d-mmltizwwcvb5567r2r63e-zd46.stardima.app",
@@ -91,9 +96,16 @@ class StarDima : MainAPI() {
 
     private suspend fun getJson(url: String): JSONObject? {
         return try {
-            val text = app.get(url, headers = headers()).text.trim()
-            if (text.startsWith("{")) JSONObject(text) else null
-        } catch (_: Throwable) {
+            val res = app.get(url, headers = headers())
+            val text = res.text.trim()
+            if (text.startsWith("{")) {
+                JSONObject(text)
+            } else {
+                android.util.Log.i(TAG, "getJson non-JSON (${res.code}) $url -> ${text.take(120)}")
+                null
+            }
+        } catch (e: Throwable) {
+            android.util.Log.i(TAG, "getJson FAILED $url -> $e")
             null
         }
     }
@@ -280,28 +292,43 @@ class StarDima : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val base = base()
-        val servers = try {
-            when {
-                data.startsWith(MOVIE_DATA) -> {
-                    val id = data.removePrefix(MOVIE_DATA)
-                    getJson("$base/api/video/$id")?.optJSONArray("servers")
-                }
-                data.startsWith(EPISODE_DATA) -> {
-                    val id = data.removePrefix(EPISODE_DATA)
-                    getJson("$base/api/episodes/$id/servers")?.optJSONArray("servers")
-                }
-                else -> null
-            } ?: JSONArray()
-        } catch (_: Throwable) {
-            JSONArray()
+        val movie: Boolean = data.startsWith(MOVIE_DATA)
+        val id: String = when {
+            movie -> data.removePrefix(MOVIE_DATA)
+            data.startsWith(EPISODE_DATA) -> data.removePrefix(EPISODE_DATA)
+            else -> return false
+        }
+
+        val servers = JSONArray()
+        val seenUrl = mutableSetOf<String>()
+        fun absorb(arr: JSONArray?) {
+            if (arr == null) return
+            for (i in 0 until arr.length()) {
+                val server = arr.optJSONObject(i) ?: continue
+                val url = server.optString("url").trim()
+                if (url.isEmpty() || !seenUrl.add(url)) continue
+                servers.put(server)
+            }
+        }
+
+        // Same calls the official app makes: plain /servers, plus the AES-wrapped
+        // /serversvip (used per-episode in the app) as a fallback, and for movies
+        // the servers embedded in the video detail payload.
+        if (movie) {
+            absorb(getJson("$base/api/video/$id")?.optJSONArray("servers"))
+            absorb(getJson("$base/api/episodes/$id/servers")?.optJSONArray("servers"))
+            absorb(getVipServers(base, id))
+        } else {
+            absorb(getJson("$base/api/episodes/$id/servers")?.optJSONArray("servers"))
+            absorb(getVipServers(base, id))
         }
 
         var found = false
-        val seen = mutableSetOf<String>()
-        val emit: (ExtractorLink) -> Unit = { link -> if (seen.add(link.url)) callback(link) }
+        val seenEmit = mutableSetOf<String>()
+        val emit: (ExtractorLink) -> Unit = { link -> if (seenEmit.add(link.url)) callback(link) }
 
         val direct = mutableListOf<Pair<String, String>>()
-        val external = mutableListOf<String>()
+        val external = mutableListOf<Pair<String, String>>()
 
         for (i in 0 until servers.length()) {
             val server = servers.optJSONObject(i) ?: continue
@@ -321,27 +348,59 @@ class StarDima : MainAPI() {
             if (isDirect) {
                 direct.add(label to link)
             } else {
-                external.add(link)
+                external.add(label to link)
             }
         }
 
         for ((label, link) in direct) {
             emit(
-                newExtractorLink("StarDima - $label", "StarDima - $label", link, ExtractorLinkType.VIDEO) {
+                newExtractorLink("StarDima - $label", "StarDima", link, ExtractorLinkType.VIDEO) {
                     this.referer = "$base/"
                 }
             )
             found = true
         }
 
-        for (link in external) {
+        for ((label, link) in external) {
             try {
                 if (loadExtractor(link, "$base/", subtitleCallback, emit)) found = true
             } catch (_: Throwable) {
             }
         }
 
+        android.util.Log.i(
+            TAG,
+            "loadLinks data=$data path=${if (movie) "movie" else "episode"} id=$id " +
+                "collected=${servers.length()} direct=${direct.size} external=${external.size} found=$found"
+        )
         return found
+    }
+
+    /** `/api/episodes/{id}/serversvip` → `encrypted_payload` (AES-256-CBC) → `{servers:[...]}`. */
+    private suspend fun getVipServers(base: String, id: String): JSONArray? {
+        return try {
+            val json = getJson("$base/api/episodes/$id/serversvip") ?: return null
+            val payload = json.optString("encrypted_payload")
+            if (payload.isEmpty()) return null
+            val plain = decryptAes(payload) ?: return null
+            JSONObject(plain).optJSONArray("servers")
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun decryptAes(base64: String): String? {
+        return try {
+            val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(
+                javax.crypto.Cipher.DECRYPT_MODE,
+                javax.crypto.spec.SecretKeySpec(AES_KEY.toByteArray(Charsets.UTF_8), "AES"),
+                javax.crypto.spec.IvParameterSpec(AES_IV.toByteArray(Charsets.UTF_8))
+            )
+            String(cipher.doFinal(android.util.Base64.decode(base64, android.util.Base64.DEFAULT)), Charsets.UTF_8)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /** `https://strema.top/embed2/?id=<encoded>` wraps a real embed; unwrap it. */
