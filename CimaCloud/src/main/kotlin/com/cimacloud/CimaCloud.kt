@@ -324,7 +324,16 @@ class CimaCloud : MainAPI() {
                         )
                     }
                 }
-                return newTvSeriesLoadResponse(id, "$mainUrl/serie/$id", TvType.TvSeries, episodes)
+                var showName = id
+                try {
+                    val firstSeason = epsJson2.optJSONArray("seasons")?.optJSONObject(0)
+                    val firstEp = firstSeason?.optJSONArray("episodes")?.optJSONObject(0)
+                    val seriesObj = firstEp?.optJSONObject("series")
+                    if (seriesObj != null && seriesObj.optString("name").isNotEmpty()) {
+                        showName = seriesObj.optString("name")
+                    }
+                } catch (e: Exception) {}
+                return newTvSeriesLoadResponse(showName, "$mainUrl/serie/$id", TvType.TvSeries, episodes)
             }
             var epsText2 = ""
             var epsJson2: JSONObject? = null
