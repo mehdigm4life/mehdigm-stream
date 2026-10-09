@@ -423,7 +423,7 @@ class CimaCloud : MainAPI() {
                         false
                     }
                     if (extracted) found = true
-                    if (!extracted && (link.contains(".mp4") || link.contains(".mkv"))) {
+                    if (!extracted && (link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd"))) {
                         found = true
                         callback(
                             newExtractorLink(label, label, link, ExtractorLinkType.VIDEO) {
