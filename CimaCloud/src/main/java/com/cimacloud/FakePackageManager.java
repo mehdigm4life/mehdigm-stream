@@ -13,7 +13,7 @@ import java.util.List;
 public final class FakePackageManager extends PackageManager {
     public static final String PKG = "com.app.cimacloud";
 
-    private static final byte[] CERT = Base64.decode("MIIDgjCCAmqgAwIBAgIEBF/5ozANBgkqhkiG9w0BAQ0FADBaMQ8wDQYDVQQGDAbkuK3lm70xDzANBgNVBAgMBuaxn+iLjzEPMA0GA1UEBwwG5Y2X5LqsMQswCQYDVQQKEwJucDELMAkGA1UECxMCbnAxCzAJBgNVBAMTAm5wMCAXDTIxMDQyNTA5MDM1NloYDzMwMjAwODI2MDkwMzU2WjBaMQ8wDQYDVQQGDAbkuK3lm70xDzANBgNVBAgMBuaxn+iLjzEPMA0GA1UEBwwG5Y2X5LqsMQswCQYDVQQKEwJucDELMAkGA1UECxMCbnAxCzAJBgNVBAMTAm5wMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtAzLX5A4PlE55bBj7YgIGDByCm+0ylWGGHm8gFfXmrSaIbOhwYKvMAaR3plzMNQPzEDW330sENjEEetMRyqwuVCSnUf8FtH7s1QusQHm5d+wCsmpIeq1+lkqjrOfSAZzTAYaG6VrX5hLXeKnpQ96p+VNxCpduQrc+G76iIM3JCf+W9UPkH44WN2hnjVJReiobM4pNTrnMHWFUAuVh7VdNaEH1jkpIvh3c19hIwZNU5xUugIzGTi19ZyoDtT2p/cGiRnEEtP83TcLvS9CpsU68KaLKgvqBSmwIGVnxziVBEUSjVu5T38w/iRfl9evuoXJ+ucmpPK9Tlg8u5prYZ9IAwIDAQABo04wTDArBgNVHRAEJDAigA8yMDIxMDQyNTA5MDM1NlqBDzMwMjAwODI2MDkwMzU2WjAdBgNVHQ4EFgQUJHO/+imFJV6E83qFzdBYz/roeUcwDQYJKoZIhvcNAQENBQADggEBAKy2PCN4FvEd2EyG/P4o6WWyXEdHBGuEdBaLQ1exLseRL2fasekgx+bAYGkvaRwCBQ41mX0qoAAN4lO1vYHuas7nTp+bLm5MtfVUyMKDzI+Fs/ntLsoTQvajfS7um/ntqD1WB5Pn1kIASakWRTbb2vg560FyQyBZ+vPZI+6w6WQ9gqlkcuwaXbha5rQ1FND4o8wjE/0t66NjcM2aG1wu6R1jMhXB1DeSk2rLOPMeciZvAo/lanq7TsynR9SaR3iyQ4461V3qCy297hoyaQMmM6CsgsHpRkWcnLXZKLrvDv6e7A04tZhf9Mg+m5yrV180lINb1yuiYx6q6937tT0iNLk=", Base64.DEFAULT);
+    private static final byte[] CERT = Base64.decode("MIICljCCAX4CAQEwDQYJKoZIhvcNAQELBQAwEDEOMAwGA1UEAwwFQWRuYW4wIBcNMjYwNjAxMTYwNTM1WhgPMjA1MTA1MjYxNjA1MzVaMBAxDjAMBgNVBAMMBUFkbmFuMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsZrgh8PNwnqODSkKHV4PO6idyAI2vB+n2kQFepBNi0oJ1Vgh9LWxywTuZGdT0JiQNxzFauI28O2dPahJ89NDkovh6pUs/MNEcyoqqjodxeRmlt8iNA9qA38tigyn31DjNEs/zqcgL0HlBxsZyyhi9RgK8+dgkCwzCuRtCu0QsD0qyuo6NHj/5VHEw+itb2iqHtfXzJFkiRqMSRjpqulxlHIbvFlFFWRL+U2wjHuO55iBvIXTt4zbedGb0cNlETsXg2MvTZumo73L/3+GEBxIdSeclSyvIvMRbTDF9bsz4toMhlPo8A4WbURM23I8IbAGLdRS4BOUWi28FuHTt0VlDQIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQA9yWgHyABa55rkp99S0GRhBfy0IUMJhU4oy7VYoomlnbnw/P6pcoMnoYlPOPRFtLOuqbgmKtY6mooSbVkboXtnIlMWN2Dn37EUL31uBldD5FrGBlCM0YKomfLYwx2zRNXD5XkFdP3k9JNKXHsLOfs4Pe6dFk0/86jhYP1uCUblXKXhm5lggIzNb8MF4+cWnxeD2UPjARK/OTOsY7wE6kbkHbxEZZMTgUFin82EIyP4Dh5Q3bA1HLYsfsEgnQrDih5PktJJtyPTQ+RLFwlE+nFnGPG3ZpjfTKm2L/dM2Cydhqd0FixV/a41CH60Y1wy5iZfN3fwRLmkC7mtUTDCKTOc", Base64.DEFAULT);
 
 
     public static final String TAG = "CimaNative";
@@ -45,12 +45,28 @@ public final class FakePackageManager extends PackageManager {
         PackageInfo pi = new PackageInfo();
         pi.packageName = PKG;
         pi.versionName = "1.4";
-        pi.versionCode = 4;
+        pi.versionCode = 6;
         pi.firstInstallTime = 1600000000000L;
         pi.lastUpdateTime = 1600000000000L;
         pi.signatures = new Signature[]{ new Signature(CERT) };
         pi.applicationInfo = fakeAppInfo(flags);
+        attachSigningInfo(pi);
         return pi;
+    }
+
+    private static void attachSigningInfo(PackageInfo pi) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 28) return;
+            Class<?> sc = Class.forName("android.content.pm.SigningInfo");
+            java.lang.reflect.Constructor<?> ctor = sc.getDeclaredConstructor(Signature[].class);
+            ctor.setAccessible(true);
+            Object info = ctor.newInstance(new Object[]{ pi.signatures });
+            java.lang.reflect.Field f = PackageInfo.class.getField("signingInfo");
+            f.set(pi, info);
+            log("signingInfo attached");
+        } catch (Throwable e) {
+            log("signingInfo failed: " + e);
+        }
     }
 
     @Override public PackageInfo getPackageInfo(java.lang.String name, int flags) throws PackageManager.NameNotFoundException {
