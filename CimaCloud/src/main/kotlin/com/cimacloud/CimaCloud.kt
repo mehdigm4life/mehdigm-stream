@@ -141,6 +141,10 @@ class CimaCloud : MainAPI() {
                 "94c24a0bc4fb8d34",
                 "cf95dc53f383f9a8",
                 "4032af8d61035123",
+                "f60ed56a9c827589",
+                "263a4dbe41488fb8",
+                "ce30d1c21815f7b9",
+                "d7462c26174b077c",
                 "d41d8cd98f00b204e9800998ecf8427e",
                 "ffffffffffffffffffffffffffffffff"
             )
