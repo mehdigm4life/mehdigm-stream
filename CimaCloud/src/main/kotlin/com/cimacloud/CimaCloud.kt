@@ -30,10 +30,30 @@ class CimaCloud : MainAPI() {
         )
     }
 
+    private fun safeJson(text: String): JSONObject? {
+        return try {
+            if (text.isBlank()) return null
+            val trimmed = text.trim()
+            if (trimmed.startsWith("<") || !trimmed.startsWith("{") && !trimmed.startsWith("[")) return null
+            if (trimmed.startsWith("[")) return JSONObject("{\"data\":$trimmed}")
+            JSONObject(trimmed)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun normalizeType(t: String): TvType = when (t) {
+        "serie", "series", "tv", "tvshow" -> TvType.TvSeries
+        "anime" -> TvType.Anime
+        "cartoon" -> TvType.Cartoon
+        "movie" -> TvType.Movie
+        else -> TvType.Movie
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return try {
             val home = app.get("$mainUrl/home", headers = getHeaders()).text
-            val json = JSONObject(home)
+            val json = safeJson(home) ?: return newHomePageResponse(emptyList())
             val sections = json.optJSONArray("sections") ?: JSONArray()
             val pages = mutableListOf<HomePageList>()
             for (i in 0 until sections.length()) {
@@ -48,12 +68,7 @@ class CimaCloud : MainAPI() {
                     val poster = item.optString("poster")
                     val type = item.optString("type", "movie")
                     val year = item.optString("release_date", "").take(4).toIntOrNull()
-                    val tvType = when (type) {
-                        "serie", "series", "tv", "tvshow" -> TvType.TvSeries
-                        "anime" -> TvType.Anime
-                        "cartoon" -> TvType.Cartoon
-                        else -> TvType.Movie
-                    }
+                    val tvType = normalizeType(type)
                     list.add(
                         newMovieSearchResponse(
                             name = itemName,
@@ -75,25 +90,21 @@ class CimaCloud : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         return try {
-            val results = mutableListOf<SearchResponse>()
             val res = app.post(
                 "$mainUrl/search",
                 headers = getHeaders() + mapOf("Content-Type" to "application/x-www-form-urlencoded"),
                 data = mapOf("title" to query, "type" to "2", "sort" to "1", "page" to "1")
             ).text
-            val json = JSONObject(res)
+            val json = safeJson(res) ?: return emptyList()
             val arr = json.optJSONArray("results") ?: JSONArray()
+            val results = mutableListOf<SearchResponse>()
             for (i in 0 until arr.length()) {
                 val item = arr.getJSONObject(i)
                 val name = item.optString("name")
                 val type = item.optString("type", "movie")
                 val poster = item.optString("poster")
                 val year = item.optString("year", "0").toIntOrNull()
-                val tvType = when (type) {
-                    "serie", "series" -> TvType.TvSeries
-                    "anime" -> TvType.Anime
-                    else -> TvType.Movie
-                }
+                val tvType = normalizeType(type)
                 val id = item.optString("id")
                 results.add(
                     newMovieSearchResponse(
@@ -114,7 +125,7 @@ class CimaCloud : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val jsonText = app.get(url, headers = getHeaders()).text
-        val json = JSONObject(jsonText)
+        val json = safeJson(jsonText) ?: throw Exception("Invalid response")
         if (json.optBoolean("blocked", false)) {
             throw Exception("Content blocked")
         }
@@ -123,8 +134,9 @@ class CimaCloud : MainAPI() {
             val ep = json.optJSONObject("episode") ?: JSONObject()
             val series = ep.optJSONObject("series") ?: JSONObject()
             val seriesId = series.optString("id")
-            val epsData = app.get("$mainUrl/series/$seriesId/episodes", headers = getHeaders()).text
-            val epsJson = JSONObject(epsData)
+            val epsUrl = "$mainUrl/series/$seriesId/episodes"
+            val epsText = app.get(epsUrl, headers = getHeaders()).text
+            val epsJson = safeJson(epsText) ?: JSONObject()
             val seasons = epsJson.optJSONArray("seasons") ?: JSONArray()
             val episodes = mutableListOf<Episode>()
             for (s in 0 until seasons.length()) {
@@ -145,19 +157,19 @@ class CimaCloud : MainAPI() {
             }
             return newTvSeriesLoadResponse(
                 series.optString("name"),
-                "$mainUrl/series/$seriesId",
+                "$mainUrl/serie/$seriesId",
                 TvType.TvSeries,
                 episodes.sortedBy { it.episode }
             ) {
-                posterUrl = series.optString("poster").ifEmpty { series.optString("backdrop") }
-                plot = ep.optString("overview")
+                this.posterUrl = series.optString("poster").ifEmpty { series.optString("backdrop") }
+                this.plot = ep.optString("overview")
             }
         }
 
         val data = json.optJSONObject("data") ?: JSONObject()
         val item = if (data.has("series")) data.optJSONObject("series") else if (data.has("movie")) data.optJSONObject("movie") else JSONObject()
         val id = url.substringAfterLast("/").substringBefore("?")
-        val type = if (url.contains("/series/")) "series" else "movie"
+        val type = if (url.contains("/serie/") || url.contains("/series/")) "series" else "movie"
         val name = item.optString("name")
         val poster = item.optString("poster")
         val backdrop = item.optString("backdrop")
@@ -170,12 +182,12 @@ class CimaCloud : MainAPI() {
                 TvType.Movie,
                 "$mainUrl/movie/$id/servers"
             ) {
-                posterUrl = poster.ifEmpty { backdrop }
-                plot = overview
+                this.posterUrl = poster.ifEmpty { backdrop }
+                this.plot = overview
             }
         } else {
-            val epsData = app.get("$mainUrl/series/$id/episodes", headers = getHeaders()).text
-            val epsJson = JSONObject(epsData)
+            val epsText = app.get("$mainUrl/serie/$id/episodes", headers = getHeaders()).text
+            val epsJson = safeJson(epsText) ?: JSONObject()
             val seasons = epsJson.optJSONArray("seasons") ?: JSONArray()
             val episodes = mutableListOf<Episode>()
             for (s in 0 until seasons.length()) {
@@ -194,9 +206,9 @@ class CimaCloud : MainAPI() {
                     )
                 }
             }
-            newTvSeriesLoadResponse(name, "$mainUrl/series/$id", TvType.TvSeries, episodes) {
-                posterUrl = poster.ifEmpty { backdrop }
-                plot = overview
+            newTvSeriesLoadResponse(name, "$mainUrl/serie/$id", TvType.TvSeries, episodes) {
+                this.posterUrl = poster.ifEmpty { backdrop }
+                this.plot = overview
             }
         }
     }
@@ -209,7 +221,7 @@ class CimaCloud : MainAPI() {
     ): Boolean {
         try {
             val text = app.get(data, headers = getHeaders(), allowRedirects = true).text
-            val json = JSONObject(text)
+            val json = safeJson(text) ?: return false
             if (json.optBoolean("blocked", false)) return false
             val servers = json.optJSONArray("servers") ?: JSONArray()
             for (i in 0 until servers.length()) {
