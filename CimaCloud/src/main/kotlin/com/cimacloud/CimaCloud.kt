@@ -23,7 +23,7 @@ class CimaCloud : MainAPI() {
 
     private fun getHeaders(): Map<String, String> {
         // Try common plausible firebase_id values
-        val devId = "0123456789abcdef"  // try better default
+        val devId = "847f414e42596944"  // try better default
         return mapOf(
             "User-Agent" to "okhttp/4.10.0",
             "Accept" to "application/json, text/plain, */*",
@@ -138,7 +138,7 @@ class CimaCloud : MainAPI() {
                 "847f414e42596944",
                 "29b1b1201dd5ae7b",
                 "1ecf0bf45eb04ff8b6445c3a36a3966a",
-                "0123456789abcdef",
+                "847f414e42596944",
                 "1234567890123456",
                 "abc123def4567890",
                 "0000000000000000",
@@ -404,7 +404,7 @@ class CimaCloud : MainAPI() {
     ): Boolean {
         val attempts = mutableListOf<Map<String,String>>()
         attempts.add(getHeaders())
-        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78","d8003a456d14a3de","b8054cdaa529ffbf","847f414e42596944","29b1b1201dd5ae7b","9774d56d682e549c").forEach { fid ->
+        listOf("847f414e42596944","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78","d8003a456d14a3de","b8054cdaa529ffbf","847f414e42596944","29b1b1201dd5ae7b","9774d56d682e549c").forEach { fid ->
             attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid))
             attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid, "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         }
