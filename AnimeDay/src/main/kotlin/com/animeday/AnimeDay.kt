@@ -392,30 +392,36 @@ class AnimeDay : MainAPI() {
                         found = true
                         callback(it)
                     }
-                } else if (link.contains("photos.google.com")) {
-                    val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
-                    val base = gphotosBase(html)
-                    android.util.Log.i("AnimeDay", "loadLinks gphotos: found=${base != null} link=$link")
+                } else if (link.contains("photos.google.com") || (link.contains("lh3.googleusercontent.com") && link.contains("/pw/") &&
+                    !link.contains(".mp4") && !link.contains(".mkv") && !link.contains(".m3u8"))) {
+                    val base = if (link.contains("photos.google.com")) {
+                        val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
+                        gphotosBase(html)
+                    } else {
+                        link.substringBefore("=")
+                    }
+                    android.util.Log.i("AnimeDay", "loadLinks gphotos: base=${base != null} link=$link")
                     if (base != null) {
+                        val mpd = base + "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
+                        val mpdOk = try {
+                            app.get(mpd, headers = plainHeaders()).text.trimStart().startsWith("<?xml")
+                        } catch (_: Throwable) {
+                            false
+                        }
+                        android.util.Log.i("AnimeDay", "loadLinks gphotos: mpdOk=$mpdOk")
                         found = true
                         callback(
-                            newExtractorLink(label, label, base + "=dv", ExtractorLinkType.VIDEO) {
+                            newExtractorLink(
+                                label + if (mpdOk) " (DASH)" else "",
+                                label,
+                                if (mpdOk) mpd else base + "=dv",
+                                if (mpdOk) ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
+                            ) {
                                 this.referer = "https://photos.google.com/"
                                 if (quality != null) this.quality = quality
                             }
                         )
                     }
-                } else if (link.contains("lh3.googleusercontent.com") && link.contains("/pw/") &&
-                    !link.contains(".mp4") && !link.contains(".mkv") && !link.contains(".m3u8")) {
-                    val videoUrl = link.substringBefore("=") + "=dv"
-                    android.util.Log.i("AnimeDay", "loadLinks gphotos direct base -> =dv")
-                    found = true
-                    callback(
-                        newExtractorLink(label, label, videoUrl, ExtractorLinkType.VIDEO) {
-                            this.referer = "https://photos.google.com/"
-                            if (quality != null) this.quality = quality
-                        }
-                    )
                 } else {
                     val extracted = try {
                         loadExtractor(link, referer, subtitleCallback, callback)
