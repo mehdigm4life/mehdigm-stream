@@ -173,7 +173,7 @@
   "iconUrl": "https://cima-cloud.com/favicon.ico",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3266390,
+  "fileSize": 3266767,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -185,7 +185,7 @@
    "Movie",
    "Cartoon"
   ],
-  "version": 15,
+  "version": 16,
   "internalName": "CimaCloud",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.cs3",
   "name": "CimaCloud",
@@ -195,7 +195,7 @@
   "iconUrl": "https://www.anime-day.com/favicon.ico",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3266847,
+  "fileSize": 3267223,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -207,7 +207,7 @@
    "Movie",
    "Cartoon"
   ],
-  "version": 9,
+  "version": 10,
   "internalName": "AnimeDay",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.cs3",
   "name": "AnimeDay",

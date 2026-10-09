@@ -409,24 +409,25 @@ class AnimeDay : MainAPI() {
         }
     }
 
-    /** Mirror the app's extractor chain for ANY source page: PhpExtractor, then HtmlSenderExtractor, then advanced. */
+    /** Mirror the app's extractor chain for ANY source page: PhpExtractor, then HtmlSenderExtractor, then advanced. Merges ALL links (dedup by URL). */
     private suspend fun resolvePhpMulti(
         pageUrl: String,
         referer: String,
         label: String,
         quality: Int?,
+        seen: MutableSet<String>,
         subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val seen = mutableSetOf<String>()
+        var found = false
         for (endpoint in listOf(
             "https://cloud-day.online/cimacloud/extractor.php",
             "https://cloud-day.online/cimacloud/html_extractor.php",
             "https://cloud-day.online/cimacloud/advanced_extractor.php"
         )) {
-            if (extractPhpServers(endpoint, pageUrl, referer, label, quality, seen, callback)) return true
+            if (extractPhpServers(endpoint, pageUrl, referer, label, quality, seen, callback)) found = true
         }
-        return false
+        return found
     }
 
     /** Google Photos MPD URLs are unplayable for third-party players (their segments return 403). Use the range-capable progressive MP4 (Accept-Ranges: bytes, moov-first). */
@@ -481,6 +482,8 @@ class AnimeDay : MainAPI() {
             }
             val servers = json.optJSONArray("servers") ?: JSONArray()
             android.util.Log.i("AnimeDay", "loadLinks: status=${json.optString("status")} servers=${servers.length()} keys=${json.keys().asSequence().toList()}")
+            val seen = mutableSetOf<String>()
+            val emit: (ExtractorLink) -> Unit = { link -> if (seen.add(link.url)) callback(link) }
             for (i in 0 until servers.length()) {
                 val srv = servers.optJSONObject(i) ?: continue
                 val raw = srv.optString("link").trim().replace("\\s+".toRegex(), "")
@@ -502,11 +505,11 @@ class AnimeDay : MainAPI() {
                 if (link.contains(".m3u8")) {
                     M3u8Helper.generateM3u8(label, link, referer).forEach {
                         found = true
-                        callback(it)
+                        emit(it)
                     }
                 } else if (link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd")) {
                     found = true
-                    callback(
+                    emit(
                         newExtractorLink(
                             label,
                             label,
@@ -527,25 +530,22 @@ class AnimeDay : MainAPI() {
                     android.util.Log.i("AnimeDay", "loadLinks gphotos mirror: base=${base != null} link=$link")
                     if (base != null) {
                         found = true
-                        emitGphotosLocal(base, label, quality, callback)
+                        emitGphotosLocal(base, label, quality, emit)
                         val dl = if (pageHtml != null) {
                             Regex("https://video-downloads[^\"\\s]+").find(pageHtml)?.value
                         } else null
                         if (dl != null) {
-                            callback(
+                            emit(
                                 newExtractorLink("$label (تحميل)", label + " (download)", dl, ExtractorLinkType.VIDEO)
                             )
                         }
                     }
                 } else {
-                    val extracted = try {
-                        loadExtractor(link, referer, subtitleCallback, callback)
+                    try {
+                        if (loadExtractor(link, referer, subtitleCallback, emit)) found = true
                     } catch (_: Throwable) {
-                        false
                     }
-                    if (extracted) {
-                        found = true
-                    } else if (resolvePhpMulti(link, referer, label, quality, subtitleCallback, callback)) {
+                    if (resolvePhpMulti(link, referer, label, quality, seen, subtitleCallback, emit)) {
                         found = true
                     }
                 }
