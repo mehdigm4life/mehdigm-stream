@@ -227,8 +227,20 @@ class CimaCloud : MainAPI() {
             val series = ep.optJSONObject("series") ?: JSONObject()
             val seriesId = series.optString("id")
             val epsUrl = "$mainUrl/series/$seriesId/episodes"
-            val epsText = app.get(epsUrl, headers = getHeaders()).text
-            val epsJson = safeJson(epsText) ?: JSONObject()
+            var epsText = ""
+            var epsJson: JSONObject? = null
+            // try with various headers
+            try {
+                epsText = app.get(epsUrl, headers = getHeaders()).text
+                epsJson = safeJson(epsText)
+            } catch (e: Exception) {}
+            if (epsJson == null) {
+                try {
+                    epsText = app.get(epsUrl, headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsJson = safeJson(epsText)
+                } catch (e: Exception) {}
+            }
+            if (epsJson == null) epsJson = JSONObject()
             val seasons = epsJson.optJSONArray("seasons") ?: JSONArray()
             val episodes = mutableListOf<Episode>()
             for (s in 0 until seasons.length()) {
