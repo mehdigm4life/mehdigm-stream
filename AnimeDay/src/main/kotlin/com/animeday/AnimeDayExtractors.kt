@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
+import kotlin.random.Random
 
 /**
  * ============================================================================
@@ -60,6 +61,29 @@ object AnimeDayExtractors {
         "$PHP_BASE/advanced_extractor.php"
     )
     private val SEEKABLE = listOf("=m37", "=m22", "=m18")
+
+    /**
+     * A per-play nonce appended to the DASH manifest URL.
+     *
+     * Google's DASH manifest embeds googlevideo `BaseURL`s that are pinned to the
+     * fetching IP and carry a short `expire`/`sig`. CloudStream caches by URL, so a
+     * manifest cached on an earlier play is served again later with already-expired
+     * segment URLs: the stream then starts (cached first segments) but every seek to
+     * an unbuffered position hits an expired segment (HTTP 403), the player reports
+     * an error and falls back to the next link. Changing the URL every play forces a
+     * brand-new manifest with fresh, valid segment URLs. The nonce is stable for the
+     * whole duration of one [newSession] so the same episode never emits duplicates.
+     */
+    @Volatile
+    private var sessionNonce: String = System.currentTimeMillis().toString(36)
+
+    /** Rotate the manifest nonce once per link-loading run (call from loadLinks). */
+    fun newSession() {
+        sessionNonce = System.currentTimeMillis().toString(36) + Integer.toHexString(Random.nextInt())
+    }
+
+    private fun freshDash(url: String): String =
+        if (url.contains("?")) "$url&_=$sessionNonce" else "$url?_=$sessionNonce"
 
     private val PW_RE = Regex("""https://lh3\.googleusercontent\.com/pw/[^=?"'\s\\]+""")
     private val HTML_RE = Regex("""data-url="(https://lh3\.googleusercontent\.com/pw/[^\s"?]+)""")
@@ -229,9 +253,11 @@ object AnimeDayExtractors {
     ): Boolean {
         var found = false
 
-        val dash = dashHint
-            ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
-            ?: (base + DASH_OPTION)
+        val dash = freshDash(
+            dashHint
+                ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
+                ?: (base + DASH_OPTION)
+        )
         if (done.add(dash)) {
             found = true
             callback(

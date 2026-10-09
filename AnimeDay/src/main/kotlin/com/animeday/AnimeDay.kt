@@ -332,6 +332,7 @@ class AnimeDay : MainAPI() {
     ): Boolean {
         var found = false
         try {
+            AnimeDayExtractors.newSession()
             val (headers, cf) = serverHeaders()
             android.util.Log.i("AnimeDay", "loadLinks GET $data cf=$cf")
             val res = app.get(data, headers = headers, allowRedirects = true)
