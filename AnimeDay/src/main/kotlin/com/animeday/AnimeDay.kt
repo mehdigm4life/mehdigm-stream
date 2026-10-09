@@ -1,0 +1,378 @@
+package com.animeday
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.provider.Settings
+import com.anime.day.Utils.NativeLib
+import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.MainPageRequest
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.newEpisode
+import com.lagradost.cloudstream3.newHomePageResponse
+import com.lagradost.cloudstream3.newMovieLoadResponse
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.M3u8Helper
+import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlin.random.Random
+
+@SuppressLint("HardwareIds")
+class AnimeDay : MainAPI() {
+    companion object {
+        @Volatile
+        var appContext: Context? = null
+
+        private const val UA = "okhttp/4.10.0"
+        private const val REFERER = "https://www.anime-day.com/"
+        private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+        internal fun randomString(len: Int): String {
+            val sb = StringBuilder(len)
+            for (i in 0 until len) sb.append(ALPHANUM[Random.nextInt(ALPHANUM.length)])
+            return sb.toString()
+        }
+    }
+
+    override var lang = "ar"
+    override var mainUrl = "https://20042026.site/v3.8/api"
+    override var name = "AnimeDay"
+    override val usesWebView = false
+    override val hasMainPage = true
+    override val hasQuickSearch = true
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(
+        TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon, TvType.AnimeMovie
+    )
+
+    private fun plainHeaders() = mapOf(
+        "User-Agent" to UA,
+        "Accept" to "application/json, text/plain, */*"
+    )
+
+    private fun androidId(): String {
+        val ctx = appContext
+        val id = try {
+            if (ctx != null) Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID) else null
+        } catch (_: Throwable) {
+            null
+        }
+        return if (id.isNullOrEmpty()) randomString(16) else id
+    }
+
+    private fun freshToken(): String? {
+        val ctx = appContext ?: return null
+        return try {
+            android.util.Log.i("AnimeDayNative", "freshToken: calling buildSecure")
+            val t = NativeLib.secureId(ctx)
+            android.util.Log.i("AnimeDayNative", "freshToken: got token len=" + (t?.length ?: -1) + " prefix=" + t?.take(24))
+            t
+        } catch (e: Throwable) {
+            android.util.Log.i("AnimeDayNative", "freshToken: threw " + e)
+            null
+        }
+    }
+
+    /** Headers used for the encrypted /servers endpoints. Returns the cloudflare-id too. */
+    private fun serverHeaders(): Pair<Map<String, String>, String> {
+        val cf = randomString(15) + androidId()
+        val headers = mutableMapOf(
+            "User-Agent" to UA,
+            "Accept" to "application/json, text/plain, */*",
+            "cloudflare-id" to cf
+        )
+        freshToken()?.let { headers["firebase_id"] = it }
+        return headers to cf
+    }
+
+    private fun safeJson(text: String?): JSONObject? {
+        return try {
+            if (text.isNullOrBlank()) return null
+            val t = text.trim()
+            if (!t.startsWith("{")) return null
+            JSONObject(t)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun toAsciiDigits(s: String): String {
+        val sb = StringBuilder(s.length)
+        for (ch in s) {
+            sb.append(
+                when (ch) {
+                    in '\u0660'..'\u0669' -> '0' + (ch - '\u0660')
+                    in '\u06F0'..'\u06F9' -> '0' + (ch - '\u06F0')
+                    else -> ch
+                }
+            )
+        }
+        return sb.toString()
+    }
+
+    /** The API does not expose episode numbers, so parse them from the title (e.g. "الحلقة 8"). */
+    private fun episodeNumber(title: String?, fallback: Int): Int {
+        if (title.isNullOrBlank()) return fallback
+        val match = Regex("(\\d{1,4})").find(toAsciiDigits(title)) ?: return fallback
+        return match.groupValues[1].toIntOrNull()?.takeIf { it > 0 } ?: fallback
+    }
+
+    private fun normalizeType(t: String?): TvType = when (t) {
+        "serie", "series", "tv", "tvshow" -> TvType.TvSeries
+        "anime" -> TvType.Anime
+        "cartoon" -> TvType.Cartoon
+        else -> TvType.Movie
+    }
+
+    private fun detailPath(type: String?, id: String): String =
+        if (normalizeType(type) == TvType.Movie) "$mainUrl/movie/$id" else "$mainUrl/series/$id"
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val pages = mutableListOf<com.lagradost.cloudstream3.HomePageList>()
+        try {
+            val json = safeJson(app.get("$mainUrl/home", headers = plainHeaders()).text)
+            val sections = json?.optJSONArray("sections") ?: JSONArray()
+            for (i in 0 until sections.length()) {
+                val sec = sections.optJSONObject(i) ?: continue
+                val items = sec.optJSONArray("section_items") ?: JSONArray()
+                val list = mutableListOf<SearchResponse>()
+                for (j in 0 until items.length()) {
+                    val item = items.optJSONObject(j) ?: continue
+                    val type = item.optString("type", "movie")
+                    val id = item.optString("id")
+                    if (id.isEmpty()) continue
+                    if (type == "episode") {
+                        val showId = item.optString("tv_show_id")
+                        if (showId.isEmpty()) continue
+                        list.add(
+                            newMovieSearchResponse(
+                                name = item.optString("tv_show_name").ifEmpty { item.optString("name") },
+                                url = "$mainUrl/series/$showId",
+                                type = TvType.TvSeries
+                            ) {
+                                this.posterUrl = item.optString("poster").ifEmpty { null }
+                            }
+                        )
+                    } else {
+                        val tvType = normalizeType(type)
+                        list.add(
+                            newMovieSearchResponse(
+                                name = item.optString("name"),
+                                url = detailPath(type, id),
+                                type = tvType
+                            ) {
+                                this.posterUrl = item.optString("poster").ifEmpty { null }
+                                this.year = item.optString("release_date").take(4).toIntOrNull()
+                            }
+                        )
+                    }
+                }
+                if (list.isNotEmpty()) pages.add(com.lagradost.cloudstream3.HomePageList(sec.optString("section_name"), list))
+            }
+        } catch (_: Throwable) {
+        }
+        return newHomePageResponse(pages)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val results = mutableListOf<SearchResponse>()
+        try {
+            val json = safeJson(
+                app.post(
+                    "$mainUrl/search",
+                    headers = plainHeaders() + mapOf("Content-Type" to "application/x-www-form-urlencoded"),
+                    data = mapOf("title" to query, "type" to "0", "sort" to "1", "page" to "1")
+                ).text
+            ) ?: return emptyList()
+            val arr = json.optJSONArray("results") ?: JSONArray()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val type = item.optString("type")
+                val id = item.optString("id")
+                if (id.isEmpty()) continue
+                val tvType = normalizeType(type)
+                results.add(
+                    newMovieSearchResponse(
+                        name = item.optString("name"),
+                        url = detailPath(type, id),
+                        type = tvType
+                    ) {
+                        this.posterUrl = item.optString("poster").ifEmpty { null }
+                        this.year = item.optString("year", "0").toIntOrNull()
+                    }
+                )
+            }
+        } catch (_: Throwable) {
+        }
+        return results
+    }
+
+    override suspend fun load(url: String): LoadResponse {
+        val clean = url.trimEnd('/')
+        val id = clean.substringAfterLast("/").substringBefore("?")
+        val isSeries = clean.contains("/series/") || clean.contains("/serie/") ||
+                clean.contains("/tv/") || clean.contains("/episode/")
+
+        return if (isSeries) loadSeries(clean, id) else loadMovie(clean, id)
+    }
+
+    private suspend fun loadSeries(url: String, id: String): LoadResponse {
+        var showId = id
+        if (url.contains("/episode/")) {
+            // legacy episode detail URL: resolve its series id when possible
+            val ep = fetchJson("$mainUrl/episode/$id", withToken = true)
+            showId = ep?.optJSONObject("episode")?.optJSONObject("series")?.optString("id").orEmpty().ifEmpty { id }
+        }
+
+        val epsJson = fetchJson("$mainUrl/series/$showId/episodes", withToken = false)
+            ?: fetchJson("$mainUrl/serie/$showId/episodes", withToken = false)
+
+        val episodes = mutableListOf<com.lagradost.cloudstream3.Episode>()
+        val seasons = epsJson?.optJSONArray("seasons") ?: JSONArray()
+        for (s in 0 until seasons.length()) {
+            val season = seasons.optJSONObject(s) ?: continue
+            val seasonNum = season.optString("season_number", "1").toIntOrNull() ?: (s + 1)
+            val eps = season.optJSONArray("episodes") ?: JSONArray()
+            for (e in 0 until eps.length()) {
+                val ei = eps.optJSONObject(e) ?: continue
+                val epId = ei.optString("id")
+                if (epId.isEmpty()) continue
+                val title = ei.optString("title").ifEmpty { ei.optString("name") }
+                val explicit = ei.optString("episode_number", "").toIntOrNull()
+                episodes.add(
+                    newEpisode("$mainUrl/episode/$epId/servers") {
+                        this.name = title
+                        this.season = seasonNum
+                        this.episode = explicit?.takeIf { it > 0 } ?: episodeNumber(title, e + 1)
+                        this.posterUrl = ei.optString("image").ifEmpty { ei.optString("cover") }.ifEmpty { null }
+                    }
+                )
+            }
+        }
+        episodes.sortWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+
+        val detail = fetchJson("$mainUrl/series/$showId", withToken = true)?.optJSONObject("series")
+        val name = detail?.optString("name").orEmpty().ifEmpty { "مسلسل $showId" }
+        val poster = detail?.optString("poster").orEmpty()
+        val backdrop = detail?.optString("backdrop").orEmpty()
+        val plot = detail?.optString("overview").orEmpty()
+
+        return newTvSeriesLoadResponse(name, "$mainUrl/series/$showId", TvType.TvSeries, episodes) {
+            this.posterUrl = poster.ifEmpty { backdrop }.ifEmpty { null }
+            this.plot = plot.ifEmpty { null }
+        }
+    }
+
+    private suspend fun loadMovie(url: String, id: String): LoadResponse {
+        val movie = fetchJson("$mainUrl/movie/$id", withToken = true)?.optJSONObject("movie")
+        val name = movie?.optString("name").orEmpty().ifEmpty { "فيلم $id" }
+        val poster = movie?.optString("poster").orEmpty()
+        val backdrop = movie?.optString("backdrop").orEmpty()
+        val plot = movie?.optString("overview").orEmpty()
+        return newMovieLoadResponse(name, "$mainUrl/movie/$id", TvType.Movie, "$mainUrl/movie/$id/servers") {
+            this.posterUrl = poster.ifEmpty { backdrop }.ifEmpty { null }
+            this.plot = plot.ifEmpty { null }
+        }
+    }
+
+    private suspend fun fetchJson(endpoint: String, withToken: Boolean): JSONObject? {
+        return try {
+            val headers = if (withToken) {
+                val (h, _) = serverHeaders()
+                h
+            } else plainHeaders()
+            val res = app.get(endpoint, headers = headers)
+            val body = res.text
+            android.util.Log.i("AnimeDay", "fetchJson GET $endpoint token=$withToken -> ${res.code} len=${body.length} body=${body.take(240)}")
+            safeJson(body)?.takeIf { !it.optBoolean("blocked", false) }
+        } catch (e: Throwable) {
+            android.util.Log.i("AnimeDay", "fetchJson GET $endpoint FAILED: $e")
+            null
+        }
+    }
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        var found = false
+        try {
+            val (headers, cf) = serverHeaders()
+            android.util.Log.i("AnimeDay", "loadLinks GET $data cf=$cf")
+            val res = app.get(data, headers = headers, allowRedirects = true)
+            val raw = res.text
+            android.util.Log.i("AnimeDay", "loadLinks -> ${res.code} len=${raw.length} body=${raw.take(240)}")
+            if (raw.isBlank()) return false
+
+            val decrypted = if (raw.trim().startsWith("{") || raw.trim().startsWith("[")) {
+                raw
+            } else {
+                val ctx = appContext
+                val keyArg = cf.substring(15)
+                val out = if (ctx != null) NativeLib.decrypt(ctx, raw.trim(), keyArg) else null
+                out ?: raw
+            }
+            android.util.Log.i("AnimeDay", "loadLinks decrypted len=${decrypted.length} head=${decrypted.take(240)}")
+
+            val json = safeJson(decrypted) ?: run {
+                android.util.Log.i("AnimeDay", "loadLinks: JSON parse failed")
+                return false
+            }
+            val servers = json.optJSONArray("servers") ?: JSONArray()
+            android.util.Log.i("AnimeDay", "loadLinks: status=${json.optString("status")} servers=${servers.length()} keys=${json.keys().asSequence().toList()}")
+            for (i in 0 until servers.length()) {
+                val srv = servers.optJSONObject(i) ?: continue
+                val raw = srv.optString("link").trim().replace("\\s+".toRegex(), "")
+                if (raw.isEmpty()) continue
+
+                val link = if (raw.startsWith("http")) {
+                    raw
+                } else {
+                    REFERER.trimEnd('/') + "/" + raw.trimStart('/')
+                }
+                val referer = srv.optString("referer")
+                    .ifEmpty { srv.optString("origin") }
+                    .ifEmpty { REFERER }
+                val label = srv.optString("title")
+                    .ifEmpty { srv.optString("name") }
+                    .ifEmpty { name }
+                val quality = srv.optString("height").toIntOrNull()
+
+                if (link.contains(".m3u8")) {
+                    M3u8Helper.generateM3u8(label, link, referer).forEach {
+                        found = true
+                        callback(it)
+                    }
+                } else {
+                    val extracted = try {
+                        loadExtractor(link, referer, subtitleCallback, callback)
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    if (extracted) found = true
+                    if (!extracted && (link.contains(".mp4") || link.contains(".mkv"))) {
+                        found = true
+                        callback(
+                            newExtractorLink(label, label, link, ExtractorLinkType.VIDEO) {
+                                this.referer = referer
+                                if (quality != null) this.quality = quality
+                            }
+                        )
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        return found
+    }
+}

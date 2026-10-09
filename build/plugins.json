@@ -165,5 +165,28 @@
         "description": "",
         "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/TukTukcima.cs3",
         "name": "TukTukcima"
+    },
+    {
+        "iconUrl": "https://www.anime-day.com/favicon.ico",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+        "fileSize": 3253872,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Anime",
+            "TvSeries",
+            "Movie",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "AnimeDay",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/AnimeDay.cs3",
+        "name": "AnimeDay",
+        "description": "AnimeDay — أنمي وكرتون مدبلج ومترجم",
+        "fileHash": "sha256-5f7ff59bfbedac6c93c830fa5bfcd363ee82f40c2086e3835b827c1dd9aba125"
     }
 ]
