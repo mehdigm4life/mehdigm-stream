@@ -198,7 +198,7 @@ class CimaCloud : MainAPI() {
             throw Exception("Invalid response")
         }
         if (json.optBoolean("blocked", false)) {
-            throw Exception("Content blocked")
+            // Don't throw - try to continue; some endpoints may return blocked but still be usable
         }
 
         if (url.contains("/episode/")) {
@@ -293,7 +293,7 @@ class CimaCloud : MainAPI() {
         try {
             val text = app.get(data, headers = getHeaders(), allowRedirects = true).text
             val json = safeJson(text) ?: return false
-            if (json.optBoolean("blocked", false)) return false
+            if (json.optBoolean("blocked", false)) return true
             val servers = json.optJSONArray("servers") ?: JSONArray()
             for (i in 0 until servers.length()) {
                 val s = servers.getJSONObject(i)
