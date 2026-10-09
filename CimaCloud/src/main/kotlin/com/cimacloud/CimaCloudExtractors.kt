@@ -22,13 +22,16 @@ import org.json.JSONObject
  *    3. CimaCloud PHP chain .. extractor.php / html_extractor.php / advanced_extractor.php
  *    4. Fallback ............. CloudStream's global loadExtractor
  *
- *  Google Photos note: the DASH manifest is IP-pinned (its googlevideo segments
- *  answer HTTP 403 to third-party players) so only the progressive
- *  `=m37` / `=m22` / `=m18` renditions are used. Those suffixes are NOT fixed
- *  resolutions, so every rendition is probed and its real size is read straight
- *  from the MP4 `tkhd` box. Renditions that do not exist (e.g. a 404 on `=m37`)
- *  are skipped and the rest are labelled with their true height — this is what
- *  fixes both the HTTP 404 and the wrong quality names.
+ *  Google Photos note: the backend exposes every quality through a single DASH
+ *  manifest (`=mm,dash-vm-vf,...`). Its googlevideo segments are IP-pinned and
+ *  answer HTTP 403 unless BOTH `Referer` and `Origin: https://photos.google.com`
+ *  are sent — the app's own player does this. CloudStream forwards an
+ *  [ExtractorLink]'s `referer` + `headers` to every manifest/segment request, so
+ *  the full DASH manifest is emitted (all real renditions, audio included).
+ *  The progressive `=m37` / `=m22` / `=m18` renditions are also probed and
+ *  emitted as a fallback: those suffixes are NOT fixed resolutions, so each one
+ *  is probed and its real size is read straight from the MP4 `tkhd` box, and
+ *  renditions that do not exist (e.g. a 404 on `=m37`) are skipped.
  *
  *  This file is intentionally the single place where extraction lives; the main
  *  API only fetches/decrypts the server list and hands each link to [emit].
@@ -41,6 +44,15 @@ object CimaCloudExtractors {
         "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
     private const val PHP_BASE = "https://cloud-day.online/cimacloud"
     private const val HEAD_BYTES = 128 * 1024
+
+    private const val PHOTO_REFERER = "https://photos.google.com/"
+    private const val PHOTO_ORIGIN = "https://photos.google.com"
+
+    /** DASH option that lists every real rendition (audio + video), exactly like the apps' player. */
+    private const val DASH_OPTION =
+        "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
+
+    private val PHOTO_HEADERS = mapOf("Origin" to PHOTO_ORIGIN)
 
     private val PHP_ENDPOINTS = listOf(
         "$PHP_BASE/extractor.php",
@@ -163,7 +175,7 @@ object CimaCloudExtractors {
     ): Boolean {
         val base = resolveGphotoBase(link)
         android.util.Log.i("CimaCloudExtractors", "gphotos base=${base != null} link=${link.take(140)}")
-        if (base != null) return emitGooglePhotos(base, label, emit)
+        if (base != null) return emitGooglePhotos(base, label, link, seen, emit)
         return emitUnknown(link, referer, label, quality, seen, subtitleCallback, emit)
     }
 
@@ -200,16 +212,42 @@ object CimaCloudExtractors {
         return null
     }
 
-    /** Probe every progressive rendition and emit only the ones that exist, labelled with their true height. */
-    internal suspend fun emitGooglePhotos(base: String, label: String, callback: (ExtractorLink) -> Unit): Boolean {
+    /**
+     * Emit the full DASH manifest (every real rendition, audio + video) plus the
+     * progressive renditions that actually exist, each labelled with its true height.
+     */
+    internal suspend fun emitGooglePhotos(
+        base: String,
+        label: String,
+        dashHint: String?,
+        seen: MutableSet<String>,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         var found = false
+
+        val dash = dashHint
+            ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
+            ?: (base + DASH_OPTION)
+        if (seen.add(dash)) {
+            found = true
+            callback(
+                newExtractorLink(label, "$label (كل الجودات)", dash, ExtractorLinkType.DASH) {
+                    this.referer = PHOTO_REFERER
+                    this.headers = PHOTO_HEADERS
+                    this.quality = 1080
+                }
+            )
+        }
+
         for (suffix in SEEKABLE) {
             val url = base + suffix
+            if (!seen.add(url)) continue
             val size = probe(url) ?: continue
             found = true
             callback(
                 newExtractorLink(label, "$label (${heightLabel(size.second)})", url, ExtractorLinkType.VIDEO) {
-                    this.referer = "https://photos.google.com/"
+                    this.referer = PHOTO_REFERER
+                    this.headers = PHOTO_HEADERS
                     this.quality = size.second
                 }
             )
@@ -328,7 +366,7 @@ object CimaCloudExtractors {
             val json = safeJson(app.get(endpoint + "?url=" + Uri.encode(pageUrl), headers = headers).text) ?: return false
             val servers = json.optJSONArray("servers") ?: return false
             var emitted = false
-            val gpBases = linkedSetOf<String>()
+            val gpBases = linkedMapOf<String, String>()
             for (i in 0 until servers.length()) {
                 val s = servers.optJSONObject(i) ?: continue
                 val u = s.optString("url").trim()
@@ -338,7 +376,7 @@ object CimaCloudExtractors {
 
                 val gpBase = gphotoBase(u)
                 if (gpBase != null) {
-                    gpBases.add(gpBase)
+                    gpBases.putIfAbsent(gpBase, u)
                     continue
                 }
 
@@ -378,8 +416,8 @@ object CimaCloudExtractors {
                     )
                 }
             }
-            for (base in gpBases) {
-                if (emitGooglePhotos(base, label, emit)) emitted = true
+            for ((base, dashHint) in gpBases) {
+                if (emitGooglePhotos(base, label, dashHint, seen, emit)) emitted = true
             }
             emitted
         } catch (e: Throwable) {
@@ -417,6 +455,6 @@ class GooglePhotosExtractor : ExtractorApi() {
         callback: (ExtractorLink) -> Unit
     ) {
         val base = CimaCloudExtractors.gphotoBase(url) ?: return
-        CimaCloudExtractors.emitGooglePhotos(base, name, callback)
+        CimaCloudExtractors.emitGooglePhotos(base, name, url, mutableSetOf(), callback)
     }
 }
