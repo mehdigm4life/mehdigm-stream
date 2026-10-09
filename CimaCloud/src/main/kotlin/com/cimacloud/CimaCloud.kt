@@ -404,11 +404,13 @@ class CimaCloud : MainAPI() {
     ): Boolean {
         val attempts = mutableListOf<Map<String,String>>()
         attempts.add(getHeaders())
-        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78").forEach { fid ->
+        listOf("0123456789abcdef","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78","d8003a456d14a3de","b8054cdaa529ffbf","847f414e42596944","29b1b1201dd5ae7b","9774d56d682e549c").forEach { fid ->
             attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid))
+            attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid, "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         }
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json"))
+        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         for (h in attempts) {
             try {
                 val text = app.get(data, headers = h, allowRedirects = true).text
