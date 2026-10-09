@@ -22,7 +22,8 @@ class CimaCloud : MainAPI() {
     )
 
     private fun getHeaders(): Map<String, String> {
-        val devId = UUID.randomUUID().toString().replace("-", "").take(16)
+        // Try common plausible firebase_id values
+        val devId = "1ecf0bf45eb04ff8b6445c3a36a3966a"
         return mapOf(
             "User-Agent" to "okhttp/4.10.0",
             "Accept" to "application/json, text/plain, */*",
