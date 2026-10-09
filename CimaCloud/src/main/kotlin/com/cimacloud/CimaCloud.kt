@@ -290,8 +290,20 @@ class CimaCloud : MainAPI() {
                 this.plot = overview
             }
         } else {
-            val epsText = app.get("$mainUrl/serie/$id/episodes", headers = getHeaders()).text
-            val epsJson = safeJson(epsText) ?: JSONObject()
+            var epsText2 = ""
+            var epsJson2: JSONObject? = null
+            try {
+                epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = getHeaders()).text
+                epsJson2 = safeJson(epsText2)
+            } catch (e: Exception) {}
+            if (epsJson2 == null) {
+                try {
+                    epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsJson2 = safeJson(epsText2)
+                } catch (e: Exception) {}
+            }
+            if (epsJson2 == null) epsJson2 = JSONObject()
+            val epsJson = epsJson2
             val seasons = epsJson.optJSONArray("seasons") ?: JSONArray()
             val episodes = mutableListOf<Episode>()
             for (s in 0 until seasons.length()) {
