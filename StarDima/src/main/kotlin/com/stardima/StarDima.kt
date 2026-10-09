@@ -57,6 +57,9 @@ class StarDima : MainAPI() {
         private const val DETAIL_SCHEME = "https://stardima.app/video/"
         private const val EPISODE_DATA = "stardima:episode:"
         private const val MOVIE_DATA = "stardima:movie:"
+        // `newEpisode` runs its url through `fixUrl()`, which prepends mainUrl to
+        // anything not starting with http; use an absolute URL for episode data.
+        private const val EPISODE_URL = "https://stardima.app/api/episodes/"
     }
 
     override var name = "StarDima"
@@ -250,7 +253,7 @@ class StarDima : MainAPI() {
                     if (epId <= 0) continue
                     val epNumber = ep.optInt("episode_number", e + 1)
                     episodes.add(
-                        newEpisode("$EPISODE_DATA$epId") {
+                        newEpisode("$EPISODE_URL$epId") {
                             this.name = ep.optString("title").ifBlank { "الحلقة $epNumber" }
                             this.season = seasonNumber
                             this.episode = epNumber
@@ -292,11 +295,16 @@ class StarDima : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val base = base()
-        val movie: Boolean = data.startsWith(MOVIE_DATA)
+        val movie: Boolean = data.contains(MOVIE_DATA)
         val id: String = when {
-            movie -> data.removePrefix(MOVIE_DATA)
-            data.startsWith(EPISODE_DATA) -> data.removePrefix(EPISODE_DATA)
-            else -> return false
+            movie -> data.substringAfter(MOVIE_DATA).takeWhile { it.isDigit() }
+            data.contains(EPISODE_DATA) -> data.substringAfter(EPISODE_DATA).takeWhile { it.isDigit() }
+            data.contains("/api/episodes/") -> data.substringAfterLast('/').substringBefore('?').takeWhile { it.isDigit() }
+            else -> ""
+        }
+        if (id.isEmpty()) {
+            android.util.Log.i(TAG, "loadLinks unrecognized data=$data")
+            return false
         }
 
         val servers = JSONArray()
@@ -316,8 +324,6 @@ class StarDima : MainAPI() {
         // the servers embedded in the video detail payload.
         if (movie) {
             absorb(getJson("$base/api/video/$id")?.optJSONArray("servers"))
-            absorb(getJson("$base/api/episodes/$id/servers")?.optJSONArray("servers"))
-            absorb(getVipServers(base, id))
         } else {
             absorb(getJson("$base/api/episodes/$id/servers")?.optJSONArray("servers"))
             absorb(getVipServers(base, id))
