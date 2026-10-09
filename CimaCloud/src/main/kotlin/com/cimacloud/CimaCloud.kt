@@ -248,7 +248,7 @@ class CimaCloud : MainAPI() {
             } catch (e: Exception) {}
             if (epsJson == null) {
                 try {
-                    epsText = app.get(epsUrl, headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsText = app.get(epsUrl, headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json, text/plain, */*")).text
                     epsJson = safeJson(epsText)
                 } catch (e: Exception) {}
             }
@@ -283,7 +283,13 @@ class CimaCloud : MainAPI() {
         }
 
         val data = json.optJSONObject("data") ?: JSONObject()
-        val item = if (data.has("series")) data.optJSONObject("series") else if (data.has("movie")) data.optJSONObject("movie") else JSONObject()
+        val item = when {
+            data.has("series") -> data.optJSONObject("series")
+            data.has("movie") -> data.optJSONObject("movie")
+            json.has("series") -> json.optJSONObject("series")
+            json.has("movie") -> json.optJSONObject("movie")
+            else -> JSONObject()
+        }
         val id = url.substringAfterLast("/").substringBefore("?")
         val type = if (url.contains("/serie/") || url.contains("/series/")) "series" else "movie"
         val name = item.optString("name")
@@ -308,12 +314,12 @@ class CimaCloud : MainAPI() {
                 var epsText2 = ""
                 var epsJson2: JSONObject? = null
                 try {
-                    epsText2 = app.get("$mainUrl/series/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsText2 = app.get("$mainUrl/series/$id/episodes", headers = getHeaders()).text
                     epsJson2 = safeJson(epsText2)
                 } catch (e: Exception) {}
                 if (epsJson2 == null) {
                     try {
-                        epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                        epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = getHeaders()).text
                         epsJson2 = safeJson(epsText2)
                     } catch (e: Exception) {}
                 }
@@ -341,8 +347,11 @@ class CimaCloud : MainAPI() {
                     val firstSeason = epsJson2.optJSONArray("seasons")?.optJSONObject(0)
                     val firstEp = firstSeason?.optJSONArray("episodes")?.optJSONObject(0)
                     val seriesObj = firstEp?.optJSONObject("series")
+                    val rootSeries = epsJson2.optJSONObject("series")
                     if (seriesObj != null && seriesObj.optString("name").isNotEmpty()) {
                         showName = seriesObj.optString("name")
+                    } else if (rootSeries != null && rootSeries.optString("name").isNotEmpty()) {
+                        showName = rootSeries.optString("name")
                     }
                 } catch (e: Exception) {}
                 return newTvSeriesLoadResponse(showName, "$mainUrl/serie/$id", TvType.TvSeries, episodes)
@@ -355,7 +364,7 @@ class CimaCloud : MainAPI() {
             } catch (e: Exception) {}
             if (epsJson2 == null) {
                 try {
-                    epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = getHeaders()).text
                     epsJson2 = safeJson(epsText2)
                 } catch (e: Exception) {}
             }
@@ -384,7 +393,7 @@ class CimaCloud : MainAPI() {
                 try {
                     val fs = epsJson.optJSONArray("seasons")?.optJSONObject(0)
                     val fe = fs?.optJSONArray("episodes")?.optJSONObject(0)
-                    val so = fe?.optJSONObject("series")
+                    val so = fe?.optJSONObject("series") ?: epsJson.optJSONObject("series") ?: json.optJSONObject("series")
                     if (so != null && so.optString("name").isNotEmpty()) finalName = so.optString("name")
                 } catch (e: Exception) {}
             }
@@ -409,7 +418,7 @@ class CimaCloud : MainAPI() {
             attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid, "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         }
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
-        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json"))
+        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         for (h in attempts) {
             try {
