@@ -83,13 +83,18 @@ object AnimeDayExtractors {
 
     // ------------------------------------------------------------------ entry point
 
-    /** Single entry point: classify [link] and emit every playable stream it yields. */
+    /**
+     * Single entry point: classify [link] and emit every playable stream it yields.
+     *
+     * NOTE: [emit] is the caller's callback and may itself deduplicate by URL, so
+     * this suite must never pre-register a URL it is about to emit. Internal
+     * de-duplication uses a private set ([done]) created per extraction.
+     */
     suspend fun emit(
         link: String,
         referer: String,
         label: String,
         quality: Int?,
-        seen: MutableSet<String>,
         subtitleCallback: (SubtitleFile) -> Unit,
         emit: (ExtractorLink) -> Unit
     ): Boolean {
@@ -108,10 +113,10 @@ object AnimeDayExtractors {
                     emitDirect(link, referer, label, quality, emit)
 
                 isGooglePhotosLink(link) ->
-                    emitGooglePhotosLink(link, referer, label, quality, seen, subtitleCallback, emit)
+                    emitGooglePhotosLink(link, referer, label, quality, subtitleCallback, emit)
 
                 else ->
-                    emitUnknown(link, referer, label, quality, seen, subtitleCallback, emit)
+                    emitUnknown(link, referer, label, quality, subtitleCallback, emit)
             }
         } catch (e: Throwable) {
             android.util.Log.i("AnimeDayExtractors", "emit FAILED for ${link.take(120)}: $e")
@@ -149,16 +154,16 @@ object AnimeDayExtractors {
         referer: String,
         label: String,
         quality: Int?,
-        seen: MutableSet<String>,
         subtitleCallback: (SubtitleFile) -> Unit,
         emit: (ExtractorLink) -> Unit
     ): Boolean {
+        val done = mutableSetOf<String>()
         var found = false
         try {
             if (loadExtractor(link, referer, subtitleCallback, emit)) found = true
         } catch (_: Throwable) {
         }
-        if (emitPhpChain(link, referer, label, quality, seen, emit)) found = true
+        if (emitPhpChain(link, referer, label, quality, done, emit)) found = true
         return found
     }
 
@@ -169,14 +174,13 @@ object AnimeDayExtractors {
         referer: String,
         label: String,
         quality: Int?,
-        seen: MutableSet<String>,
         subtitleCallback: (SubtitleFile) -> Unit,
         emit: (ExtractorLink) -> Unit
     ): Boolean {
         val base = resolveGphotoBase(link)
         android.util.Log.i("AnimeDayExtractors", "gphotos base=${base != null} link=${link.take(140)}")
-        if (base != null) return emitGooglePhotos(base, label, link, seen, emit)
-        return emitUnknown(link, referer, label, quality, seen, subtitleCallback, emit)
+        if (base != null) return emitGooglePhotos(base, label, link, mutableSetOf(), emit)
+        return emitUnknown(link, referer, label, quality, subtitleCallback, emit)
     }
 
     /** Bare `.../pw/<token>` base, stripped of any `=modifier` and query string. */
@@ -220,7 +224,7 @@ object AnimeDayExtractors {
         base: String,
         label: String,
         dashHint: String?,
-        seen: MutableSet<String>,
+        done: MutableSet<String>,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var found = false
@@ -228,7 +232,7 @@ object AnimeDayExtractors {
         val dash = dashHint
             ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
             ?: (base + DASH_OPTION)
-        if (seen.add(dash)) {
+        if (done.add(dash)) {
             found = true
             callback(
                 newExtractorLink(label, "$label (كل الجودات)", dash, ExtractorLinkType.DASH) {
@@ -241,7 +245,7 @@ object AnimeDayExtractors {
 
         for (suffix in SEEKABLE) {
             val url = base + suffix
-            if (!seen.add(url)) continue
+            if (!done.add(url)) continue
             val size = probe(url) ?: continue
             found = true
             callback(
@@ -342,12 +346,12 @@ object AnimeDayExtractors {
         referer: String,
         label: String,
         quality: Int?,
-        seen: MutableSet<String>,
+        done: MutableSet<String>,
         emit: (ExtractorLink) -> Unit
     ): Boolean {
         var found = false
         for (endpoint in PHP_ENDPOINTS) {
-            if (emitPhpServers(endpoint, pageUrl, referer, label, quality, seen, emit)) found = true
+            if (emitPhpServers(endpoint, pageUrl, referer, label, quality, done, emit)) found = true
         }
         return found
     }
@@ -358,7 +362,7 @@ object AnimeDayExtractors {
         referer: String,
         label: String,
         quality: Int?,
-        seen: MutableSet<String>,
+        done: MutableSet<String>,
         emit: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
@@ -376,16 +380,15 @@ object AnimeDayExtractors {
 
                 val gpBase = gphotoBase(u)
                 if (gpBase != null) {
-                    gpBases.putIfAbsent(gpBase, u)
+                    if (!gpBases.containsKey(gpBase)) gpBases[gpBase] = u
                     continue
                 }
 
-                if (u.isNotEmpty() && seen.add(u)) {
+                if (u.isNotEmpty() && done.add(u)) {
                     emitted = true
                     when {
                         u.contains(".m3u8") -> {
                             for (v in M3u8Helper.generateM3u8(labelName, u, ref)) {
-                                seen.add(v.url)
                                 emit(v)
                             }
                         }
@@ -407,7 +410,7 @@ object AnimeDayExtractors {
                 }
 
                 val dl = s.optString("url_download").trim()
-                if (dl.isNotEmpty() && seen.add(dl)) {
+                if (dl.isNotEmpty() && done.add(dl)) {
                     emitted = true
                     emit(
                         newExtractorLink("$labelName (تحميل)", "$labelName (download)", dl, ExtractorLinkType.VIDEO) {
@@ -417,7 +420,7 @@ object AnimeDayExtractors {
                 }
             }
             for ((base, dashHint) in gpBases) {
-                if (emitGooglePhotos(base, label, dashHint, seen, emit)) emitted = true
+                if (emitGooglePhotos(base, label, dashHint, done, emit)) emitted = true
             }
             emitted
         } catch (e: Throwable) {

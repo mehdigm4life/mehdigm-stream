@@ -375,7 +375,7 @@ class AnimeDay : MainAPI() {
                     .ifEmpty { name }
                 val quality = srv.optString("height").toIntOrNull()
 
-                if (AnimeDayExtractors.emit(link, referer, label, quality, seen, subtitleCallback, emit)) {
+                if (AnimeDayExtractors.emit(link, referer, label, quality, subtitleCallback, emit)) {
                     found = true
                 }
             }

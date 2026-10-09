@@ -375,7 +375,7 @@ class CimaCloud : MainAPI() {
                     .ifEmpty { name }
                 val quality = srv.optString("height").toIntOrNull()
 
-                if (CimaCloudExtractors.emit(link, referer, label, quality, seen, subtitleCallback, emit)) {
+                if (CimaCloudExtractors.emit(link, referer, label, quality, subtitleCallback, emit)) {
                     found = true
                 }
             }
