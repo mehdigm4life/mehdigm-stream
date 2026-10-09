@@ -281,7 +281,7 @@ class CimaCloud : MainAPI() {
 
         return if (type == "movie") {
             newMovieLoadResponse(
-                name,
+                name.ifEmpty { id },
                 "$mainUrl/movie/$id",
                 TvType.Movie,
                 "$mainUrl/movie/$id/servers"
@@ -290,6 +290,42 @@ class CimaCloud : MainAPI() {
                 this.plot = overview
             }
         } else {
+            // Fallback if detail is blocked/missing
+            if (name.isEmpty() && poster.isEmpty()) {
+                // Try to fetch episodes directly
+                var epsText2 = ""
+                var epsJson2: JSONObject? = null
+                try {
+                    epsText2 = app.get("$mainUrl/series/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                    epsJson2 = safeJson(epsText2)
+                } catch (e: Exception) {}
+                if (epsJson2 == null) {
+                    try {
+                        epsText2 = app.get("$mainUrl/serie/$id/episodes", headers = mapOf("User-Agent" to "okhttp/4.10.0","Accept" to "application/json")).text
+                        epsJson2 = safeJson(epsText2)
+                    } catch (e: Exception) {}
+                }
+                if (epsJson2 == null) epsJson2 = JSONObject()
+                val seasons = epsJson2.optJSONArray("seasons") ?: JSONArray()
+                val episodes = mutableListOf<Episode>()
+                for (s in 0 until seasons.length()) {
+                    val season = seasons.getJSONObject(s)
+                    val eps = season.optJSONArray("episodes") ?: JSONArray()
+                    val seasonNum = season.optString("season_number", "1").toIntOrNull()
+                    for (e in 0 until eps.length()) {
+                        val ei = eps.getJSONObject(e)
+                        episodes.add(
+                            newEpisode("$mainUrl/episode/${ei.optString("id")}/servers") {
+                                this.name = ei.optString("title")
+                                this.season = seasonNum
+                                this.episode = ei.optString("episode_number", "0").toIntOrNull()
+                                this.posterUrl = ei.optString("image").ifEmpty { ei.optString("cover") }
+                            }
+                        )
+                    }
+                }
+                return newTvSeriesLoadResponse(id, "$mainUrl/serie/$id", TvType.TvSeries, episodes)
+            }
             var epsText2 = ""
             var epsJson2: JSONObject? = null
             try {
