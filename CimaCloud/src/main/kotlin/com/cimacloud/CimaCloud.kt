@@ -124,8 +124,46 @@ class CimaCloud : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val jsonText = app.get(url, headers = getHeaders()).text
-        val json = safeJson(jsonText) ?: throw Exception("Invalid response")
+        fun normalizeUrl(u: String): String {
+            var s = u
+            while (s.endsWith("/")) s = s.dropLast(1)
+            return s
+        }
+
+        suspend fun fetchDetail(u: String): Pair<String, JSONObject?> {
+            return try {
+                val t = app.get(u, headers = getHeaders()).text
+                Pair(t, safeJson(t))
+            } catch (e: Exception) {
+                Pair("", null)
+            }
+        }
+
+        var base = normalizeUrl(url)
+        var fetch = fetchDetail(base)
+        var jsonText: String = fetch.first
+        var json: JSONObject? = fetch.second
+
+        // Try alternate series/serie paths
+        if (json == null) {
+            val alt = when {
+                base.contains("/series/") -> base.replace("/series/", "/serie/")
+                base.contains("/serie/") -> base.replace("/serie/", "/series/")
+                else -> base
+            }
+            if (alt != base) {
+                fetch = fetchDetail(alt)
+                jsonText = fetch.first
+                json = fetch.second
+                if (json != null) {
+                    base = alt
+                }
+            }
+        }
+
+        if (json == null) {
+            throw Exception("Invalid response")
+        }
         if (json.optBoolean("blocked", false)) {
             throw Exception("Content blocked")
         }
