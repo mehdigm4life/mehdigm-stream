@@ -66,10 +66,10 @@
     },
     {
         "iconUrl": "https://cima-cloud.com/favicon.ico",
-        "fileHash": "sha256-4a6b466d8e77eb20b1750cb11174bf2dd74e179bd7fe3766e326e387b6383640",
+        "fileHash": "sha256-570cbdad847270a07b6e9e6cd9f1c8c1c510eb993d867f8bd7231251adc50b4f",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3251197,
+        "fileSize": 3251753,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -81,7 +81,7 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 4,
+        "version": 5,
         "internalName": "CimaCloud",
         "description": "CimaCloud — مباشر، مدبلج، مترجم",
         "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/CimaCloud.cs3",

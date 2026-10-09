@@ -15,6 +15,7 @@ import java.util.zip.ZipFile
  */
 object NativeLib {
     private const val LIB_NAME = "libnative-lib.so"
+    private const val TOKEN_PROP = "cimacloud.native.token"
 
     @Volatile
     private var loaded = false
@@ -49,7 +50,17 @@ object NativeLib {
         // Serialize every native call: the .so has process-wide mutable state and
         // concurrent calls corrupt the heap (crashes surface in unrelated threads).
         synchronized(lock) {
-            return runCatching { buildSecure(FakeContext(context.applicationContext ?: context)) }.getOrNull()
+            val fresh = runCatching {
+                buildSecure(FakeContext(context.applicationContext ?: context))
+            }.getOrNull()
+            if (!fresh.isNullOrEmpty() && fresh.length > 8) {
+                // Process-global cache survives CloudStream plugin (re)loads, which
+                // create a new ClassLoader where the .so cannot be re-opened.
+                System.setProperty(TOKEN_PROP, fresh)
+                return fresh
+            }
+            // Native unavailable (e.g. after a plugin reload) -> fall back to cache.
+            return System.getProperty(TOKEN_PROP)?.takeIf { it.isNotEmpty() }
         }
     }
 
@@ -65,7 +76,13 @@ object NativeLib {
         abis.addAll(Build.SUPPORTED_ABIS)
         if (Build.CPU_ABI.isNotEmpty()) abis.add(Build.CPU_ABI)
 
-        val dir = File(context.filesDir, "cima_native").apply { mkdirs() }
+        // A unique directory per load attempt is required: Android's linker keys
+        // loaded libraries by real path + ClassLoader namespace, so re-opening the
+        // same path from a new (reloaded) plugin ClassLoader fails with
+        // "already opened by ClassLoader ... can't open in ClassLoader ...".
+        val tag = java.lang.Long.toString(System.nanoTime(), 36)
+        val base = File(context.filesDir, "cima_native")
+        val dir = File(base, tag).apply { mkdirs() }
 
         for (abi in abis) {
             val entry = "lib/$abi/$LIB_NAME"
@@ -75,7 +92,11 @@ object NativeLib {
             out.setReadable(true, false)
             out.setExecutable(true, false)
             out.setWritable(true)
-            if (out.length() > 0L) return out
+            if (out.length() > 0L) {
+                // Drop copies left behind by previous (re)loads.
+                base.listFiles()?.forEach { if (it != dir) runCatching { it.deleteRecursively() } }
+                return out
+            }
         }
         throw UnsatisfiedLinkError("$LIB_NAME not found inside plugin for ABIs=$abis")
     }

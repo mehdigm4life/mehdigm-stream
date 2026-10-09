@@ -173,7 +173,7 @@
   "iconUrl": "https://cima-cloud.com/favicon.ico",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3251197,
+  "fileSize": 3251753,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -185,7 +185,7 @@
    "Movie",
    "Cartoon"
   ],
-  "version": 4,
+  "version": 5,
   "internalName": "CimaCloud",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.cs3",
   "name": "CimaCloud",
