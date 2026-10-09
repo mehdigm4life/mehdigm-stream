@@ -73,7 +73,7 @@ class CimaCloud : MainAPI() {
         return try {
             android.util.Log.i("CimaNative", "freshToken: calling buildSecure")
             val t = NativeLib.secureId(ctx)
-            android.util.Log.i("CimaNative", "freshToken: got token len=" + (t?.length ?: -1))
+            android.util.Log.i("CimaNative", "freshToken: got token len=" + (t?.length ?: -1) + " prefix=" + t?.take(24))
             t
         } catch (e: Throwable) {
             android.util.Log.i("CimaNative", "freshToken: threw " + e)
@@ -289,8 +289,12 @@ class CimaCloud : MainAPI() {
                 val (h, _) = serverHeaders()
                 h
             } else plainHeaders()
-            safeJson(app.get(endpoint, headers = headers).text)?.takeIf { !it.optBoolean("blocked", false) }
-        } catch (_: Throwable) {
+            val res = app.get(endpoint, headers = headers)
+            val body = res.text
+            android.util.Log.i("CimaCloud", "fetchJson GET $endpoint token=$withToken -> ${res.code} len=${body.length} body=${body.take(240)}")
+            safeJson(body)?.takeIf { !it.optBoolean("blocked", false) }
+        } catch (e: Throwable) {
+            android.util.Log.i("CimaCloud", "fetchJson GET $endpoint FAILED: $e")
             null
         }
     }
@@ -304,7 +308,10 @@ class CimaCloud : MainAPI() {
         var found = false
         try {
             val (headers, cf) = serverHeaders()
-            val raw = app.get(data, headers = headers, allowRedirects = true).text
+            android.util.Log.i("CimaCloud", "loadLinks GET $data cf=$cf")
+            val res = app.get(data, headers = headers, allowRedirects = true)
+            val raw = res.text
+            android.util.Log.i("CimaCloud", "loadLinks -> ${res.code} len=${raw.length} body=${raw.take(240)}")
             if (raw.isBlank()) return false
 
             val decrypted = if (raw.trim().startsWith("{") || raw.trim().startsWith("[")) {
@@ -315,9 +322,14 @@ class CimaCloud : MainAPI() {
                 val out = if (ctx != null) NativeLib.decrypt(ctx, raw.trim(), keyArg) else null
                 out ?: raw
             }
+            android.util.Log.i("CimaCloud", "loadLinks decrypted len=${decrypted.length} head=${decrypted.take(240)}")
 
-            val json = safeJson(decrypted) ?: return false
+            val json = safeJson(decrypted) ?: run {
+                android.util.Log.i("CimaCloud", "loadLinks: JSON parse failed")
+                return false
+            }
             val servers = json.optJSONArray("servers") ?: JSONArray()
+            android.util.Log.i("CimaCloud", "loadLinks: status=${json.optString("status")} servers=${servers.length()} keys=${json.keys().asSequence().toList()}")
             for (i in 0 until servers.length()) {
                 val srv = servers.optJSONObject(i) ?: continue
                 val raw = srv.optString("link").trim().replace("\\s+".toRegex(), "")
