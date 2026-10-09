@@ -2,7 +2,6 @@ package com.animeday
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.net.Uri
 import android.provider.Settings
 import com.anime.day.Utils.NativeLib
 import com.lagradost.cloudstream3.HomePageResponse
@@ -18,10 +17,6 @@ import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.M3u8Helper
-import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random
@@ -97,10 +92,7 @@ class AnimeDay : MainAPI() {
         }
     }
 
-    private fun plainHeaders() = mapOf(
-        "User-Agent" to UA,
-        "Accept" to "application/json, text/plain, */*"
-    )
+    private fun plainHeaders() = AnimeDayExtractors.plainHeaders()
 
     private fun androidId(): String {
         val ctx = appContext
@@ -332,97 +324,6 @@ class AnimeDay : MainAPI() {
         }
     }
 
-    /** Call one of the app's PHP extractors (extractor/html/advanced) with ?url= and emit the returned playable links. */
-    private suspend fun extractPhpServers(
-        endpoint: String,
-        pageUrl: String,
-        referer: String,
-        label: String,
-        quality: Int?,
-        seen: MutableSet<String>,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        return try {
-            val headers = plainHeaders() + mapOf("Referer" to referer, "Accept-Language" to "ar,en;q=0.9")
-            val json = safeJson(app.get(endpoint + "?url=" + Uri.encode(pageUrl), headers = headers).text) ?: return false
-            val servers = json.optJSONArray("servers") ?: return false
-            var emitted = false
-            val gpBases = linkedSetOf<String>()
-            for (i in 0 until servers.length()) {
-                val s = servers.optJSONObject(i) ?: continue
-                val u = s.optString("url").trim()
-                val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
-                val labelName = s.optString("name").ifEmpty { label }
-                val q = s.optString("height").toIntOrNull() ?: quality
-                val gpBase = GooglePhotos.baseOf(u)
-                if (gpBase != null) {
-                    gpBases.add(gpBase)
-                    continue
-                }
-                if (u.isNotEmpty() && seen.add(u)) {
-                    emitted = true
-                    when {
-                        u.contains(".m3u8") -> {
-                            for (v in M3u8Helper.generateM3u8(labelName, u, ref)) {
-                                seen.add(v.url)
-                                callback(v)
-                            }
-                        }
-                        u.contains(".mpd") -> callback(
-                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.DASH) {
-                                this.referer = ref
-                                if (q != null) this.quality = q
-                            }
-                        )
-                        else -> callback(
-                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
-                                this.referer = ref
-                                if (q != null) this.quality = q
-                            }
-                        )
-                    }
-                }
-                val dl = s.optString("url_download").trim()
-                if (dl.isNotEmpty() && seen.add(dl)) {
-                    emitted = true
-                    callback(
-                        newExtractorLink("$labelName (تحميل)", labelName + " (download)", dl, ExtractorLinkType.VIDEO) {
-                            this.referer = ref
-                        }
-                    )
-                }
-            }
-            for (base in gpBases) {
-                if (GooglePhotos.emit(base, label, callback)) emitted = true
-            }
-            emitted
-        } catch (e: Throwable) {
-            android.util.Log.i("AnimeDay", "extractPhpServers FAILED $endpoint : $e")
-            false
-        }
-    }
-
-    /** Mirror the app's extractor chain for ANY source page: PhpExtractor, then HtmlSenderExtractor, then advanced. Merges ALL links (dedup by URL). */
-    private suspend fun resolvePhpMulti(
-        pageUrl: String,
-        referer: String,
-        label: String,
-        quality: Int?,
-        seen: MutableSet<String>,
-        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        var found = false
-        for (endpoint in listOf(
-            "https://cloud-day.online/cimacloud/extractor.php",
-            "https://cloud-day.online/cimacloud/html_extractor.php",
-            "https://cloud-day.online/cimacloud/advanced_extractor.php"
-        )) {
-            if (extractPhpServers(endpoint, pageUrl, referer, label, quality, seen, callback)) found = true
-        }
-        return found
-    }
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -474,46 +375,8 @@ class AnimeDay : MainAPI() {
                     .ifEmpty { name }
                 val quality = srv.optString("height").toIntOrNull()
 
-                if (link.contains(".m3u8")) {
-                    M3u8Helper.generateM3u8(label, link, referer).forEach {
-                        found = true
-                        emit(it)
-                    }
-                } else if (link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd")) {
+                if (AnimeDayExtractors.emit(link, referer, label, quality, seen, subtitleCallback, emit)) {
                     found = true
-                    emit(
-                        newExtractorLink(
-                            label,
-                            label,
-                            link,
-                            if (link.contains(".mpd")) ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
-                        ) {
-                            this.referer = referer
-                            if (quality != null) this.quality = quality
-                        }
-                    )
-                } else if (link.contains("photos.google.com") || link.contains("photos.app.goo.gl") ||
-                    link.contains("googleusercontent.com") || link.contains("googlefinal") || link.contains("hrrejhp")
-                ) {
-                    val base = GooglePhotos.resolveBase(link)
-                    android.util.Log.i("AnimeDay", "loadLinks gphotos: base=${base != null} link=${link.take(140)}")
-                    if (base != null) {
-                        if (GooglePhotos.emit(base, label, emit)) found = true
-                    } else {
-                        try {
-                            if (loadExtractor(link, referer, subtitleCallback, emit)) found = true
-                        } catch (_: Throwable) {
-                        }
-                        if (resolvePhpMulti(link, referer, label, quality, seen, subtitleCallback, emit)) found = true
-                    }
-                } else {
-                    try {
-                        if (loadExtractor(link, referer, subtitleCallback, emit)) found = true
-                    } catch (_: Throwable) {
-                    }
-                    if (resolvePhpMulti(link, referer, label, quality, seen, subtitleCallback, emit)) {
-                        found = true
-                    }
                 }
             }
         } catch (_: Throwable) {
