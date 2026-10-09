@@ -77,9 +77,18 @@ object AnimeDayExtractors {
     @Volatile
     private var sessionNonce: String = System.currentTimeMillis().toString(36)
 
+    /** One DASH manifest per URL per session; the API lists the same base many times. */
+    @Volatile
+    private var cachedManifestUrl: String? = null
+
+    @Volatile
+    private var cachedManifestBody: String? = null
+
     /** Rotate the manifest nonce once per link-loading run (call from loadLinks). */
     fun newSession() {
         sessionNonce = System.currentTimeMillis().toString(36) + Integer.toHexString(Random.nextInt())
+        cachedManifestUrl = null
+        cachedManifestBody = null
     }
 
     private fun freshDash(url: String): String =
@@ -256,32 +265,38 @@ object AnimeDayExtractors {
     ): Boolean {
         var found = false
 
-        val dashUrl = dashHint
-            ?.takeIf { it.contains("dash", true) || it.contains("=mm") }
-            ?: (base + DASH_OPTION)
+        val dashUrl = base + DASH_OPTION
         val adaptiveUrl = freshDash(dashUrl)
 
-        val manifest = fetchManifest(dashUrl)
+        val manifest = manifestFor(dashUrl)
+        val byHeight = LinkedHashMap<Int, VideoRep>()
         if (!manifest.isNullOrBlank()) {
-            for (rep in videoReps(manifest).sortedByDescending { it.height }) {
-                val single = filterToRep(manifest, rep.id)
-                val local = PhotoDashServer.put(single.toByteArray(Charsets.UTF_8)) ?: continue
-                if (!done.add("$adaptiveUrl#${rep.id}")) continue
+            for (rep in videoReps(manifest)) {
+                val current = byHeight[rep.height]
+                if (current == null || rep.width > current.width) byHeight[rep.height] = rep
+            }
+        }
+
+        if (byHeight.isNotEmpty()) {
+            for ((height, rep) in byHeight.entries.sortedByDescending { it.key }) {
+                val single = filterToRep(manifest!!, rep.id)
+                val local = PhotoDashServer.put("$base|${rep.id}", single.toByteArray(Charsets.UTF_8)) ?: continue
+                if (!done.add("gq:$base:$height")) continue
                 found = true
                 callback(
-                    newExtractorLink(label, "$label (${heightLabel(rep.height)})", local, ExtractorLinkType.DASH) {
+                    newExtractorLink(label, "جودة ${height}p", local, ExtractorLinkType.DASH) {
                         this.referer = PHOTO_REFERER
                         this.headers = PHOTO_HEADERS
-                        this.quality = rep.height
+                        this.quality = height
                     }
                 )
             }
         }
 
-        if (done.add(adaptiveUrl)) {
+        if (done.add("ga:$adaptiveUrl")) {
             found = true
             callback(
-                newExtractorLink(label, "$label (تلقائي)", adaptiveUrl, ExtractorLinkType.DASH) {
+                newExtractorLink(label, "جودة تلقائية", adaptiveUrl, ExtractorLinkType.DASH) {
                     this.referer = PHOTO_REFERER
                     this.headers = PHOTO_HEADERS
                     this.quality = 1080
@@ -289,20 +304,30 @@ object AnimeDayExtractors {
             )
         }
 
-        for (suffix in SEEKABLE) {
-            val url = base + suffix
-            if (!done.add(url)) continue
-            val size = probe(url) ?: continue
-            found = true
-            callback(
-                newExtractorLink(label, "$label (${heightLabel(size.second)})", url, ExtractorLinkType.VIDEO) {
-                    this.referer = PHOTO_REFERER
-                    this.headers = PHOTO_HEADERS
-                    this.quality = size.second
-                }
-            )
+        if (byHeight.isEmpty()) {
+            for (suffix in SEEKABLE) {
+                val url = base + suffix
+                if (!done.add(url)) continue
+                val size = probe(url) ?: continue
+                found = true
+                callback(
+                    newExtractorLink(label, "جودة ${size.second}p", url, ExtractorLinkType.VIDEO) {
+                        this.referer = PHOTO_REFERER
+                        this.headers = PHOTO_HEADERS
+                        this.quality = size.second
+                    }
+                )
+            }
         }
         return found
+    }
+
+    private suspend fun manifestFor(url: String): String? {
+        if (cachedManifestUrl == url) return cachedManifestBody
+        val body = fetchManifest(url)
+        cachedManifestUrl = url
+        cachedManifestBody = body
+        return body
     }
 
     private suspend fun fetchManifest(url: String): String? {
@@ -384,17 +409,6 @@ object AnimeDayExtractors {
             total += n
         }
         return out.toByteArray()
-    }
-
-    private fun heightLabel(h: Int): String = when {
-        h >= 1000 -> "1080p"
-        h >= 900 -> "960p"
-        h >= 700 -> "720p"
-        h >= 560 -> "640p"
-        h >= 400 -> "480p"
-        h >= 300 -> "360p"
-        h >= 200 -> "240p"
-        else -> "${h}p"
     }
 
     /** Read width/height out of the first non-empty `tkhd` (track header) box. */
@@ -609,14 +623,21 @@ internal object PhotoDashServer {
         }
     }
 
-    /** Publish [body]; returns its loopback URL, or null when the server is unavailable. */
-    fun put(body: ByteArray): String? {
+    /** Publish [body] under a stable [key]; returns its loopback URL, or null when unavailable. */
+    fun put(key: String, body: ByteArray): String? {
         val p = ensure()
         if (p <= 0) return null
-        if (store.size >= MAX_ENTRIES) store.clear()
-        val token = Integer.toHexString(Random.nextInt()) + System.nanoTime().toString(16)
+        if (store.size >= MAX_ENTRIES && !store.containsKey(sha1(key))) store.clear()
+        val token = sha1(key)
         store[token] = body
         return "http://127.0.0.1:$p/dash/$token.mpd"
+    }
+
+    private fun sha1(value: String): String = try {
+        val md = java.security.MessageDigest.getInstance("SHA-1")
+        md.digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    } catch (_: Throwable) {
+        Integer.toHexString(value.hashCode())
     }
 
     private fun serve(sock: java.net.Socket) {
