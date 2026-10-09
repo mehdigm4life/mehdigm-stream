@@ -50,6 +50,25 @@ class CimaCloud : MainAPI() {
         else -> TvType.Movie
     }
 
+    private fun tryDecrypt(text: String): String {
+        if (text.isBlank()) return text
+        val trimmed = text.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return text
+        try {
+            val key = "GlTg9mfVdCSWSGCf0ebc12cc624c0b4".toByteArray()
+            val suffix = key.copyOfRange(15, key.size.coerceAtMost(31))
+            val bytes = android.util.Base64.decode(trimmed, android.util.Base64.DEFAULT)
+            // try xor with suffix first
+            val out = StringBuilder(bytes.size)
+            for (i in bytes.indices) {
+                out.append((bytes[i].toInt() xor suffix[i % suffix.size].toInt()).toChar())
+            }
+            val r = out.toString()
+            if (r.startsWith("{") || r.startsWith("[")) return r
+        } catch (e: Exception) {}
+        return text
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return try {
             val home = app.get("$mainUrl/home", headers = getHeaders()).text
@@ -422,7 +441,8 @@ class CimaCloud : MainAPI() {
         attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         for (h in attempts) {
             try {
-                val text = app.get(data, headers = h, allowRedirects = true).text
+                val raw = app.get(data, headers = h, allowRedirects = true).text
+                val text = tryDecrypt(raw)
                 val json = safeJson(text) ?: continue
                 val servers = json.optJSONArray("servers") ?: JSONArray()
                 for (i in 0 until servers.length()) {
