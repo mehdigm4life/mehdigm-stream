@@ -22,16 +22,13 @@ class CimaCloud : MainAPI() {
     )
 
     private fun getHeaders(): Map<String, String> {
-        // Try common plausible firebase_id values
-        val devId = "847f414e42596944"  // try better default
         return mapOf(
             "User-Agent" to "okhttp/4.10.0",
             "Accept" to "application/json, text/plain, */*",
-            "firebase_id" to devId
+            "firebase_id" to "bfIJH6E6U8M7tNOF6K9vvEokyrcLD+k73ptPzpZvEaRtrIbvweBRHg/htenW3hOwkVGbGQu1Zz07/ciKictk3DqgmfbCpIDFa9NcAjuEojE7rJuvhgzNRllMMzhynlD/He8V2Aw8fJ0K9R2xujO4IzwYWqOilry1Pt4edH2o+LJ/W/p7tipvm70AKHx5VbsOQTWZRIJCFeg9lHU2Q80OJdGRzcE1/Q6k2Y3VJ4YrthKm0YGrr7XC9pvfmQdI7RazF3xk745MDcgm0rxG4pVWiVcSYLPKUeokZyBSbxcISYHYvy5Agl+7/SDTYBBdlk/fPEFqe0fR9EVz111m2I/BkA==.jkdESGHoHnfFLcrR.UAjP78fp7LZUHQEMOxrkUzzvv+6WCiP+Np80XgZWjUd3HPGE6kJH6z92Wyca2rcBbo8CDcOxuyVYXMsf1eupZSYqwaTs21cuzJB4wNM8DmW6aj8siL2WuG4b5fNm1HgAAkyuiRS4o1Aq8Ae3dkKTYkLQdKoECzaNKGURR0yVFAxExSMU6Ww28ScT2AWNbGdQRbdtRKshlHCX+2ld5ZZUe704WSDySsbVmXMrC2ycqRogl83pe99tNr4g7Sfw2SnhUBhJ5gDIVXGbMSDzI2qPC1LS8pte+RbN0ryuY42PNKXHlEiKWO9+WQB4fQF2IT5iI8FLMCg8Uiayk9GwaScMB8lGVPM/NCVwAWmoxSwTPluqHCZaVFl9QIIx+/FxTO1xE6ZFgaFxaTdUAX4AxSXyML4U96KwPIN5skWxeNhxJB/KhwCXt+0oO4cyibuaACKi5WXuvcOR19N4ZSJHc0FjsKVIFZm5TvekQ4T5+DBhxhByYvxT5w6OSgj85KSXSNBXF5+NI314jFmYEaNZjtwzFNEo6zCdVpK+wmdqkJo1wFAgEHnW82MLimDfI6uSJ8S55Z1SztWLT1+vcKBYpYJnPGQrxnmB+Zo5x2ntSZWW/+UtalHiZTDZcjXo9eA4fKM=",
+            "cloudflare-id" to "GlTg9mfVdCSWSGCf0ebc12cc624c0b4"
         )
-    }
-
-    private fun safeJson(text: String): JSONObject? {
+    }    private fun safeJson(text: String): JSONObject? {
         return try {
             if (text.isBlank()) return null
             val trimmed = text.trim()
