@@ -9,5 +9,6 @@ class CimaCloudPlugin : Plugin() {
     override fun load(context: Context) {
         CimaCloud.appContext = context.applicationContext ?: context
         registerMainAPI(CimaCloud())
+        registerExtractorAPI(GooglePhotosExtractor())
     }
 }

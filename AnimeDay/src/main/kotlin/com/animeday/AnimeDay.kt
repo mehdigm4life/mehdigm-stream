@@ -37,12 +37,6 @@ class AnimeDay : MainAPI() {
         private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         private const val DEFAULT_API = "https://20042026.site/v3.8/api"
         private const val CONFIG_API = "https://backup-animeday.animegateshorts.workers.dev"
-        private const val GP_WATCH_SUFFIX = "=m18"
-        private val GP_QUALITIES = listOf(
-            Triple("=m37", 1080, "1080p"),
-            Triple("=m22", 720, "720p"),
-            Triple("=m18", 360, "360p")
-        )
 
         internal fun randomString(len: Int): String {
             val sb = StringBuilder(len)
@@ -338,21 +332,7 @@ class AnimeDay : MainAPI() {
         }
     }
 
-    /** Google Photos share pages embed the video as <c-wiz data-url="https://lh3.googleusercontent.com/pw/<TOKEN>" ...>. */
-    private fun gphotosBase(html: String?): String? {
-        if (html.isNullOrBlank()) return null
-        val re = Regex("data-url=\"(https://lh3\\.googleusercontent\\.com/pw/[^\"]+)\"")
-        return re.find(html)?.groupValues?.get(1)
-    }
-
-    /** Headers the original app uses for the Google Photos share page (mirrors the app config). */
-    private fun gpHtmlHeaders() = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
-        "Accept-Language" to "ar,en;q=0.9",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    )
-
-    /** Call one of the app's PHP extractors (extractor/html/advanced) with ?url= and emit the returned playable + download links. */
+    /** Call one of the app's PHP extractors (extractor/html/advanced) with ?url= and emit the returned playable links. */
     private suspend fun extractPhpServers(
         endpoint: String,
         pageUrl: String,
@@ -367,17 +347,19 @@ class AnimeDay : MainAPI() {
             val json = safeJson(app.get(endpoint + "?url=" + Uri.encode(pageUrl), headers = headers).text) ?: return false
             val servers = json.optJSONArray("servers") ?: return false
             var emitted = false
+            val gpBases = linkedSetOf<String>()
             for (i in 0 until servers.length()) {
                 val s = servers.optJSONObject(i) ?: continue
                 val u = s.optString("url").trim()
                 val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
                 val labelName = s.optString("name").ifEmpty { label }
                 val q = s.optString("height").toIntOrNull() ?: quality
-                val gToken = gphotosToken(u)
-                if (gToken != null) {
-                    emitted = true
-                    emitGphotoLinks(gToken, labelName, callback)
-                } else if (u.isNotEmpty() && seen.add(u)) {
+                val gpBase = GooglePhotos.baseOf(u)
+                if (gpBase != null) {
+                    gpBases.add(gpBase)
+                    continue
+                }
+                if (u.isNotEmpty() && seen.add(u)) {
                     emitted = true
                     when {
                         u.contains(".m3u8") -> {
@@ -401,7 +383,7 @@ class AnimeDay : MainAPI() {
                     }
                 }
                 val dl = s.optString("url_download").trim()
-                if (gToken == null && dl.isNotEmpty() && seen.add(dl)) {
+                if (dl.isNotEmpty() && seen.add(dl)) {
                     emitted = true
                     callback(
                         newExtractorLink("$labelName (تحميل)", labelName + " (download)", dl, ExtractorLinkType.VIDEO) {
@@ -409,6 +391,9 @@ class AnimeDay : MainAPI() {
                         }
                     )
                 }
+            }
+            for (base in gpBases) {
+                if (GooglePhotos.emit(base, label, callback)) emitted = true
             }
             emitted
         } catch (e: Throwable) {
@@ -436,24 +421,6 @@ class AnimeDay : MainAPI() {
             if (extractPhpServers(endpoint, pageUrl, referer, label, quality, seen, callback)) found = true
         }
         return found
-    }
-
-    /** Strip any =<suffix> / =mm,... from a Google Photos URL to get its streamable token. */
-    private fun gphotosToken(url: String): String? {
-        val u = url.trim()
-        if (u.isBlank()) return null
-        val base = u.substringBefore("=").trim()
-        return base.takeIf { it.startsWith("https://") && it.contains("googleusercontent.com") && it.contains("/pw/") }
-    }
-
-    private suspend fun emitGphotoLinks(base: String, label: String, emit: (ExtractorLink) -> Unit) {
-        for ((suffix, q, qname) in GP_QUALITIES) {
-            emit(
-                newExtractorLink(label, "$label ($qname)", base + suffix, ExtractorLinkType.VIDEO) {
-                    this.quality = q
-                }
-            )
-        }
     }
 
     override suspend fun loadLinks(
@@ -525,25 +492,19 @@ class AnimeDay : MainAPI() {
                             if (quality != null) this.quality = quality
                         }
                     )
-                } else if (link.contains("photos.google.com") || link.contains("googleusercontent.com") || link.contains("googlefinal")) {
-                    val target = Regex("[?&]url=([^&]+)").find(link)?.groupValues?.get(1)
-                        ?.let { Uri.decode(it) }
-                        ?.takeIf { it.contains("photos.google.com") || it.contains("googleusercontent.com") }
-                        ?: link
-                    val base = if (target.contains("photos.google.com")) {
-                        val pageHtml = try {
-                            app.get(target, headers = gpHtmlHeaders()).text
-                        } catch (_: Throwable) {
-                            null
-                        }
-                        gphotosBase(pageHtml)
-                    } else {
-                        gphotosToken(target)
-                    }
-                    android.util.Log.i("AnimeDay", "loadLinks gphotos mirror: base=${base != null} target=${target.take(140)}")
+                } else if (link.contains("photos.google.com") || link.contains("photos.app.goo.gl") ||
+                    link.contains("googleusercontent.com") || link.contains("googlefinal") || link.contains("hrrejhp")
+                ) {
+                    val base = GooglePhotos.resolveBase(link)
+                    android.util.Log.i("AnimeDay", "loadLinks gphotos: base=${base != null} link=${link.take(140)}")
                     if (base != null) {
-                        found = true
-                        emitGphotoLinks(base, label, emit)
+                        if (GooglePhotos.emit(base, label, emit)) found = true
+                    } else {
+                        try {
+                            if (loadExtractor(link, referer, subtitleCallback, emit)) found = true
+                        } catch (_: Throwable) {
+                        }
+                        if (resolvePhpMulti(link, referer, label, quality, seen, subtitleCallback, emit)) found = true
                     }
                 } else {
                     try {

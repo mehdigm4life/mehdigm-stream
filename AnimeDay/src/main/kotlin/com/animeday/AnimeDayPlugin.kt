@@ -9,5 +9,6 @@ class AnimeDayPlugin : Plugin() {
     override fun load(context: Context) {
         AnimeDay.appContext = context.applicationContext ?: context
         registerMainAPI(AnimeDay())
+        registerExtractorAPI(GooglePhotosExtractor())
     }
 }
