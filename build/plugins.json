@@ -170,7 +170,7 @@
         "iconUrl": "https://www.anime-day.com/favicon.ico",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3253872,
+        "fileSize": 3258838,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -182,11 +182,11 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 1,
+        "version": 2,
         "internalName": "AnimeDay",
         "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/AnimeDay.cs3",
         "name": "AnimeDay",
         "description": "AnimeDay — أنمي وكرتون مدبلج ومترجم",
-        "fileHash": "sha256-5f7ff59bfbedac6c93c830fa5bfcd363ee82f40c2086e3835b827c1dd9aba125"
+        "fileHash": "sha256-cfa0310cc13bd443931abae74afa9132ed0ac0f943f4853b5079e6d1122f7abc"
     }
 ]

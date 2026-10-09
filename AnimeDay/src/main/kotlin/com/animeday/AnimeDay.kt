@@ -34,16 +34,29 @@ class AnimeDay : MainAPI() {
         private const val UA = "okhttp/4.10.0"
         private const val REFERER = "https://www.anime-day.com/"
         private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        private const val DEFAULT_API = "https://20042026.site/v3.8/api"
+        private const val CONFIG_API = "https://backup-animeday.animegateshorts.workers.dev"
 
         internal fun randomString(len: Int): String {
             val sb = StringBuilder(len)
             for (i in 0 until len) sb.append(ALPHANUM[Random.nextInt(ALPHANUM.length)])
             return sb.toString()
         }
+
+        private fun safeJson(text: String?): JSONObject? {
+            return try {
+                if (text.isNullOrBlank()) return null
+                val t = text.trim()
+                if (!t.startsWith("{")) return null
+                JSONObject(t)
+            } catch (_: Throwable) {
+                null
+            }
+        }
     }
 
     override var lang = "ar"
-    override var mainUrl = "https://20042026.site/v3.8/api"
+    override var mainUrl = DEFAULT_API
     override var name = "AnimeDay"
     override val usesWebView = false
     override val hasMainPage = true
@@ -52,6 +65,36 @@ class AnimeDay : MainAPI() {
     override val supportedTypes = setOf(
         TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon, TvType.AnimeMovie
     )
+
+    @Volatile
+    private var resolvedApi: String? = null
+
+    private suspend fun resolveApi(): String {
+        resolvedApi?.let { return it }
+        val fetched = tryFetchCloudday()
+        if (fetched != null) {
+            synchronized(this) {
+                if (resolvedApi == null) resolvedApi = fetched
+            }
+            return fetched
+        }
+        return DEFAULT_API
+    }
+
+    private suspend fun tryFetchCloudday(): String? {
+        return try {
+            val body = app.get(CONFIG_API).text
+            val obj = safeJson(body) ?: return null
+            val data = obj.optJSONArray("data")
+            val first = data?.optJSONObject(0)
+            val base = first?.optString("cloudday").orEmpty()
+                .ifEmpty { obj.optJSONObject("data")?.optString("cloudday").orEmpty() }
+            base.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                ?.let { it.trimEnd('/') + "/v3.8/api" }
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     private fun plainHeaders() = mapOf(
         "User-Agent" to UA,
@@ -93,17 +136,6 @@ class AnimeDay : MainAPI() {
         return headers to cf
     }
 
-    private fun safeJson(text: String?): JSONObject? {
-        return try {
-            if (text.isNullOrBlank()) return null
-            val t = text.trim()
-            if (!t.startsWith("{")) return null
-            JSONObject(t)
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
     private fun toAsciiDigits(s: String): String {
         val sb = StringBuilder(s.length)
         for (ch in s) {
@@ -132,13 +164,13 @@ class AnimeDay : MainAPI() {
         else -> TvType.Movie
     }
 
-    private fun detailPath(type: String?, id: String): String =
-        if (normalizeType(type) == TvType.Movie) "$mainUrl/movie/$id" else "$mainUrl/series/$id"
+    private suspend fun detailPath(type: String?, id: String): String =
+        if (normalizeType(type) == TvType.Movie) "${resolveApi()}/movie/$id" else "${resolveApi()}/series/$id"
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val pages = mutableListOf<com.lagradost.cloudstream3.HomePageList>()
         try {
-            val json = safeJson(app.get("$mainUrl/home", headers = plainHeaders()).text)
+            val json = safeJson(app.get("${resolveApi()}/home", headers = plainHeaders()).text)
             val sections = json?.optJSONArray("sections") ?: JSONArray()
             for (i in 0 until sections.length()) {
                 val sec = sections.optJSONObject(i) ?: continue
@@ -155,7 +187,7 @@ class AnimeDay : MainAPI() {
                         list.add(
                             newMovieSearchResponse(
                                 name = item.optString("tv_show_name").ifEmpty { item.optString("name") },
-                                url = "$mainUrl/series/$showId",
+                                url = "${resolveApi()}/series/$showId",
                                 type = TvType.TvSeries
                             ) {
                                 this.posterUrl = item.optString("poster").ifEmpty { null }
@@ -187,7 +219,7 @@ class AnimeDay : MainAPI() {
         try {
             val json = safeJson(
                 app.post(
-                    "$mainUrl/search",
+                    "${resolveApi()}/search",
                     headers = plainHeaders() + mapOf("Content-Type" to "application/x-www-form-urlencoded"),
                     data = mapOf("title" to query, "type" to "0", "sort" to "1", "page" to "1")
                 ).text
@@ -228,12 +260,12 @@ class AnimeDay : MainAPI() {
         var showId = id
         if (url.contains("/episode/")) {
             // legacy episode detail URL: resolve its series id when possible
-            val ep = fetchJson("$mainUrl/episode/$id", withToken = true)
+            val ep = fetchJson("${resolveApi()}/episode/$id", withToken = true)
             showId = ep?.optJSONObject("episode")?.optJSONObject("series")?.optString("id").orEmpty().ifEmpty { id }
         }
 
-        val epsJson = fetchJson("$mainUrl/series/$showId/episodes", withToken = false)
-            ?: fetchJson("$mainUrl/serie/$showId/episodes", withToken = false)
+        val epsJson = fetchJson("${resolveApi()}/series/$showId/episodes", withToken = false)
+            ?: fetchJson("${resolveApi()}/serie/$showId/episodes", withToken = false)
 
         val episodes = mutableListOf<com.lagradost.cloudstream3.Episode>()
         val seasons = epsJson?.optJSONArray("seasons") ?: JSONArray()
@@ -248,7 +280,7 @@ class AnimeDay : MainAPI() {
                 val title = ei.optString("title").ifEmpty { ei.optString("name") }
                 val explicit = ei.optString("episode_number", "").toIntOrNull()
                 episodes.add(
-                    newEpisode("$mainUrl/episode/$epId/servers") {
+                    newEpisode("${resolveApi()}/episode/$epId/servers") {
                         this.name = title
                         this.season = seasonNum
                         this.episode = explicit?.takeIf { it > 0 } ?: episodeNumber(title, e + 1)
@@ -259,25 +291,25 @@ class AnimeDay : MainAPI() {
         }
         episodes.sortWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
-        val detail = fetchJson("$mainUrl/series/$showId", withToken = true)?.optJSONObject("series")
+        val detail = fetchJson("${resolveApi()}/series/$showId", withToken = true)?.optJSONObject("series")
         val name = detail?.optString("name").orEmpty().ifEmpty { "مسلسل $showId" }
         val poster = detail?.optString("poster").orEmpty()
         val backdrop = detail?.optString("backdrop").orEmpty()
         val plot = detail?.optString("overview").orEmpty()
 
-        return newTvSeriesLoadResponse(name, "$mainUrl/series/$showId", TvType.TvSeries, episodes) {
+        return newTvSeriesLoadResponse(name, "${resolveApi()}/series/$showId", TvType.TvSeries, episodes) {
             this.posterUrl = poster.ifEmpty { backdrop }.ifEmpty { null }
             this.plot = plot.ifEmpty { null }
         }
     }
 
     private suspend fun loadMovie(url: String, id: String): LoadResponse {
-        val movie = fetchJson("$mainUrl/movie/$id", withToken = true)?.optJSONObject("movie")
+        val movie = fetchJson("${resolveApi()}/movie/$id", withToken = true)?.optJSONObject("movie")
         val name = movie?.optString("name").orEmpty().ifEmpty { "فيلم $id" }
         val poster = movie?.optString("poster").orEmpty()
         val backdrop = movie?.optString("backdrop").orEmpty()
         val plot = movie?.optString("overview").orEmpty()
-        return newMovieLoadResponse(name, "$mainUrl/movie/$id", TvType.Movie, "$mainUrl/movie/$id/servers") {
+        return newMovieLoadResponse(name, "${resolveApi()}/movie/$id", TvType.Movie, "${resolveApi()}/movie/$id/servers") {
             this.posterUrl = poster.ifEmpty { backdrop }.ifEmpty { null }
             this.plot = plot.ifEmpty { null }
         }

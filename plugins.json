@@ -195,7 +195,7 @@
   "iconUrl": "https://www.anime-day.com/favicon.ico",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3253872,
+  "fileSize": 3258838,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -207,7 +207,7 @@
    "Movie",
    "Cartoon"
   ],
-  "version": 1,
+  "version": 2,
   "internalName": "AnimeDay",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.cs3",
   "name": "AnimeDay",
