@@ -2,6 +2,7 @@ package com.cimacloud
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.Uri
 import android.provider.Settings
 import com.app.cimacloud.Utils.NativeLib
 import com.lagradost.cloudstream3.HomePageResponse
@@ -338,6 +339,95 @@ class CimaCloud : MainAPI() {
         return re.find(html)?.groupValues?.get(1)
     }
 
+    /** Ask the app's own server-side resolver (extractor.php) to turn any source page into playable + download links. */
+    private suspend fun resolvePhp(
+        pageUrl: String,
+        referer: String,
+        label: String,
+        quality: Int?,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            val exUrl = "https://cloud-day.online/cimacloud/extractor.php?url=" + Uri.encode(pageUrl)
+            android.util.Log.i("CimaCloud", "loadLinks php resolve $exUrl")
+            val json = safeJson(app.get(exUrl, headers = plainHeaders()).text) ?: return false
+            val servers = json.optJSONArray("servers") ?: return false
+            var emitted = false
+            for (i in 0 until servers.length()) {
+                val s = servers.optJSONObject(i) ?: continue
+                val u = s.optString("url").trim()
+                val ref = s.optString("referer").ifEmpty { s.optString("origin") }.ifEmpty { referer }
+                val labelName = s.optString("name").ifEmpty { label }
+                val q = s.optString("height").toIntOrNull() ?: quality
+                if (u.isNotEmpty()) {
+                    emitted = true
+                    when {
+                        u.contains(".m3u8") -> M3u8Helper.generateM3u8(labelName, u, ref).forEach { callback(it) }
+                        u.contains(".mpd") -> callback(
+                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.DASH) {
+                                this.referer = ref
+                                if (q != null) this.quality = q
+                            }
+                        )
+                        else -> callback(
+                            newExtractorLink(labelName, labelName, u, ExtractorLinkType.VIDEO) {
+                                this.referer = ref
+                                if (q != null) this.quality = q
+                            }
+                        )
+                    }
+                }
+                val dl = s.optString("url_download").trim()
+                if (dl.isNotEmpty() && dl != u) {
+                    emitted = true
+                    callback(
+                        newExtractorLink("$labelName (تحميل)", labelName + " (download)", dl, ExtractorLinkType.VIDEO) {
+                            this.referer = ref
+                        }
+                    )
+                }
+            }
+            emitted
+        } catch (e: Throwable) {
+            android.util.Log.i("CimaCloud", "loadLinks php resolve FAILED: $e")
+            false
+        }
+    }
+
+    /** Build a DASH MPD link from a bare lh3 pw base (fallback when extractor.php is unreachable). */
+    private suspend fun emitGphotosLocal(
+        base: String,
+        label: String,
+        referer: String,
+        quality: Int?,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val mpd = base + "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
+        val mpdOk = try {
+            app.get(mpd, headers = plainHeaders()).text.trimStart().startsWith("<?xml")
+        } catch (_: Throwable) {
+            false
+        }
+        android.util.Log.i("CimaCloud", "loadLinks gphotos local: mpdOk=$mpdOk")
+        if (mpdOk) {
+            callback(
+                newExtractorLink(label + " (DASH)", label, mpd, ExtractorLinkType.DASH) {
+                    this.referer = "https://photos.google.com/"
+                    if (quality != null) this.quality = quality
+                }
+            )
+        } else {
+            callback(
+                newExtractorLink(label, label, base + "=dv", ExtractorLinkType.VIDEO) {
+                    this.referer = "https://photos.google.com/"
+                    if (quality != null) this.quality = quality
+                }
+            )
+        }
+        return true
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -392,35 +482,34 @@ class CimaCloud : MainAPI() {
                         found = true
                         callback(it)
                     }
-                } else if (link.contains("photos.google.com") || (link.contains("lh3.googleusercontent.com") && link.contains("/pw/") &&
-                    !link.contains(".mp4") && !link.contains(".mkv") && !link.contains(".m3u8"))) {
-                    val base = if (link.contains("photos.google.com")) {
-                        val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
-                        gphotosBase(html)
-                    } else {
-                        link.substringBefore("=")
-                    }
-                    android.util.Log.i("CimaCloud", "loadLinks gphotos: base=${base != null} link=$link")
-                    if (base != null) {
-                        val mpd = base + "=mm,dash-vm-vf,dr.sdr,sdrCodec.vp9.h264?alr=true&mpd_version=5&pacing=0"
-                        val mpdOk = try {
-                            app.get(mpd, headers = plainHeaders()).text.trimStart().startsWith("<?xml")
-                        } catch (_: Throwable) {
-                            false
+                } else if (link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd")) {
+                    found = true
+                    callback(
+                        newExtractorLink(
+                            label,
+                            label,
+                            link,
+                            if (link.contains(".mpd")) ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
+                        ) {
+                            this.referer = referer
+                            if (quality != null) this.quality = quality
                         }
-                        android.util.Log.i("CimaCloud", "loadLinks gphotos: mpdOk=$mpdOk")
+                    )
+                } else if (link.contains("photos.google.com") || (link.contains("lh3.googleusercontent.com") && link.contains("/pw/"))) {
+                    if (!resolvePhp(link, referer, label, quality, subtitleCallback, callback)) {
+                        val base = if (link.contains("photos.google.com")) {
+                            val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
+                            gphotosBase(html)
+                        } else {
+                            link.substringBefore("=")
+                        }
+                        android.util.Log.i("CimaCloud", "loadLinks gphotos local: base=${base != null} link=$link")
+                        if (base != null) {
+                            found = true
+                            emitGphotosLocal(base, label, referer, quality, callback)
+                        }
+                    } else {
                         found = true
-                        callback(
-                            newExtractorLink(
-                                label + if (mpdOk) " (DASH)" else "",
-                                label,
-                                if (mpdOk) mpd else base + "=dv",
-                                if (mpdOk) ExtractorLinkType.DASH else ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = "https://photos.google.com/"
-                                if (quality != null) this.quality = quality
-                            }
-                        )
                     }
                 } else {
                     val extracted = try {
@@ -428,15 +517,10 @@ class CimaCloud : MainAPI() {
                     } catch (_: Throwable) {
                         false
                     }
-                    if (extracted) found = true
-                    if (!extracted && (link.contains(".mp4") || link.contains(".mkv") || link.contains(".mpd"))) {
+                    if (extracted) {
                         found = true
-                        callback(
-                            newExtractorLink(label, label, link, ExtractorLinkType.VIDEO) {
-                                this.referer = referer
-                                if (quality != null) this.quality = quality
-                            }
-                        )
+                    } else if (resolvePhp(link, referer, label, quality, subtitleCallback, callback)) {
+                        found = true
                     }
                 }
             }
