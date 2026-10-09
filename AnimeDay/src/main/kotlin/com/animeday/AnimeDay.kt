@@ -331,6 +331,13 @@ class AnimeDay : MainAPI() {
         }
     }
 
+    /** Google Photos share pages embed the video as <c-wiz data-url="https://lh3.googleusercontent.com/pw/<TOKEN>" ... data-isvideo="true">. */
+    private fun gphotosBase(html: String?): String? {
+        if (html.isNullOrBlank()) return null
+        val re = Regex("data-url=\"(https://lh3\\.googleusercontent\\.com/pw/[^\"]+)\"[^>]*?data-isvideo=\"true\"")
+        return re.find(html)?.groupValues?.get(1)
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -385,6 +392,30 @@ class AnimeDay : MainAPI() {
                         found = true
                         callback(it)
                     }
+                } else if (link.contains("photos.google.com")) {
+                    val html = try { app.get(link, headers = plainHeaders()).text } catch (_: Throwable) { null }
+                    val base = gphotosBase(html)
+                    android.util.Log.i("AnimeDay", "loadLinks gphotos: found=${base != null} link=$link")
+                    if (base != null) {
+                        found = true
+                        callback(
+                            newExtractorLink(label, label, base + "=dv", ExtractorLinkType.VIDEO) {
+                                this.referer = "https://photos.google.com/"
+                                if (quality != null) this.quality = quality
+                            }
+                        )
+                    }
+                } else if (link.contains("lh3.googleusercontent.com") && link.contains("/pw/") &&
+                    !link.contains(".mp4") && !link.contains(".mkv") && !link.contains(".m3u8")) {
+                    val videoUrl = link.substringBefore("=") + "=dv"
+                    android.util.Log.i("AnimeDay", "loadLinks gphotos direct base -> =dv")
+                    found = true
+                    callback(
+                        newExtractorLink(label, label, videoUrl, ExtractorLinkType.VIDEO) {
+                            this.referer = "https://photos.google.com/"
+                            if (quality != null) this.quality = quality
+                        }
+                    )
                 } else {
                     val extracted = try {
                         loadExtractor(link, referer, subtitleCallback, callback)

@@ -66,10 +66,10 @@
     },
     {
         "iconUrl": "https://cima-cloud.com/favicon.ico",
-        "fileHash": "sha256-314286bab442bd9f62df2c6c1bb4a139169a6181d7e4895ff1632fc1609a9c34",
+        "fileHash": "sha256-0938de9218149fb6a70cc8ae8a7799427fab59d999567c49ae28ee54a0e3be1f",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3258396,
+        "fileSize": 3260210,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -81,7 +81,7 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 8,
+        "version": 9,
         "internalName": "CimaCloud",
         "description": "CimaCloud — مباشر، مدبلج، مترجم",
         "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/CimaCloud.cs3",
@@ -170,7 +170,7 @@
         "iconUrl": "https://www.anime-day.com/favicon.ico",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3258838,
+        "fileSize": 3260659,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -182,11 +182,11 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 2,
+        "version": 3,
         "internalName": "AnimeDay",
         "url": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/builds/AnimeDay.cs3",
         "name": "AnimeDay",
         "description": "AnimeDay — أنمي وكرتون مدبلج ومترجم",
-        "fileHash": "sha256-cfa0310cc13bd443931abae74afa9132ed0ac0f943f4853b5079e6d1122f7abc"
+        "fileHash": "sha256-2730043b2456eae3e3446d86c21f478e66a3118973a8b47c6ada05bc3d082310"
     }
 ]
