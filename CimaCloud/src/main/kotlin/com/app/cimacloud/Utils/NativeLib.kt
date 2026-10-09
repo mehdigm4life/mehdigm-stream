@@ -36,18 +36,28 @@ object NativeLib {
             if (loaded) return
             val so = findOrExtract(context)
             System.load(so.absolutePath)
+            // The native library shares global OpenSSL/BoringSSL state and is NOT
+            // thread-safe. Perform the first (one-time initialisation) call while
+            // still holding the lock so concurrent callers never race the init.
+            runCatching { buildSecure(FakeContext(context.applicationContext ?: context)) }
             loaded = true
         }
     }
 
     fun secureId(context: Context): String? {
         load(context)
-        return runCatching { buildSecure(FakeContext(context.applicationContext ?: context)) }.getOrNull()
+        // Serialize every native call: the .so has process-wide mutable state and
+        // concurrent calls corrupt the heap (crashes surface in unrelated threads).
+        synchronized(lock) {
+            return runCatching { buildSecure(FakeContext(context.applicationContext ?: context)) }.getOrNull()
+        }
     }
 
     fun decrypt(context: Context, data: String, key: String): String? {
         load(context)
-        return runCatching { decryptResponse(data, key) }.getOrNull()
+        synchronized(lock) {
+            return runCatching { decryptResponse(data, key) }.getOrNull()
+        }
     }
 
     private fun findOrExtract(context: Context): File {
