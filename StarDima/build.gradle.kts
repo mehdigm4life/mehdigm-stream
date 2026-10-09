@@ -1,4 +1,4 @@
-version = 3
+version = 4
 
 cloudstream {
     description = "StarDima — ستارديما | أفلام ومسلسلات وكرتون مدبلج ومترجم."
