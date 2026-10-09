@@ -1,0 +1,169 @@
+[
+    {
+        "fileHash": "sha256-1d018bfb5a9a73a586f1ba17a0f503c85565fed13a253e32e1de2a526a7b7f22",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 53383,
+        "status": 3,
+        "authors": [
+            "mehdigm4life"
+        ],
+        "version": -1,
+        "internalName": "Animezid",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/Animezid.cs3",
+        "name": "Animezid"
+    },
+    {
+        "fileHash": "sha256-518bdd57a08d0b025fe700677582d11135a058dc5073344d3e3cc3eb1778e8fc",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 22703,
+        "status": 3,
+        "authors": [
+            "mehdigm4life"
+        ],
+        "version": -1,
+        "internalName": "Animhq",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/Animhq.cs3",
+        "name": "Animhq"
+    },
+    {
+        "fileHash": "sha256-8229f9b9269df04cbd5a1e6fddeb16efcff040663a1695fb37151bcbeaf0f685",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 35303,
+        "status": 3,
+        "authors": [
+            "mehdigm4life"
+        ],
+        "version": -1,
+        "internalName": "ArabSeed",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/ArabSeed.cs3",
+        "name": "ArabSeed"
+    },
+    {
+        "iconUrl": "https://apps-anime.com/favicon.ico",
+        "fileHash": "sha256-e8af3dc7278d7d5ba38a12def07127904b9689b7e79a3a804acf7e899c73603c",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 23194,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Anime",
+            "TvSeries",
+            "Movie",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "CartoonAnime",
+        "description": "\u0645\u0633\u0644\u0633\u0644\u0627\u062a \u0643\u0631\u062a\u0648\u0646 \u0648\u0623\u0646\u0645\u064a \u2014 \u0645\u0634\u0627\u0647\u062f\u0629 \u0627\u0644\u0645\u0633\u0644\u0633\u0644\u0627\u062a \u0648\u0627\u0644\u0623\u0641\u0644\u0627\u0645 \u0627\u0644\u0645\u062a\u0631\u062c\u0645\u0629 \u0648\u0627\u0644\u0645\u062f\u0628\u0644\u062c\u0629.",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/CartoonAnime.cs3",
+        "name": "CartoonAnime"
+    },
+    {
+        "iconUrl": "https://cima-cloud.com/favicon.ico",
+        "fileHash": "sha256-6e1d95f1007660cb22250e0b925a44953a00c2a34110917319795aefb382d77f",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 7512,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Anime",
+            "TvSeries",
+            "Movie",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "CimaCloud",
+        "description": "CimaCloud \u2014 \u0645\u0628\u0627\u0634\u0631\u060c \u0645\u062f\u0628\u0644\u062c\u060c \u0645\u062a\u0631\u062c\u0645",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/CimaCloud.cs3",
+        "name": "CimaCloud"
+    },
+    {
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s",
+        "fileHash": "sha256-bf959cce02bff49fc59f1a7935049033fdce1a041c06225d79916eef9f9df170",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 48362,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "TvSeries",
+            "Movie"
+        ],
+        "version": 4,
+        "internalName": "Cinemana",
+        "description": "\u0633\u064a\u0646\u0645\u0627\u0646\u0627 \u2014 \u0644\u0627 \u064a\u0639\u0645\u0644 \u062e\u0627\u0631\u062c \u0627\u0644\u0639\u0631\u0627\u0642 \u0623\u0648 \u0639\u0644\u0649 \u0623\u064a \u0634\u0628\u0643\u0629 \u063a\u064a\u0631 Earthlink.",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/Cinemana.cs3",
+        "name": "Cinemana"
+    },
+    {
+        "fileHash": "sha256-679caf7ac512c216793a90a29ce97567d00a15d2093236a8e9857c4266e5305c",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 51661,
+        "status": 3,
+        "authors": [
+            "mehdigm4life"
+        ],
+        "version": -1,
+        "internalName": "FaselHD",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/FaselHD.cs3",
+        "name": "FaselHD"
+    },
+    {
+        "iconUrl": "https://shaheid4u.name/faveicon.ico?v=33",
+        "fileHash": "sha256-9ee5857232caade70a4431af1cb919f2c272173ed2a73308cce144c1d0ff2467",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 36074,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "TvSeries",
+            "Movie",
+            "Anime"
+        ],
+        "version": 3,
+        "internalName": "Shahid4u",
+        "description": "\u062a\u062d\u062f\u064a\u062b \u0627\u0644\u062f\u0648\u0645\u064a\u0646 \u0625\u0644\u0649 shaheid4u.name \u0648\u062f\u0639\u0645 \u0627\u0644\u0628\u0646\u064a\u0629 \u0627\u0644\u062c\u062f\u064a\u062f\u0629 \u0644\u0644\u0645\u0648\u0627\u0633\u0645/\u0627\u0644\u062d\u0644\u0642\u0627\u062a \u0648\u0627\u0633\u062a\u062e\u0631\u0627\u062c \u0633\u064a\u0631\u0641\u0631\u0627\u062a \u0627\u0644\u0645\u0634\u0627\u0647\u062f\u0629",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/Shahid4u.cs3",
+        "name": "Shahid4u"
+    },
+    {
+        "iconUrl": "https://tuktukhd.com/wp-content/themes/TukTukCinema3/tuk.png?x50750",
+        "fileHash": "sha256-5da57d61261ff4f5f72f29b9840792262bc43f7a1e489c93efa29a42fac0d6ed",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/cimastream",
+        "fileSize": 37886,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "TvSeries",
+            "Movie",
+            "Anime"
+        ],
+        "version": 1,
+        "internalName": "TukTukcima",
+        "description": "",
+        "url": "https://raw.githubusercontent.com/mehdigm4life/cimastream/builds/TukTukcima.cs3",
+        "name": "TukTukcima"
+    }
+]
