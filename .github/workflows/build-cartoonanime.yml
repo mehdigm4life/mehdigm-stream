@@ -1,0 +1,51 @@
+name: Build CartoonAnime Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'CartoonAnime/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build CartoonAnime plugin
+        run: ./gradlew :CartoonAnime:make
+
+      - name: Upload CartoonAnime.cs3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CartoonAnime
+          path: CartoonAnime/build/CartoonAnime.cs3
+
+      - name: Commit and push built cs3 to build/
+        run: |
+          if [ -f "CartoonAnime/build/CartoonAnime.cs3" ]; then
+            cp CartoonAnime/build/CartoonAnime.cs3 build/CartoonAnime.cs3
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/CartoonAnime.cs3
+            git commit --allow-empty -m "🤖 Build CartoonAnime.cs3"
+            git pull --rebase origin "$GITHUB_REF_NAME" || true
+            git push
+          fi

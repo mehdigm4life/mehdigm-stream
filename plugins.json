@@ -145,6 +145,28 @@
   "internalName": "TukTukcima",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TukTukcima.cs3",
   "name": "توك توك سينما (TukTuk)",
-  "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والتركية والأنمي."
+   "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والتركية والأنمي."
+ },
+ {
+  "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/cartoonanime.jpeg",
+  "apiVersion": 1,
+  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 23194,
+  "status": 1,
+  "language": "ar",
+  "authors": [
+   "mehdigm4life"
+  ],
+  "tvTypes": [
+   "Anime",
+   "TvSeries",
+   "Movie",
+   "Cartoon"
+  ],
+  "version": 1,
+  "internalName": "CartoonAnime",
+  "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CartoonAnime.cs3",
+  "name": "مسلسلات كرتون وأنمي (CartoonAnime)",
+  "description": "مسلسلات كرتون وأنمي — مسلسلات وأفلام الكرتون والأنمي المترجمة والمدبلجة."
  }
 ]
