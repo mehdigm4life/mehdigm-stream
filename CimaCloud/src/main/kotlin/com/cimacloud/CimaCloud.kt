@@ -150,35 +150,8 @@ class CimaCloud : MainAPI() {
         }
 
         suspend fun fetchDetail(u: String): Pair<String, JSONObject?> {
-            val fbIds = listOf(
-                "bfIJH6E6U8M7tNOF6K9vvEokyrcLD+k73ptPzpZvEaRtrIbvweBRHg/htenW3hOwkVGbGQu1Zz07/ciKictk3DqgmfbCpIDFa9NcAjuEojE7rJuvhgzNRllMMzhynlD/He8V2Aw8fJ0K9R2xujO4IzwYWqOilry1Pt4edH2o+LJ/W/p7tipvm70AKHx5VbsOQTWZRIJCFeg9lHU2Q80OJdGRzcE1/Q6k2Y3VJ4YrthKm0YGrr7XC9pvfmQdI7RazF3xk745MDcgm0rxG4pVWiVcSYLPKUeokZyBSbxcISYHYvy5Agl+7/SDTYBBdlk/fPEFqe0fR9EVz111m2I/BkA==.jkdESGHoHnfFLcrR.UAjP78fp7LZUHQEMOxrkUzzvv+6WCiP+Np80XgZWjUd3HPGE6kJH6z92Wyca2rcBbo8CDcOxuyVYXMsf1eupZSYqwaTs21cuzJB4wNM8DmW6aj8siL2WuG4b5fNm1HgAAkyuiRS4o1Aq8Ae3dkKTYkLQdKoECzaNKGURR0yVFAxExSMU6Ww28ScT2AWNbGdQRbdtRKshlHCX+2ld5ZZUe704WSDySsbVmXMrC2ycqRogl83pe99tNr4g7Sfw2SnhUBhJ5gDIVXGbMSDzI2qPC1LS8pte+RbN0ryuY42PNKXHlEiKWO9+WQB4fQF2IT5iI8FLMCg8Uiayk9GwaScMB8lGVPM/NCVwAWmoxSwTPluqHCZaVFl9QIIx+/FxTO1xE6ZFgaFxaTdUAX4AxSXyML4U96KwPIN5skWxeNhxJB/KhwCXt+0oO4cyibuaACKi5WXuvcOR19N4ZSJHc0FjsKVIFZm5TvekQ4T5+DBhxhByYvxT5w6OSgj85KSXSNBXF5+NI314jFmYEaNZjtwzFNEo6zCdVpK+wmdqkJo1wFAgEHnW82MLimDfI6uSJ8S55Z1SztWLT1+vcKBYpYJnPGQrxnmB+Zo5x2ntSZWW/+UtalHiZTDZcjXo9eA4fKM=",
-                                "d8003a456d14a3de",
-                "b8054cdaa529ffbf",
-                "847f414e42596944",
-                "29b1b1201dd5ae7b",
-                "1ecf0bf45eb04ff8b6445c3a36a3966a",
-                "847f414e42596944",
-                "1234567890123456",
-                "abc123def4567890",
-                "0000000000000000",
-                "94c24a0bc4fb8d34",
-                "cf95dc53f383f9a8",
-                "4032af8d61035123",
-                "f60ed56a9c827589",
-                "263a4dbe41488fb8",
-                "ce30d1c21815f7b9",
-                "d7462c26174b077c",
-                "4d853cd5e7d688e7",
-                "9f9f5111f7b27a78",
-                "ad0a325a4731e777",
-                "d3e439737a216621",
-                "d41d8cd98f00b204e9800998ecf8427e",
-                "ffffffffffffffffffffffffffffffff"
-            )
-            val cfIds = listOf(
-                "abcdefghijklmnop0123456789ABCDEF",
-                "0123456789abcdef0123456789ABCDEF"
-            )
+            val fbIds = listOf("bfIJH6E6U8M7tNOF6K9vvEokyrcLD+k73ptPzpZvEaRtrIbvweBRHg/htenW3hOwkVGbGQu1Zz07/ciKictk3DqgmfbCpIDFa9NcAjuEojE7rJuvhgzNRllMMzhynlD/He8V2Aw8fJ0K9R2xujO4IzwYWqOilry1Pt4edH2o+LJ/W/p7tipvm70AKHx5VbsOQTWZRIJCFeg9lHU2Q80OJdGRzcE1/Q6k2Y3VJ4YrthKm0YGrr7XC9pvfmQdI7RazF3xk745MDcgm0rxG4pVWiVcSYLPKUeokZyBSbxcISYHYvy5Agl+7/SDTYBBdlk/fPEFqe0fR9EVz111m2I/BkA==.jkdESGHoHnfFLcrR.UAjP78fp7LZUHQEMOxrkUzzvv+6WCiP+Np80XgZWjUd3HPGE6kJH6z92Wyca2rcBbo8CDcOxuyVYXMsf1eupZSYqwaTs21cuzJB4wNM8DmW6aj8siL2WuG4b5fNm1HgAAkyuiRS4o1Aq8Ae3dkKTYkLQdKoECzaNKGURR0yVFAxExSMU6Ww28ScT2AWNbGdQRbdtRKshlHCX+2ld5ZZUe704WSDySsbVmXMrC2ycqRogl83pe99tNr4g7Sfw2SnhUBhJ5gDIVXGbMSDzI2qPC1LS8pte+RbN0ryuY42PNKXHlEiKWO9+WQB4fQF2IT5iI8FLMCg8Uiayk9GwaScMB8lGVPM/NCVwAWmoxSwTPluqHCZaVFl9QIIx+/FxTO1xE6ZFgaFxaTdUAX4AxSXyML4U96KwPIN5skWxeNhxJB/KhwCXt+0oO4cyibuaACKi5WXuvcOR19N4ZSJHc0FjsKVIFZm5TvekQ4T5+DBhxhByYvxT5w6OSgj85KSXSNBXF5+NI314jFmYEaNZjtwzFNEo6zCdVpK+wmdqkJo1wFAgEHnW82MLimDfI6uSJ8S55Z1SztWLT1+vcKBYpYJnPGQrxnmB+Zo5x2ntSZWW/+UtalHiZTDZcjXo9eA4fKM=")
+            val cfIds = listOf("GlTg9mfVdCSWSGCf0ebc12cc624c0b4")
             for (fid in fbIds) {
                 for (cf in cfIds) {
                     try {
@@ -430,15 +403,8 @@ class CimaCloud : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val attempts = mutableListOf<Map<String,String>>()
+                val attempts = mutableListOf<Map<String,String>>()
         attempts.add(getHeaders())
-        listOf("847f414e42596944","1234567890123456","94c24a0bc4fb8d34","f60ed56a9c827589","1ecf0bf45eb04ff8b6445c3a36a3966a","4d853cd5e7d688e7","9f9f5111f7b27a78","d8003a456d14a3de","b8054cdaa529ffbf","847f414e42596944","29b1b1201dd5ae7b","9774d56d682e549c").forEach { fid ->
-            attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid))
-            attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "firebase_id" to fid, "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
-        }
-        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
-        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"))
-        attempts.add(mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*", "cloudflare-id" to "abcdefghijklmnop0123456789ABCDEF"))
         for (h in attempts) {
             try {
                 val raw = app.get(data, headers = h, allowRedirects = true).text
