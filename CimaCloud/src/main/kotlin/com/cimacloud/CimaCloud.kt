@@ -137,19 +137,28 @@ class CimaCloud : MainAPI() {
                 "0123456789abcdef",
                 "1234567890123456",
                 "abc123def4567890",
-                "0000000000000000"
+                "0000000000000000",
+                "d41d8cd98f00b204e9800998ecf8427e",
+                "ffffffffffffffffffffffffffffffff"
+            )
+            val cfIds = listOf(
+                "abcdefghijklmnop0123456789ABCDEF",
+                "0123456789abcdef0123456789ABCDEF"
             )
             for (fid in fbIds) {
-                try {
-                    val h = mapOf(
-                        "User-Agent" to "okhttp/4.10.0",
-                        "Accept" to "application/json, text/plain, */*",
-                        "firebase_id" to fid
-                    )
-                    val t = app.get(u, headers = h).text
-                    val j = safeJson(t)
-                    if (j != null) return Pair(t, j)
-                } catch (e: Exception) {
+                for (cf in cfIds) {
+                    try {
+                        val h = mapOf(
+                            "User-Agent" to "okhttp/4.10.0",
+                            "Accept" to "application/json, text/plain, */*",
+                            "firebase_id" to fid,
+                            "cloudflare-id" to cf
+                        )
+                        val t = app.get(u, headers = h).text
+                        val j = safeJson(t)
+                        if (j != null) return Pair(t, j)
+                    } catch (e: Exception) {
+                    }
                 }
             }
             try {
