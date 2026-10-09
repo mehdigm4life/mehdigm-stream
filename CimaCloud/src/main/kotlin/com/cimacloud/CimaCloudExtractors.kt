@@ -26,13 +26,13 @@ import kotlin.random.Random
  *  Google Photos note: the backend exposes every quality through a single DASH
  *  manifest (`=mm,dash-vm-vf,...`). Its googlevideo segments are IP-pinned and
  *  answer HTTP 403 unless BOTH `Referer` and `Origin: https://photos.google.com`
- *  are sent — the app's own player does this. CloudStream forwards an
- *  [ExtractorLink]'s `referer` + `headers` to every manifest/segment request, so
- *  the full DASH manifest is emitted (all real renditions, audio included).
- *  The progressive `=m37` / `=m22` / `=m18` renditions are also probed and
- *  emitted as a fallback: those suffixes are NOT fixed resolutions, so each one
- *  is probed and its real size is read straight from the MP4 `tkhd` box, and
- *  renditions that do not exist (e.g. a 404 on `=m37`) are skipped.
+ *  are sent, and they are pinned to the `User-Agent` that minted them — exactly
+ *  the headers [PHOTO_HEADERS] carries. Every video rendition is emitted as its
+ *  own independent DASH source (a single-rendition manifest served over the
+ *  loopback [PhotoDashServer]), so each quality is directly selectable and
+ *  stable instead of relying on the adaptive manifest's "tracks" switches, which
+ *  intermittently fail. The full adaptive manifest and the probed progressive
+ *  `=m37` / `=m22` / `=m18` MP4 renditions are emitted as fallbacks.
  *
  *  This file is intentionally the single place where extraction lives; the main
  *  API only fetches/decrypts the server list and hands each link to [emit].
@@ -86,9 +86,19 @@ object CimaCloudExtractors {
     @Volatile
     private var sessionNonce: String = System.currentTimeMillis().toString(36)
 
+    /** One (URL → body) manifest per session, so every listed base reuses the same
+     *  freshly-minted googlevideo segment URLs; reset by [newSession]. */
+    @Volatile
+    private var cachedManifestUrl: String? = null
+
+    @Volatile
+    private var cachedManifestBody: String? = null
+
     /** Rotate the manifest nonce once per link-loading run (call from loadLinks). */
     fun newSession() {
         sessionNonce = System.currentTimeMillis().toString(36) + Integer.toHexString(Random.nextInt())
+        cachedManifestUrl = null
+        cachedManifestBody = null
     }
 
     private fun freshDash(url: String): String =
@@ -250,12 +260,17 @@ object CimaCloudExtractors {
     }
 
     /**
-     * Emit every real Google Photos stream as a direct, self-contained source:
+     * Emit every real Google Photos rendition:
      *
-     *   1. The adaptive DASH manifest (every video rendition + audio). The player
-     *      fetches it itself with the link's referer/UA, so the IP/UA-pinned
-     *      segment URLs are always minted for the same client that will play them.
-     *   2. The progressive muxed MP4 renditions (`=m37`/`=m22`/`=m18`). Those
+     *   1. One independent DASH source per video rendition (192p…1080p), each served
+     *      as a small single-rendition manifest over the loopback [PhotoDashServer].
+     *      CloudStream's player ignores an [ExtractorLink]'s `quality` for track
+     *      selection and the "tracks" switches inside the adaptive manifest
+     *      intermittently fail — so each rendition becomes its own directly
+     *      selectable, stable source. The segments inside are absolute googlevideo
+     *      URLs, fetched by the player with this link's referer/headers.
+     *   2. The full adaptive DASH manifest (`DASH تلقائي`) as a fallback.
+     *   3. The progressive muxed MP4 renditions (`=m37`/`=m22`/`=m18`). Those
      *      suffixes are NOT fixed resolutions, so each one is probed and its real
      *      size is read straight from the MP4 `tkhd` box; renditions that do not
      *      exist (e.g. a 404 on `=m37`) are skipped.
@@ -264,7 +279,7 @@ object CimaCloudExtractors {
      * and `Origin: https://photos.google.com` are sent, and they are pinned to
      * the `User-Agent` that requested the manifest — hence [PHOTO_HEADERS] carries
      * the browser UA. CloudStream forwards an [ExtractorLink]'s `referer` +
-     * `headers` to every manifest/segment request, so both links play correctly.
+     * `headers` to every manifest/segment request, so every emitted link plays.
      *
      * The API/website lists the same Google Photos base many times (once per
      * "quality"); [done] collapses those repeated servers into one source each.
@@ -278,9 +293,37 @@ object CimaCloudExtractors {
     ): Boolean {
         var found = false
 
+        val dashUrl = base + DASH_OPTION
+
+        // One independent DASH source per video rendition, served as a tiny
+        // single-rendition manifest so each quality is its own stable link.
+        val manifest = manifestFor(dashUrl)
+        val byHeight = LinkedHashMap<Int, VideoRep>()
+        if (!manifest.isNullOrBlank()) {
+            for (rep in videoReps(manifest)) {
+                val current = byHeight[rep.height]
+                if (current == null || rep.width > current.width) byHeight[rep.height] = rep
+            }
+        }
+        if (!manifest.isNullOrBlank() && byHeight.isNotEmpty()) {
+            for ((height, rep) in byHeight.entries.sortedByDescending { it.key }) {
+                if (!done.add("gq:$base:$height")) continue
+                val single = filterToRep(manifest, rep.id)
+                val local = PhotoDashServer.put("$base|${rep.id}", single.toByteArray(Charsets.UTF_8)) ?: continue
+                found = true
+                callback(
+                    newExtractorLink(label, "جودة ${height}p", local, ExtractorLinkType.DASH) {
+                        this.referer = PHOTO_REFERER
+                        this.headers = PHOTO_HEADERS
+                        this.quality = height
+                    }
+                )
+            }
+        }
+
         // Direct adaptive DASH manifest — a fresh URL every session so the
         // player's cache never replays a manifest with already-expired segments.
-        val adaptiveUrl = freshDash(base + DASH_OPTION)
+        val adaptiveUrl = freshDash(dashUrl)
         if (done.add("ga:$adaptiveUrl")) {
             found = true
             callback(
@@ -307,6 +350,62 @@ object CimaCloudExtractors {
         }
         return found
     }
+
+    /** The current session's freshly-fetched manifest for [url] (see [manifestFor]). */
+    private suspend fun manifestFor(url: String): String? {
+        if (cachedManifestUrl == url) return cachedManifestBody
+        val body = fetchManifest(url)
+        cachedManifestUrl = url
+        cachedManifestBody = body
+        return body
+    }
+
+    private suspend fun fetchManifest(url: String): String? {
+        return try {
+            val res = app.get(
+                url,
+                headers = mapOf(
+                    "User-Agent" to BROWSER_UA,
+                    "Accept" to "*/*",
+                    "Referer" to PHOTO_REFERER,
+                    "Origin" to PHOTO_ORIGIN
+                ),
+                allowRedirects = true
+            )
+            if (res.code in 200..299) res.text else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    internal data class VideoRep(val id: String, val width: Int, val height: Int)
+
+    private val REP_BLOCK_RE = Regex("(?s)<Representation\\b[^>]*>.*?</Representation>")
+    private val REP_HEIGHT_RE = Regex("\\bheight=\"(\\d+)\"")
+    private val REP_WIDTH_RE = Regex("\\bwidth=\"(\\d+)\"")
+    private val REP_ID_RE = Regex("\\bid=\"(\\d+)\"")
+
+    /** Video renditions (those carrying a `height`), largest first. */
+    internal fun videoReps(manifest: String): List<VideoRep> {
+        val out = ArrayList<VideoRep>()
+        for (m in REP_BLOCK_RE.findAll(manifest)) {
+            val block = m.value
+            val h = REP_HEIGHT_RE.find(block)?.groupValues?.get(1)?.toIntOrNull() ?: continue
+            val id = REP_ID_RE.find(block)?.groupValues?.get(1) ?: continue
+            val w = REP_WIDTH_RE.find(block)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            out.add(VideoRep(id, w, h))
+        }
+        return out
+    }
+
+    /** Drop every video rendition except [keepId], preserving the audio rendition(s). */
+    internal fun filterToRep(manifest: String, keepId: String): String =
+        REP_BLOCK_RE.replace(manifest) { m ->
+            val block = m.value
+            if (!REP_HEIGHT_RE.containsMatchIn(block)) block
+            else if (REP_ID_RE.find(block)?.groupValues?.get(1) == keepId) block
+            else ""
+        }
 
     /** (width, height) when the rendition exists and its MP4 header is readable, otherwise null. */
     private suspend fun probe(url: String): Pair<Int, Int>? {
@@ -497,6 +596,114 @@ class GooglePhotosExtractor : ExtractorApi() {
     ) {
         val base = CimaCloudExtractors.gphotoBase(url) ?: return
         CimaCloudExtractors.emitGooglePhotos(base, name, url, mutableSetOf(), callback)
+    }
+}
+
+/**
+ * Minimal loopback HTTP server that exposes per-rendition DASH manifests.
+ *
+ * CloudStream's player only accepts http(s) manifest URLs (no `data:` / `file:`),
+ * and its track selector ignores an [ExtractorLink]'s quality — so the only way
+ * to turn each rendition into its own *source* is to serve a manifest that
+ * contains only that rendition. The segments inside are absolute googlevideo
+ * URLs and are therefore fetched directly by the player with the link's
+ * referer/headers (which carry the browser UA and the photos Origin/Referer).
+ *
+ * The socket is bound to 127.0.0.1 on an ephemeral port (the same technique
+ * CloudStream uses for its torrent streaming server), so nothing is exposed.
+ * Casting devices cannot reach this localhost URL — those sessions fall back to
+ * the direct adaptive DASH and progressive MP4 links.
+ */
+internal object PhotoDashServer {
+    private const val TAG = "PhotoDashServer"
+    private const val MAX_ENTRIES = 128
+
+    @Volatile
+    private var server: java.net.ServerSocket? = null
+
+    @Volatile
+    private var port: Int = 0
+
+    private val store = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    @Synchronized
+    private fun ensure(): Int {
+        val current = server
+        if (current != null && !current.isClosed && port > 0) return port
+        return try {
+            val ss = java.net.ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
+            server = ss
+            port = ss.localPort
+            val worker = Thread {
+                while (!ss.isClosed) {
+                    val client = try {
+                        ss.accept()
+                    } catch (_: Throwable) {
+                        break
+                    }
+                    Thread { serve(client) }.apply { isDaemon = true }.start()
+                }
+            }
+            worker.isDaemon = true
+            worker.name = TAG
+            worker.start()
+            port
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "loopback bind failed: $e")
+            server = null
+            port = 0
+            0
+        }
+    }
+
+    /** Publish [body] under a stable [key]; returns its loopback URL, or null when unavailable. */
+    fun put(key: String, body: ByteArray): String? {
+        val p = ensure()
+        if (p <= 0) return null
+        if (store.size >= MAX_ENTRIES && !store.containsKey(sha1(key))) store.clear()
+        val token = sha1(key)
+        store[token] = body
+        return "http://127.0.0.1:$p/dash/$token.mpd"
+    }
+
+    private fun sha1(value: String): String = try {
+        val md = java.security.MessageDigest.getInstance("SHA-1")
+        md.digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    } catch (_: Throwable) {
+        Integer.toHexString(value.hashCode())
+    }
+
+    private fun serve(sock: java.net.Socket) {
+        try {
+            sock.soTimeout = 8000
+            val input = sock.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+            val requestLine = input.readLine() ?: return
+            while (true) {
+                val line = input.readLine() ?: break
+                if (line.isEmpty()) break
+            }
+            val path = requestLine.split(' ').getOrNull(1).orEmpty()
+            val token = path.substringBefore('?').substringAfterLast('/').substringBefore('.')
+            val body = store[token]
+            val out = sock.getOutputStream()
+            if (body == null) {
+                out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            } else {
+                val head = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/dash+xml\r\n" +
+                        "Content-Length: ${body.size}\r\n" +
+                        "Connection: close\r\n\r\n"
+                out.write(head.toByteArray(Charsets.ISO_8859_1))
+                out.write(body)
+            }
+            out.flush()
+        } catch (_: Throwable) {
+        } finally {
+            try {
+                sock.close()
+            } catch (_: Throwable) {
+            }
+        }
     }
 }
 

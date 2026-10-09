@@ -172,20 +172,20 @@
  {
   "iconUrl": "https://cima-cloud.com/favicon.ico",
   "apiVersion": 1,
-  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3272771,
+"repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 3280168,
   "status": 1,
   "language": "ar",
   "authors": [
-   "mehdigm4life"
+    "mehdigm4life"
   ],
   "tvTypes": [
-   "Anime",
-   "TvSeries",
-   "Movie",
-   "Cartoon"
+    "Anime",
+    "TvSeries",
+    "Movie",
+    "Cartoon"
   ],
-   "version": 25,
+   "version": 26,
    "internalName": "CimaCloud",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.cs3",
   "name": "CimaCloud",
@@ -194,20 +194,20 @@
  {
   "iconUrl": "https://www.anime-day.com/favicon.ico",
   "apiVersion": 1,
-  "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 3273251,
+"repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+  "fileSize": 3280613,
   "status": 1,
   "language": "ar",
   "authors": [
-   "mehdigm4life"
+    "mehdigm4life"
   ],
   "tvTypes": [
-   "Anime",
-   "TvSeries",
-   "Movie",
-   "Cartoon"
+    "Anime",
+    "TvSeries",
+    "Movie",
+    "Cartoon"
   ],
-   "version": 19,
+   "version": 20,
    "internalName": "AnimeDay",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.cs3",
   "name": "AnimeDay",
