@@ -100,6 +100,27 @@ class CimaCloud : MainAPI() {
         }
     }
 
+    private fun toAsciiDigits(s: String): String {
+        val sb = StringBuilder(s.length)
+        for (ch in s) {
+            sb.append(
+                when (ch) {
+                    in '\u0660'..'\u0669' -> '0' + (ch - '\u0660')
+                    in '\u06F0'..'\u06F9' -> '0' + (ch - '\u06F0')
+                    else -> ch
+                }
+            )
+        }
+        return sb.toString()
+    }
+
+    /** The API does not expose episode numbers, so parse them from the title (e.g. "الحلقة 8"). */
+    private fun episodeNumber(title: String?, fallback: Int): Int {
+        if (title.isNullOrBlank()) return fallback
+        val match = Regex("(\\d{1,4})").find(toAsciiDigits(title)) ?: return fallback
+        return match.groupValues[1].toIntOrNull()?.takeIf { it > 0 } ?: fallback
+    }
+
     private fun normalizeType(t: String?): TvType = when (t) {
         "serie", "series", "tv", "tvshow" -> TvType.TvSeries
         "anime" -> TvType.Anime
@@ -214,17 +235,19 @@ class CimaCloud : MainAPI() {
         val seasons = epsJson?.optJSONArray("seasons") ?: JSONArray()
         for (s in 0 until seasons.length()) {
             val season = seasons.optJSONObject(s) ?: continue
-            val seasonNum = season.optString("season_number", "1").toIntOrNull()
+            val seasonNum = season.optString("season_number", "1").toIntOrNull() ?: (s + 1)
             val eps = season.optJSONArray("episodes") ?: JSONArray()
             for (e in 0 until eps.length()) {
                 val ei = eps.optJSONObject(e) ?: continue
                 val epId = ei.optString("id")
                 if (epId.isEmpty()) continue
+                val title = ei.optString("title").ifEmpty { ei.optString("name") }
+                val explicit = ei.optString("episode_number", "").toIntOrNull()
                 episodes.add(
                     newEpisode("$mainUrl/episode/$epId/servers") {
-                        this.name = ei.optString("title").ifEmpty { ei.optString("name") }
+                        this.name = title
                         this.season = seasonNum
-                        this.episode = ei.optString("episode_number", "0").toIntOrNull()
+                        this.episode = explicit?.takeIf { it > 0 } ?: episodeNumber(title, e + 1)
                         this.posterUrl = ei.optString("image").ifEmpty { ei.optString("cover") }.ifEmpty { null }
                     }
                 )
@@ -293,25 +316,40 @@ class CimaCloud : MainAPI() {
             val servers = json.optJSONArray("servers") ?: JSONArray()
             for (i in 0 until servers.length()) {
                 val srv = servers.optJSONObject(i) ?: continue
-                val link = srv.optString("link").trim().replace("\\s+".toRegex(), "")
-                if (link.isEmpty() || !link.startsWith("http")) continue
+                val raw = srv.optString("link").trim().replace("\\s+".toRegex(), "")
+                if (raw.isEmpty()) continue
 
-                val referer = srv.optString("referer").ifEmpty { REFERER }
+                val link = if (raw.startsWith("http")) {
+                    raw
+                } else {
+                    REFERER.trimEnd('/') + "/" + raw.trimStart('/')
+                }
+                val referer = srv.optString("referer")
+                    .ifEmpty { srv.optString("origin") }
+                    .ifEmpty { REFERER }
+                val label = srv.optString("title")
+                    .ifEmpty { srv.optString("name") }
+                    .ifEmpty { name }
+                val quality = srv.optString("height").toIntOrNull()
+
                 if (link.contains(".m3u8")) {
-                    M3u8Helper.generateM3u8(name, link, referer).forEach {
+                    M3u8Helper.generateM3u8(label, link, referer).forEach {
                         found = true
                         callback(it)
                     }
                 } else {
-                    try {
-                        if (loadExtractor(link, referer, subtitleCallback, callback)) found = true
+                    val extracted = try {
+                        loadExtractor(link, referer, subtitleCallback, callback)
                     } catch (_: Throwable) {
+                        false
                     }
-                    if (link.contains(".mp4")) {
+                    if (extracted) found = true
+                    if (!extracted && (link.contains(".mp4") || link.contains(".mkv"))) {
                         found = true
                         callback(
-                            newExtractorLink(name, name, link, ExtractorLinkType.VIDEO) {
+                            newExtractorLink(label, label, link, ExtractorLinkType.VIDEO) {
                                 this.referer = referer
+                                if (quality != null) this.quality = quality
                             }
                         )
                     }
