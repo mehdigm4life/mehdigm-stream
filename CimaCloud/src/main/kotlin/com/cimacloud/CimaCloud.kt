@@ -371,34 +371,40 @@ class CimaCloud : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        try {
-            val text = app.get(data, headers = getHeaders(), allowRedirects = true).text
-            val json = safeJson(text) ?: return false
-            if (json.optBoolean("blocked", false)) return true
-            val servers = json.optJSONArray("servers") ?: JSONArray()
-            for (i in 0 until servers.length()) {
-                val s = servers.getJSONObject(i)
-                val link = s.optString("link")
-                if (link.isNotEmpty()) {
-                    if (link.contains(".m3u8")) {
-                        M3u8Helper.generateM3u8(this.name, link, "https://cima-cloud.com/").forEach(callback)
-                    } else if (link.contains(".mp4")) {
-                        callback.invoke(
-                            newExtractorLink(
-                                source = this.name,
-                                name = this.name,
-                                url = link,
-                                type = ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = "https://cima-cloud.com/"
-                            }
-                        )
+        val attempts = listOf(
+            getHeaders(),
+            mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json, text/plain, */*"),
+            mapOf("User-Agent" to "okhttp/4.10.0", "Accept" to "application/json")
+        )
+        for (h in attempts) {
+            try {
+                val text = app.get(data, headers = h, allowRedirects = true).text
+                val json = safeJson(text) ?: continue
+                val servers = json.optJSONArray("servers") ?: JSONArray()
+                for (i in 0 until servers.length()) {
+                    val srv = servers.getJSONObject(i)
+                    val link = srv.optString("link")
+                    if (link.isNotEmpty()) {
+                        if (link.contains(".m3u8")) {
+                            M3u8Helper.generateM3u8(this.name, link, "https://cima-cloud.com/").forEach(callback)
+                        } else if (link.contains(".mp4")) {
+                            callback.invoke(
+                                newExtractorLink(
+                                    source = this.name,
+                                    name = this.name,
+                                    url = link,
+                                    type = ExtractorLinkType.VIDEO
+                                ) {
+                                    this.referer = "https://cima-cloud.com/"
+                                }
+                            )
+                        }
                     }
                 }
+                if (servers.length() > 0) return true
+            } catch (e: Exception) {
             }
-            return true
-        } catch (e: Exception) {
-            return false
         }
+        return false
     }
 }
