@@ -1,6 +1,6 @@
 import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
 
-version = 20
+version = 21
 
 cloudstream {
     description = "AnimeDay — أنمي وكرتون مدبلج ومترجم"
