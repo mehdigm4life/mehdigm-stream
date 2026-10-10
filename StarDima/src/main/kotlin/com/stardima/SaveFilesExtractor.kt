@@ -29,9 +29,30 @@ class SaveFilesExtractor : ExtractorApi() {
         val fileCode = embedUrl.substringAfterLast("/")
         if (fileCode.isBlank()) return
 
-        // Seed the session cookie used by the /dl endpoint.
+        // Fast path: plain OkHttp, no browser needed.
+        if (resolve(embedUrl, fileCode, cookie = null, callback)) return
+
+        // Fallback: earn the Cloudflare challenge cookies in a hidden WebView,
+        // then replay the same flow with the Cookie header attached.
+        val cookie = try {
+            CfxSolver.cookiesFor(embedUrl)
+        } catch (_: Throwable) {
+            null
+        }
+        if (cookie != null) {
+            resolve(embedUrl, fileCode, cookie, callback)
+        }
+    }
+
+    private suspend fun resolve(
+        embedUrl: String,
+        fileCode: String,
+        cookie: String?,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        // Seed the session cookie used by the /dl endpoint (harmless if it 403s).
         try {
-            app.get(embedUrl, referer = referer ?: mainUrl)
+            app.get(embedUrl, headers = baseHeaders(cookie), referer = embedUrl)
         } catch (_: Throwable) {
             // continue; /dl may still answer
         }
@@ -45,8 +66,7 @@ class SaveFilesExtractor : ExtractorApi() {
                     "auto" to "1",
                     "referer" to embedUrl,
                 ),
-                headers = mapOf(
-                    "User-Agent" to BROWSER_UA,
+                headers = baseHeaders(cookie) + mapOf(
                     "Referer" to embedUrl,
                     "Origin" to mainUrl,
                 ),
@@ -54,18 +74,21 @@ class SaveFilesExtractor : ExtractorApi() {
             ).text
         } catch (e: Throwable) {
             android.util.Log.i(TAG, "SaveFiles /dl failed ${embedUrl.take(120)}: $e")
-            return
+            return false
         }
 
-        val m3u8 = M3U8_RE.find(dlText)?.groupValues?.get(1) ?: run {
-            android.util.Log.i(TAG, "SaveFiles no m3u8 for ${embedUrl.take(120)}")
-            return
-        }
-
+        val m3u8 = M3U8_RE.find(dlText)?.groupValues?.get(1) ?: return false
         for (link in M3u8Helper.generateM3u8(name, m3u8, embedUrl)) {
             callback(link)
         }
+        return true
     }
+
+    private fun baseHeaders(cookie: String?): Map<String, String> =
+        mapOf(
+            "User-Agent" to BROWSER_UA,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        ) + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap())
 
     companion object {
         private const val TAG = "StarDimaSaveFiles"

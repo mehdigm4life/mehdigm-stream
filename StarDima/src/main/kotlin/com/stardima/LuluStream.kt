@@ -1,5 +1,6 @@
 package com.stardima
 
+import android.net.Uri
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
@@ -19,6 +20,16 @@ import com.lagradost.cloudstream3.utils.M3u8Helper
  * We decode the packer payload and hand the HLS master to [M3u8Helper]. The
  * generated segment URLs already carry their own token, so playback only needs
  * the embed page as `Referer`.
+ *
+ * The hosts front their pages with a Cloudflare JS challenge for non-browser
+ * clients, so extraction is layered (each layer is guarded and may yield
+ * nothing without ever throwing):
+ *  1. plain OkHttp GET of the embed page (fast path, works when CF allows);
+ *  2. POST `op=embed` to `/dl`, which returns the same player page;
+ *  3. WebView-based challenge solve (see [CfxSolver]) then re-fetch with the
+ *     earned cookies;
+ *  4. try the sibling host. If nothing produced a stream, the source is
+ *     silently skipped so other sources keep working.
  */
 open class StarDimaLuluStreamExtractor : ExtractorApi() {
     override var name = "LuluStream"
@@ -32,27 +43,96 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
         callback: (ExtractorLink) -> Unit
     ) {
         val pageReferer = referer ?: "$mainUrl/"
+        val code = url.trim().trimEnd('/').substringAfterLast('/')
+        if (code.isBlank()) return
+
+        val givenHost = try {
+            Uri.parse(url).host?.lowercase()
+        } catch (_: Throwable) {
+            null
+        }
+        val hosts = (givenHost?.let { listOf(it) } ?: emptyList()) +
+            (SIBLING_HOSTS.filterNot { it == givenHost })
+
+        for (host in hosts.distinct()) {
+            val embed = "https://$host/e/$code"
+            if (extractFrom(embed, pageReferer, cookie = null, callback)) return
+            if (extractFromDl(host, code, embed, pageReferer, callback)) return
+            val cookie = try {
+                CfxSolver.cookiesFor(embed)
+            } catch (_: Throwable) {
+                null
+            }
+            if (cookie != null) {
+                if (extractFrom(embed, pageReferer, cookie, callback)) return
+                if (extractFromDl(host, code, embed, pageReferer, callback, cookie)) return
+            }
+        }
+    }
+
+    private suspend fun extractFrom(
+        embed: String,
+        pageReferer: String,
+        cookie: String?,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         val html = try {
-            app.get(url, referer = pageReferer, headers = PAGE_HEADERS).text
+            app.get(embed, referer = pageReferer, headers = pageHeaders(cookie)).text
         } catch (e: Throwable) {
-            android.util.Log.i(TAG, "LuluStream fetch failed ${url.take(120)}: $e")
-            return
+            android.util.Log.i(TAG, "fetch failed ${embed.take(120)}: $e")
+            return false
         }
-
-        val m3u8 = streamUrl(html) ?: run {
-            android.util.Log.i(TAG, "LuluStream no m3u8 in ${url.take(120)}")
-            return
-        }
-
+        val m3u8 = streamUrl(html) ?: return false
         for (link in M3u8Helper.generateM3u8(name, m3u8, pageReferer)) {
             callback(link)
         }
+        return true
     }
+
+    private suspend fun extractFromDl(
+        host: String,
+        code: String,
+        embed: String,
+        pageReferer: String,
+        callback: (ExtractorLink) -> Unit,
+        cookie: String? = null
+    ): Boolean {
+        val dl = try {
+            app.post(
+                "https://$host/dl",
+                data = mapOf(
+                    "op" to "embed",
+                    "file_code" to code,
+                    "auto" to "1",
+                    "referer" to embed,
+                ),
+                headers = mapOf(
+                    "User-Agent" to BROWSER_UA,
+                    "Referer" to embed,
+                    "Origin" to "https://$host",
+                ) + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap()),
+                referer = embed
+            ).text
+        } catch (e: Throwable) {
+            android.util.Log.i(TAG, "/dl failed ${embed.take(120)}: $e")
+            return false
+        }
+        val m3u8 = streamUrl(dl) ?: return false
+        for (link in M3u8Helper.generateM3u8(name, m3u8, pageReferer)) {
+            callback(link)
+        }
+        return true
+    }
+
+    private fun pageHeaders(cookie: String?): Map<String, String> =
+        PAGE_HEADERS + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap())
 
     companion object {
         private const val TAG = "StarDimaLuluStream"
         private const val BROWSER_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+        private val SIBLING_HOSTS = listOf("lulustream.com", "luluvdo.com")
 
         private val PAGE_HEADERS = mapOf(
             "User-Agent" to BROWSER_UA,
