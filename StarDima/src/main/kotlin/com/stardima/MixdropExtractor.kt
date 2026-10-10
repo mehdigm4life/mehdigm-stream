@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
 
 /**
  * Mixdrop (mixdrop.top, redirects to mxdrop.top) extractor for StarDima.
@@ -20,7 +21,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
  * small HTTP range request (the `tkhd` box inside `moov` carries the video
  * width/height as 16.16 fixed point). That height becomes the link `quality`,
  * so CloudStream labels the source "Mixdrop 480p" instead of "Mixdrop -1p".
- * If the probe fails for any reason the link is still emitted with quality -1.
+ * If the probe fails for any reason the link is still emitted, labelled just
+ * "Mixdrop".
  */
 class MixdropExtractor : ExtractorApi() {
     override var name = "Mixdrop"
@@ -54,10 +56,14 @@ class MixdropExtractor : ExtractorApi() {
         }
 
         val type = if (streamUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+        // Use the real video height as the quality so CloudStream shows e.g.
+        // "Mixdrop 720p". When it cannot be read, fall back to the "unknown"
+        // sentinel (whose label is empty) so it shows just "Mixdrop", not
+        // "Mixdrop -1p".
         val quality = if (type == ExtractorLinkType.VIDEO) {
-            resolveVideoHeight(streamUrl, pageReferer) ?: -1
+            resolveVideoHeight(streamUrl, pageReferer) ?: Qualities.Unknown.value
         } else {
-            -1
+            Qualities.Unknown.value
         }
 
         callback(
