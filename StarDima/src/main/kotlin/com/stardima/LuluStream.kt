@@ -106,6 +106,7 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
                 ),
                 headers = mapOf(
                     "User-Agent" to BROWSER_UA,
+                    "Accept-Language" to ACCEPT_LANGUAGE,
                     "Referer" to embed,
                     "Origin" to "https://$host",
                 ) + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap()),
@@ -120,41 +121,25 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
     }
 
     /**
-     * The HLS CDN (e.g. ...tnmr.org) gates every request (playlist, variants,
-     * segments, AES key) behind a browser TLS fingerprint: plain OkHttp gets
-     * nginx 403 no matter the headers (verified: identical request from
-     * Chrome 200, from curl 403). The core's M3u8Helper validation fetch uses
-     * OkHttp, so it always drops our links, while the actual exoplayer uses
-     * Cronet (browser-like TLS) and plays this CDN fine.
-     *
-     * So we ask M3u8Helper first (for variant labels when its validation
-     * works, e.g. on non-gated hosts) and fall back to emitting a direct M3U8
-     * ExtractorLink without the OkHttp validation, letting the player's Cronet
-     * fetch master/variants/segments/key.
+     * The HLS CDN (e.g. ...tnmr.org) is plain nginx that binds each master /
+     * variant token `t=..` to the exact `User-Agent` + `Accept-Language` of the
+     * request that produced it (verified: identical headers -> 200, any
+     * difference -> 403; Referer, cookies and TLS are irrelevant). The token is
+     * minted while fetching the embed page, so every request — embed, `/dl` and
+     * playback — must carry the exact same [CDN_HEADERS]. The player's own
+     * network stack (Cronet == Chromium) then fetches master, variants and
+     * segments with those headers. [M3u8Helper] fetches with the passed headers
+     * and propagates them onto the emitted links, so qualities stay enumerated.
      */
     private suspend fun emitM3u8(m3u8: String, embed: String, callback: (ExtractorLink) -> Unit): Boolean {
-        // Gated CDN (tnmr.org) rejects every non-browser TLS fingerprint. When
-        // the native Chrome-TLS client is available we relay the whole HLS tree
-        // through a loopback proxy so the player only ever talks to 127.0.0.1.
-        if (m3u8.contains(".tnmr.org")) {
-            val proxied = TnmrProxy.serve(m3u8, embed)
-            if (proxied != null) {
-                callback(
-                    ExtractorLink(
-                        source = m3u8,
-                        name = "$name (WebFetcher)",
-                        url = proxied,
-                        referer = embed,
-                        quality = -1,
-                        headers = emptyMap(),
-                        type = ExtractorLinkType.M3U8
-                    )
-                )
-                return true
-            }
-            android.util.Log.i(TAG, "proxy unavailable, using direct m3u8")
+        val ref = cdnReferer(embed)
+        val headers = CDN_HEADERS + mapOf("Referer" to ref)
+
+        val generated = try {
+            M3u8Helper.generateM3u8(name, m3u8, ref, headers = headers)
+        } catch (_: Throwable) {
+            emptyList()
         }
-        val generated = M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))
         if (generated.isNotEmpty()) {
             generated.forEach { callback(it) }
             return true
@@ -164,31 +149,34 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
                 source = m3u8,
                 name = name,
                 url = m3u8,
-                referer = embed,
+                referer = ref,
                 quality = -1,
-                headers = m3u8Headers(embed),
+                headers = headers,
                 type = ExtractorLinkType.M3U8
             )
         )
         return true
     }
 
+    /**
+     * Referer the CDN whitelists: the origin of the final embed page. The
+     * lulustream.com page 301-redirects to luluvdo.com, so the browser's
+     * Referer for the cross-site CDN fetch is `https://luluvdo.com/`.
+     */
+    private fun cdnReferer(embed: String): String {
+        val host = try {
+            Uri.parse(embed).host?.lowercase()
+        } catch (_: Throwable) {
+            null
+        }
+        return when (host) {
+            null, "luluvdo.com", "lulustream.com" -> "https://luluvdo.com/"
+            else -> "https://$host/"
+        }
+    }
+
     private fun pageHeaders(cookie: String?): Map<String, String> =
         PAGE_HEADERS + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap())
-
-    /**
-     * The HLS CDN (e.g. ...tnmr.org) answers 403 when the master playlist is
-     * requested without the embedding page as `Referer`, and the core's
-     * M3u8Helper validation fetch only sends the stream headers, not its
-     * referer. Carrying both Referer and the browser UA makes the validation
-     * (and the ordering of emitted variants) pass, and the emitted links keep
-     * the embed URL as their player referer.
-     */
-    private fun m3u8Headers(embed: String): Map<String, String> =
-        mapOf(
-            "Referer" to embed,
-            "User-Agent" to BROWSER_UA
-        )
 
     companion object {
         private const val TAG = "StarDimaLuluStream"
@@ -197,10 +185,23 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
 
         private val SIBLING_HOSTS = listOf("lulustream.com", "luluvdo.com")
 
+        /**
+         * The CDN token is an HMAC over the request's `User-Agent` and
+         * `Accept-Language`, so these two MUST be byte-identical on the request
+         * that mints the token (the embed page / `/dl`) and on every playback
+         * request (master, variants, segments). Keep this the single source.
+         */
+        private const val ACCEPT_LANGUAGE = "en-US,en;q=0.9"
+
         private val PAGE_HEADERS = mapOf(
             "User-Agent" to BROWSER_UA,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language" to "ar,en;q=0.9"
+            "Accept-Language" to ACCEPT_LANGUAGE
+        )
+
+        private val CDN_HEADERS = mapOf(
+            "User-Agent" to BROWSER_UA,
+            "Accept-Language" to ACCEPT_LANGUAGE
         )
 
         private val PACKER_EVAL_RE = Regex(

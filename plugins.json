@@ -217,20 +217,20 @@
   "iconUrl": "https://stardima.app/logo.png",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 4187131,
-  "status": 1,
-  "language": "ar",
-  "authors": [
-   "mehdigm4life"
-  ],
-  "tvTypes": [
-   "Movie",
-   "TvSeries",
-   "Anime",
-   "Cartoon",
-   "AnimeMovie"
-  ],
-  "version": 11,
+   "fileSize": 4187341,
+   "status": 1,
+   "language": "ar",
+   "authors": [
+    "mehdigm4life"
+   ],
+   "tvTypes": [
+    "Movie",
+    "TvSeries",
+    "Anime",
+    "Cartoon",
+    "AnimeMovie"
+   ],
+   "version": 12,
   "internalName": "StarDima",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/StarDima.cs3",
   "name": "StarDima (ستارديما)",
