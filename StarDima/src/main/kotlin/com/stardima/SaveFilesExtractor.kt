@@ -78,7 +78,7 @@ class SaveFilesExtractor : ExtractorApi() {
         }
 
         val m3u8 = M3U8_RE.find(dlText)?.groupValues?.get(1) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, embedUrl)) {
+        for (link in M3u8Helper.generateM3u8(name, m3u8, embedUrl, headers = m3u8Headers(embedUrl))) {
             callback(link)
         }
         return true
@@ -89,6 +89,14 @@ class SaveFilesExtractor : ExtractorApi() {
             "User-Agent" to BROWSER_UA,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         ) + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap())
+
+    /** The core's M3u8Helper validation fetch only sends stream headers, so
+     *  carry the browser UA and embedding page as Referer explicitly. */
+    private fun m3u8Headers(embedUrl: String): Map<String, String> =
+        mapOf(
+            "Referer" to embedUrl,
+            "User-Agent" to BROWSER_UA
+        )
 
     companion object {
         private const val TAG = "StarDimaSaveFiles"

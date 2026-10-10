@@ -83,7 +83,7 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
             return false
         }
         val m3u8 = streamUrl(html) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, pageReferer)) {
+        for (link in M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))) {
             callback(link)
         }
         return true
@@ -118,7 +118,7 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
             return false
         }
         val m3u8 = streamUrl(dl) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, pageReferer)) {
+        for (link in M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))) {
             callback(link)
         }
         return true
@@ -126,6 +126,20 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
 
     private fun pageHeaders(cookie: String?): Map<String, String> =
         PAGE_HEADERS + (cookie?.let { mapOf("Cookie" to it) } ?: emptyMap())
+
+    /**
+     * The HLS CDN (e.g. ...tnmr.org) answers 403 when the master playlist is
+     * requested without the embedding page as `Referer`, and the core's
+     * M3u8Helper validation fetch only sends the stream headers, not its
+     * referer. Carrying both Referer and the browser UA makes the validation
+     * (and the ordering of emitted variants) pass, and the emitted links keep
+     * the embed URL as their player referer.
+     */
+    private fun m3u8Headers(embed: String): Map<String, String> =
+        mapOf(
+            "Referer" to embed,
+            "User-Agent" to BROWSER_UA
+        )
 
     companion object {
         private const val TAG = "StarDimaLuluStream"
