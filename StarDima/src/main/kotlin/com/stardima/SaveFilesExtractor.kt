@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.M3u8Helper
 
 /**
@@ -78,9 +79,24 @@ class SaveFilesExtractor : ExtractorApi() {
         }
 
         val m3u8 = M3U8_RE.find(dlText)?.groupValues?.get(1) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, embedUrl, headers = m3u8Headers(embedUrl))) {
-            callback(link)
+        val generated = M3u8Helper.generateM3u8(name, m3u8, embedUrl, headers = m3u8Headers(embedUrl))
+        if (generated.isNotEmpty()) {
+            generated.forEach { callback(it) }
+            return true
         }
+        // Fallback: emit without the OkHttp-based M3u8Helper validation so the
+        // player (Cronet, browser-like TLS) can fetch gated HLS CDNs itself.
+        callback(
+            ExtractorLink(
+                source = m3u8,
+                name = name,
+                url = m3u8,
+                referer = embedUrl,
+                quality = -1,
+                headers = m3u8Headers(embedUrl),
+                type = ExtractorLinkType.M3U8
+            )
+        )
         return true
     }
 

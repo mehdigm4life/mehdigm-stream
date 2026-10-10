@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.JsUnpacker
 import com.lagradost.cloudstream3.utils.M3u8Helper
 
@@ -83,10 +84,7 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
             return false
         }
         val m3u8 = streamUrl(html) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))) {
-            callback(link)
-        }
-        return true
+        return emitM3u8(m3u8, embed, callback)
     }
 
     private suspend fun extractFromDl(
@@ -118,9 +116,39 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
             return false
         }
         val m3u8 = streamUrl(dl) ?: return false
-        for (link in M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))) {
-            callback(link)
+        return emitM3u8(m3u8, embed, callback)
+    }
+
+    /**
+     * The HLS CDN (e.g. ...tnmr.org) gates every request (playlist, variants,
+     * segments, AES key) behind a browser TLS fingerprint: plain OkHttp gets
+     * nginx 403 no matter the headers (verified: identical request from
+     * Chrome 200, from curl 403). The core's M3u8Helper validation fetch uses
+     * OkHttp, so it always drops our links, while the actual exoplayer uses
+     * Cronet (browser-like TLS) and plays this CDN fine.
+     *
+     * So we ask M3u8Helper first (for variant labels when its validation
+     * works, e.g. on non-gated hosts) and fall back to emitting a direct M3U8
+     * ExtractorLink without the OkHttp validation, letting the player's Cronet
+     * fetch master/variants/segments/key.
+     */
+    private suspend fun emitM3u8(m3u8: String, embed: String, callback: (ExtractorLink) -> Unit): Boolean {
+        val generated = M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))
+        if (generated.isNotEmpty()) {
+            generated.forEach { callback(it) }
+            return true
         }
+        callback(
+            ExtractorLink(
+                source = m3u8,
+                name = name,
+                url = m3u8,
+                referer = embed,
+                quality = -1,
+                headers = m3u8Headers(embed),
+                type = ExtractorLinkType.M3U8
+            )
+        )
         return true
     }
 
