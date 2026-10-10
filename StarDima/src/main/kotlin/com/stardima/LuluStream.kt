@@ -133,6 +133,27 @@ open class StarDimaLuluStreamExtractor : ExtractorApi() {
      * fetch master/variants/segments/key.
      */
     private suspend fun emitM3u8(m3u8: String, embed: String, callback: (ExtractorLink) -> Unit): Boolean {
+        // Gated CDN (tnmr.org) rejects every non-browser TLS fingerprint. When
+        // the native Chrome-TLS client is available we relay the whole HLS tree
+        // through a loopback proxy so the player only ever talks to 127.0.0.1.
+        if (m3u8.contains(".tnmr.org")) {
+            val proxied = TnmrProxy.serve(m3u8, embed)
+            if (proxied != null) {
+                callback(
+                    ExtractorLink(
+                        source = m3u8,
+                        name = "$name (WebFetcher)",
+                        url = proxied,
+                        referer = embed,
+                        quality = -1,
+                        headers = emptyMap(),
+                        type = ExtractorLinkType.M3U8
+                    )
+                )
+                return true
+            }
+            android.util.Log.i(TAG, "proxy unavailable, using direct m3u8")
+        }
         val generated = M3u8Helper.generateM3u8(name, m3u8, embed, headers = m3u8Headers(embed))
         if (generated.isNotEmpty()) {
             generated.forEach { callback(it) }

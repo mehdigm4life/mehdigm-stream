@@ -1,4 +1,6 @@
-version = 8
+import org.gradle.api.tasks.bundling.Zip
+
+version = 9
 
 cloudstream {
     description = "StarDima — ستارديما | أفلام ومسلسلات وكرتون مدبلج ومترجم."
@@ -16,4 +18,10 @@ cloudstream {
     )
 
     iconUrl = "https://stardima.app/logo.png"
+}
+
+tasks.named<Zip>("make") {
+    from("src/main/assets/native") {
+        into("native")
+    }
 }
