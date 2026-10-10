@@ -19,6 +19,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -65,6 +66,7 @@ object TnmrProxy {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sidCounter = AtomicInteger(0)
+    private val sessionReferers = ConcurrentHashMap<Int, String>()
 
     /** Tries to make the proxy available; returns a playable localhost master URL or null. */
     fun serve(masterUrl: String, referer: String?): String? {
@@ -76,7 +78,8 @@ object TnmrProxy {
             val sid = sidCounter.incrementAndGet()
             val localPrefix = "http://127.0.0.1:$port/P$sid"
             val abs = fixUpstreamHost(masterUrl, referer)
-            val body = upstreamFetch(abs, referer) ?: return null
+            val (body, ref) = upstreamFetch(abs, hlsReferers(referer)) ?: return null
+            if (ref != null) sessionReferers[sid] = ref
             val newBody = if (isPlaylist(body)) rewrite(String(body, StandardCharsets.UTF_8), abs, localPrefix) else null
             if (newBody == null) return null
             Log.i(TAG, "proxy master ready (${newBody.length} chars) on port $port")
@@ -90,6 +93,28 @@ object TnmrProxy {
     private fun fixUpstreamHost(url: String, referer: String?): String {
         return url
     }
+
+    /**
+     * Candidate Referer values for tnmr.org HLS requests. The embed page
+     * 301-redirects lulustream.com -> luluvdo.com, and Chrome then sends the
+     * origin-only Referer ("strict-origin-when-cross-origin") for this
+     * cross-site CDN fetch, e.g. `https://luluvdo.com/`. Copying that exact
+     * value (a full embed path or the wrong sibling domain is rejected with
+     * 403) is what makes the CDN accept our request.
+     */
+    private fun hlsReferers(embed: String?): List<String> =
+        buildList {
+            val host = try {
+                embed?.let { URI(it).host?.lowercase() }
+            } catch (_: Throwable) {
+                null
+            }
+            if (host == null || host == "luluvdo.com" || host == "lulustream.com") {
+                add("https://luluvdo.com/")
+            }
+            if (host != null) add("https://$host/")
+            if (!embed.isNullOrBlank()) add(embed)
+        }.distinct()
 
     // ------------------------------------------------------------------
     // Server
@@ -154,14 +179,14 @@ object TnmrProxy {
                     respond(s, 404, "text/plain", "missing u".toByteArray())
                     return
                 }
+                val sid = prefix.removePrefix("/P").toIntOrNull()
                 val upstream = try {
                     URLDecoder.decode(query, "UTF-8")
                 } catch (_: Throwable) {
                     respond(s, 400, "text/plain", "bad query".toByteArray())
                     return
                 }
-
-                val body = upstreamFetch(upstream, null)
+                val body = upstreamFetch(upstream, hlsReferers(sid?.let { sessionReferers[it] }))?.first
                 if (body == null) {
                     respond(s, 502, "text/plain", "upstream unavailable".toByteArray())
                     return
@@ -229,26 +254,40 @@ object TnmrProxy {
     // Upstream fetch through native browser-TLS client
     // ------------------------------------------------------------------
 
-    private fun upstreamFetch(url: String, referer: String?): ByteArray? =
+    /**
+     * Try each candidate Referer in order and return the first upstream byte
+     * array that answers 200 together with the Referer that won (kept per
+     * session so segment/key requests reuse it). Failures are logged with a
+     * small body snippet so the exact nginx rejection reason stays visible.
+     */
+    private fun upstreamFetch(url: String, referers: List<String>): Pair<ByteArray, String>? =
         synchronized(ALL) {
-            try {
-                val bytes = BrowserFetch.fetch(
-                    url,
-                    referer,
-                    BROWSER_UA,
-                    20,
-                    arrayOf("Accept: */*")
-                )
-                val status = BrowserFetch.lastStatus()
-                if (status == 200) bytes
-                else {
-                    Log.i(TAG, "upstream $status for ${url.take(120)} [${BrowserFetch.lastError()}]")
+            for (ref in referers) {
+                val bytes = try {
+                    // ua="" keeps curl-impersonate's own self-consistent header
+                    // set (User-Agent + sec-ch-ua + sec-fetch-*); overriding only
+                    // the UA breaks the chrome version consistency and gets 403.
+                    BrowserFetch.fetch(url, ref, "", 20, emptyArray())
+                } catch (e: Throwable) {
+                    Log.i(TAG, "fetch error for ${url.take(120)}: $e")
                     null
                 }
-            } catch (e: Throwable) {
-                Log.i(TAG, "fetch error for ${url.take(120)}: $e")
-                null
+                val status = BrowserFetch.lastStatus()
+                if (status == 200) {
+                    if (bytes != null) {
+                        Log.i(TAG, "UPSTREAM_OK[$status] ref=$ref ${url.take(100)}")
+                        return Pair(bytes, ref)
+                    }
+                    break
+                }
+                val snippet = if (bytes != null && bytes.isNotEmpty()) {
+                    String(bytes, 0, minOf(160, bytes.size), StandardCharsets.UTF_8)
+                } else {
+                    "(empty)"
+                }
+                Log.i(TAG, "upstream $status ref=$ref ${url.take(100)} body=$snippet [${BrowserFetch.lastError()}]")
             }
+            null
         }
 
     private val ALL = Any()

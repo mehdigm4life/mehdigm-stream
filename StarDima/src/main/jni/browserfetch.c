@@ -206,8 +206,12 @@ Java_com_stardima_BrowserFetch_fetch(JNIEnv *env, jclass clazz,
             }
             (*env)->DeleteLocalRef(env, hs);
         }
-        if (hdrs) p_setopt_slist(h, CURLOPT_HTTPHEADER, hdrs);
     }
+    /* Only set an explicit header list when the caller actually added one:
+     * curl-impersonate installs the full browser header set (sec-ch-ua,
+     * Accept, User-Agent, sec-fetch-*) during impersonate(), and setting
+     * CURLOPT_HTTPHEADER here would silently replace that whole list. */
+    if (hdrs) p_setopt_slist(h, CURLOPT_HTTPHEADER, hdrs);
 
     struct buf b = {0, 0, 0};
     p_setopt_ptr(h, CURLOPT_WRITEFUNCTION, write_cb);
