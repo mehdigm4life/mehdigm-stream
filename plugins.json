@@ -99,8 +99,8 @@
    "Movie",
    "Anime"
   ],
-  "version": 9,
-  "internalName": "FaselHD",
+   "version": 9,
+   "internalName": "FaselHD",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
   "name": "فاصل إعلاني (FaselHD)",
   "description": "مشاهدة وتحميل الأفلام والمسلسلات الأجنبية والآسيوية والأنمي."
@@ -217,7 +217,7 @@
   "iconUrl": "https://stardima.app/logo.png",
   "apiVersion": 1,
   "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-  "fileSize": 40859,
+  "fileSize": 4187880,
   "status": 1,
   "language": "ar",
   "authors": [
@@ -230,7 +230,7 @@
    "Cartoon",
    "AnimeMovie"
   ],
-  "version": 9,
+  "version": 10,
   "internalName": "StarDima",
   "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/StarDima.cs3",
   "name": "StarDima (ستارديما)",

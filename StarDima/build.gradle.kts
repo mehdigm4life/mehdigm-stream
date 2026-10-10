@@ -1,6 +1,6 @@
 import org.gradle.api.tasks.bundling.Zip
 
-version = 9
+version = 10
 
 cloudstream {
     description = "StarDima — ستارديما | أفلام ومسلسلات وكرتون مدبلج ومترجم."

@@ -3,7 +3,6 @@ package com.stardima
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import com.lagradost.api.getContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -71,7 +70,7 @@ object TnmrProxy {
     fun serve(masterUrl: String, referer: String?): String? {
         return try {
             if (nativeFailed.get()) return null
-            val context = getContext() as? Context ?: return null
+            val context = appContext() ?: return null
             if (!ensureNative(context)) return null
             if (!ensureServer()) return null
             val sid = sidCounter.incrementAndGet()
@@ -80,6 +79,7 @@ object TnmrProxy {
             val body = upstreamFetch(abs, referer) ?: return null
             val newBody = if (isPlaylist(body)) rewrite(String(body, StandardCharsets.UTF_8), abs, localPrefix) else null
             if (newBody == null) return null
+            Log.i(TAG, "proxy master ready (${newBody.length} chars) on port $port")
             "$localPrefix?u=${enc(abs)}"
         } catch (e: Throwable) {
             Log.i(TAG, "serve failed: $e")
@@ -355,12 +355,32 @@ object TnmrProxy {
     }
 
     private fun findAbi(): String? {
-        val supported = if (Build.VERSION.SDK_INT >= 21) Build.SUPPORTED_ABIS else emptyArray()
+        val supported = Build.SUPPORTED_ABIS ?: emptyArray()
         for (abi in supported) {
             when (abi) {
                 "arm64-v8a" -> return "arm64-v8a"
                 "armeabi-v7a" -> return "armeabi-v7a"
             }
+        }
+        return null
+    }
+
+    /**
+     * Resolve the host Application context without linking against any
+     * CloudStream API that may be absent in the installed app version.
+     */
+    private fun appContext(): Context? {
+        try {
+            val cls = Class.forName("com.lagradost.api.ContextHelper_jvmKt")
+            val r = cls.getDeclaredMethod("getContext").invoke(null)
+            if (r is Context) return r
+        } catch (_: Throwable) {
+        }
+        try {
+            val at = Class.forName("android.app.ActivityThread")
+            val r = at.getDeclaredMethod("currentApplication").invoke(null)
+            if (r is Context) return r
+        } catch (_: Throwable) {
         }
         return null
     }
