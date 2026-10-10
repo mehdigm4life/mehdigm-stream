@@ -12,6 +12,9 @@ class StarDimaPlugin : Plugin() {
         registerExtractorAPI(StarDimaLuluStreamExtractor())
         registerExtractorAPI(StarDimaLuluvdoExtractor())
         registerExtractorAPI(SaveFilesExtractor())
+        registerExtractorAPI(UqloadExtractor())
+        registerExtractorAPI(MixdropExtractor())
+        registerExtractorAPI(StreamHgExtractor())
 
         registerMainAPI(StarDima())
     }
