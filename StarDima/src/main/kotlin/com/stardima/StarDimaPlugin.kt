@@ -9,6 +9,7 @@ class StarDimaPlugin : Plugin() {
     override fun load(context: Context) {
         registerExtractorAPI(StarDimaLuluStreamExtractor())
         registerExtractorAPI(StarDimaLuluvdoExtractor())
+        registerExtractorAPI(SaveFilesExtractor())
 
         registerMainAPI(StarDima())
     }
