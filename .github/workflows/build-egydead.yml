@@ -46,24 +46,34 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           python3 - <<'PY'
-          import json, os, subprocess
+          import glob, json, os, subprocess, xml.etree.ElementTree as ET
 
-          log_text = ""
-          if os.path.exists("gradle.log"):
+          xml_report = []
+          for xml_path in sorted(glob.glob("EgyDead/build/test-results/testDebugUnitTest/*.xml")):
+              try:
+                  tree = ET.parse(xml_path)
+                  root = tree.getroot()
+                  xml_report.append(f"## Suite: {root.attrib.get('name')} (tests={root.attrib.get('tests')}, failures={root.attrib.get('failures')}, time={root.attrib.get('time')}s)")
+                  for tc in root.findall("testcase"):
+                      status = "PASS"
+                      fail_txt = ""
+                      for f in list(tc.findall("failure")) + list(tc.findall("error")):
+                          status = "FAIL"
+                          fail_txt = (f.text or f.attrib.get("message", ""))[:3000]
+                      xml_report.append(f"- `{tc.attrib.get('name')}`: **{status}** ({tc.attrib.get('time')}s)")
+                      if fail_txt:
+                          xml_report.append(f"```\n{fail_txt}\n```")
+                  sysout = root.findtext("system-out") or ""
+                  if sysout.strip():
+                      xml_report.append("### Standard Output\n```\n" + sysout[-25000:] + "\n```")
+              except Exception as ex:
+                  xml_report.append(f"XML parse error: {ex}")
+
+          log_text = "\n".join(xml_report)
+          if not log_text.strip() and os.path.exists("gradle.log"):
               with open("gradle.log", "r", encoding="utf-8", errors="replace") as fh:
                   lines = fh.readlines()
-              important = [
-                  ln for ln in lines
-                  if any(k in ln for k in [
-                      "Discovered live", "Shelf [", "Search ", "Movie loaded",
-                      "Lupin Season", "Episode fast-path", "Root Series", "Film Collection",
-                      "Fall 2 ", "Cruella 2021", "[VERIFY", "Verified playable",
-                      "e: file://", "FAILED", "FAILURE:", "> Task :EgyDead:", "BUILD "
-                  ])
-              ]
-              summary_block = "".join(important)[-28000:]
-              tail_block = "".join(lines[-250:])[-28000:]
-              log_text = "### Filtered Highlights\n```\n" + summary_block + "\n```\n\n### Log Tail\n```\n" + tail_block + "\n```"
+              log_text = "### Gradle Tail\n```\n" + "".join(lines[-250:])[-50000:] + "\n```"
 
           outcome = os.environ.get("OUTCOME", "failure")
           conclusion = "success" if outcome == "success" else "failure"
