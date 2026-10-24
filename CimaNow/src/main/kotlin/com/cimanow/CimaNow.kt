@@ -180,13 +180,30 @@ class CimaNow : MainAPI() {
         return out
     }
 
-    private fun parseCardAnchor(a: Element): SearchResponse? {
+    private fun isLogoImage(img: Element): Boolean {
+        val alt = img.attr("alt").trim()
+        if (alt.equals("logo", ignoreCase = true) || alt == "لوجو") return true
+        val imgUrl = decodeUrlReadable(extractCleanImageUrl(img).orEmpty())
+        return imgUrl.contains("لوجو") ||
+            Regex("""(?:^|[-_/])logo(?:\.[a-z0-9]+|\?|$)""", RegexOption.IGNORE_CASE).containsMatchIn(imgUrl)
+    }
+
+    private fun extractTitleFromSlug(decodedHref: String): String {
+        val slug = decodedHref.substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')
+        if (slug.isBlank()) return ""
+        return slug.replace('-', ' ').replace('_', ' ').replace(Regex("""\s+"""), " ").trim()
+    }
+
+    internal fun parseCardAnchor(a: Element): SearchResponse? {
         val rawHref = a.attr("href").trim()
         if (rawHref.isEmpty() || rawHref.startsWith("#") || rawHref.startsWith("javascript:", true)) return null
         val fullUrl = CimaNowNetwork.encodeUrl(rawHref)
         val decodedHref = decodeUrlReadable(fullUrl)
         if (decodedHref.endsWith("/home/") || decodedHref.contains("/category/") ||
             decodedHref.contains("/release-year/") || decodedHref.contains("/actor/") ||
+            decodedHref.contains("/director/") || decodedHref.contains("/escritor/") ||
+            decodedHref.contains("/translator/") || decodedHref.contains("/tag/") ||
+            decodedHref.contains("/watching/") ||
             decodedHref.contains("/news/") || decodedHref.endsWith("/news")
         ) {
             return null
@@ -194,14 +211,32 @@ class CimaNow : MainAPI() {
 
         val titleLi = a.selectFirst("li[aria-label=title]")
             ?: a.select("ul.info > li").lastOrNull { !it.hasAttr("aria-label") || it.attr("aria-label") == "title" }
-        val rawTitle = titleLi?.text()?.trim().orEmpty()
-            .ifBlank { a.attr("title").trim() }
-            .ifBlank { a.selectFirst("img[alt]")?.attr("alt")?.trim().orEmpty() }
+
+        val nonLogoAlt = a.select("img[alt]")
+            .firstOrNull { img ->
+                val alt = img.attr("alt").trim()
+                alt.isNotBlank() && !alt.equals("logo", ignoreCase = true) && alt != "لوجو" && !isLogoImage(img)
+            }
+            ?.attr("alt")
+            ?.trim()
+            .orEmpty()
+            .ifBlank {
+                a.select("img[alt]")
+                    .map { it.attr("alt").trim() }
+                    .firstOrNull { it.isNotBlank() && !it.equals("logo", ignoreCase = true) && it != "لوجو" }
+                    .orEmpty()
+            }
+
+        val rawTitle = titleLi?.text()?.trim()?.takeIf { !it.equals("logo", ignoreCase = true) }.orEmpty()
+            .ifBlank { a.attr("title").trim().takeIf { !it.equals("logo", ignoreCase = true) }.orEmpty() }
+            .ifBlank { nonLogoAlt }
+            .ifBlank { a.ownText().trim().takeIf { !it.equals("logo", ignoreCase = true) }.orEmpty() }
+            .ifBlank { extractTitleFromSlug(decodedHref) }
         if (rawTitle.isBlank()) return null
 
         val yearText = a.selectFirst("li[aria-label=year]")?.text()?.trim()
         val year = yearText?.toIntOrNull()
-            ?: Regex("""\b(19\d{2}|20\d{2})\b""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex("""\b(19\d{2}|20\d{2})\b""").findAll(rawTitle).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
 
         val cleanTitle = cleanCardTitle(titleLi, rawTitle, year)
         if (cleanTitle.isBlank()) return null
@@ -212,7 +247,11 @@ class CimaNow : MainAPI() {
         val epNum = Regex("""\d+""").find(epText)?.value?.toIntOrNull()
             ?: Regex("""(?:ح|حلقة|الحلقة)\s*(\d+)""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-        val imgEl = a.selectFirst("img[data-src], img[src]")
+        // Recommendation (`#related`) cards contain `<img alt="logo" src="...-لوجو.png">` before the real cover `<img>`
+        val imgs = a.select("img[data-src], img[data-lazy-src], img[src]")
+        val imgEl = imgs.firstOrNull { img ->
+            extractCleanImageUrl(img) != null && !isLogoImage(img)
+        } ?: imgs.lastOrNull()
         val poster = extractCleanImageUrl(imgEl)
 
         val contextStr = "$rawTitle $ribbon $tabBadges $decodedHref"
@@ -261,24 +300,40 @@ class CimaNow : MainAPI() {
     }
 
     private fun cleanCardTitle(titleLi: Element?, fallback: String, year: Int?): String {
-        val base = if (titleLi != null) {
+        if (titleLi != null) {
             val own = titleLi.ownText().trim()
             val seasonEm = titleLi.select("em").map { it.text().trim() }
                 .filter { it.startsWith("ج") || it.contains("موسم") }
                 .joinToString(" ")
-            if (own.isNotBlank()) {
+            val base = if (own.isNotBlank()) {
                 if (seasonEm.isNotBlank() && !own.contains(seasonEm)) "$own $seasonEm" else own
             } else {
                 fallback
             }
-        } else {
-            fallback
+            var cleaned = base.replace(Regex("""\s+"""), " ").trim()
+            if (year != null) {
+                val withoutYear = cleaned.replace(Regex("""\s+$year$"""), "").trim()
+                if (withoutYear.isNotBlank()) cleaned = withoutYear
+            }
+            return cleaned.ifBlank { fallback }
         }
-        var cleaned = base.replace(Regex("""\s+"""), " ").trim()
+
+        // Recommendation (`#related`) or `img[alt]` / URL-slug title cleaning:
+        // e.g. "فيلم Tenzing 2026 مترجم" -> "Tenzing", "مسلسل The Terminal List الموسم الثاني مترجم" -> "The Terminal List الموسم الثاني"
+        var cleaned = fallback.replace(Regex("""\s+"""), " ").trim()
+        cleaned = cleaned.replace(
+            Regex("""^(?:مشاهدة\s+(?:و\s*تحميل\s+)?)?(?:فيلم|مسلسل|برنامج|انمي|أنمي|مسرحية|حفل|حفلة|كرتون)\s+"""),
+            "",
+        ).trim()
+        cleaned = cleaned.replace(
+            Regex("""(?:\s+(?:مترجمة?|مدبلجة?|اون\s*لاين|أون\s*لاين|كاملة?|بجودة\s+عالية|HD))+?$""", RegexOption.IGNORE_CASE),
+            "",
+        ).trim()
         if (year != null) {
-            cleaned = cleaned.replace(Regex("""\s+$year$"""), "").trim()
+            val withoutYear = cleaned.replace(Regex("""\s+$year$"""), "").trim()
+            if (withoutYear.isNotBlank()) cleaned = withoutYear
         }
-        return cleaned.ifBlank { fallback }
+        return cleaned.ifBlank { fallback.trim() }
     }
 
     // ── 4. Rich Detail / Series / Episode `load(url)` ────────────────────────
@@ -381,8 +436,8 @@ class CimaNow : MainAPI() {
 
         var meta = extractRichMetadata(doc, finalUrl)
 
-        // If user opened a `/selary/` landing page that lacks plot/cast/trailer, enrich from first episode
-        if ((meta.plot.isNullOrBlank() || meta.actors.isEmpty()) && allEpisodes.isNotEmpty()) {
+        // If user opened a `/selary/` landing page that lacks plot/cast/trailer/recommendations, enrich from first episode
+        if ((meta.plot.isNullOrBlank() || meta.actors.isEmpty() || meta.recommendations.isEmpty()) && allEpisodes.isNotEmpty()) {
             val firstEpUrl = CimaNowCrypto.safeJsonObject(allEpisodes.first().data)?.optString("itemUrl")
                 ?: allEpisodes.first().data
             val epPage = CimaNowNetwork.getPage(firstEpUrl, finalUrl)
