@@ -541,11 +541,45 @@ object CimaNowNetwork {
 
     // ── Isolated Sticky Session Runner (for Gateway -> `/watching/` -> `core.php`) ─
 
+    data class NoRedirectResponse(
+        val code: Int,
+        val location: String?,
+        val body: String,
+    )
+
     class StickyHttpSession(
         val client: OkHttpClient,
         val cookieStore: SessionCookieStore,
         val proxySpec: String?,
     ) {
+        private val noRedirectClient: OkHttpClient by lazy {
+            client.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+        }
+
+        fun getNoRedirect(
+            url: String,
+            referer: String? = null,
+            extraHeaders: Map<String, String> = emptyMap(),
+        ): NoRedirectResponse? = runCatching {
+            val rb = Request.Builder()
+                .url(encodeUrl(url))
+                .header("User-Agent", MOBILE_UA)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+            if (!referer.isNullOrBlank()) rb.header("Referer", encodeUrl(referer))
+            for ((k, v) in extraHeaders) rb.header(k, v)
+            noRedirectClient.newCall(rb.build()).execute().use { res ->
+                NoRedirectResponse(
+                    code = res.code,
+                    location = res.header("Location")?.trim(),
+                    body = res.body?.string().orEmpty(),
+                )
+            }
+        }.getOrNull()
+
         fun getText(
             url: String,
             referer: String? = null,
@@ -607,7 +641,7 @@ object CimaNowNetwork {
             pool = ensureProxiesAvailable()
         }
 
-        for (spec in pool.take(5)) {
+        for (spec in pool.take(8)) {
             val jp = buildJavaProxy(spec) ?: continue
             val store = SessionCookieStore(false)
             val client = buildProxyOkHttpClient(jp, store, connectSec = 9L, readSec = 18L)

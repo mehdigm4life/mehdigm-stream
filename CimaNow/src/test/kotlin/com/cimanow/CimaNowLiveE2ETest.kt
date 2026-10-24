@@ -112,7 +112,7 @@ class CimaNowLiveE2ETest {
             "[E2E][Load Series Root] title='${lupinLoad.name}' seasons=$seasonsFound totalEpisodes=${lupinLoad.episodes.size} " +
                 "plotLen=${lupinLoad.plot?.length ?: 0} actors=${lupinLoad.actors?.size ?: 0}",
         )
-        assertTrue("Expected multi-season Lupin >= 3 seasons on root /selary/, got $seasonsFound", seasonsFound.size >= 3)
+        assertEquals("Expected all 4 seasons [1, 2, 3, 4] on root /selary/, got $seasonsFound", listOf(1, 2, 3, 4), seasonsFound)
         assertTrue("Expected >= 15 total episodes across Lupin seasons", lupinLoad.episodes.size >= 15)
 
         val lupinS4SelaryUrl = "https://cimanow.cc/selary/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
@@ -122,9 +122,10 @@ class CimaNowLiveE2ETest {
         println(
             "[E2E][Load Series S4] title='${lupinS4Load.name}' seasons=$s4SeasonsFound totalEpisodes=${lupinS4Load.episodes.size}",
         )
-        assertTrue("Expected multi-season Lupin >= 3 seasons on S4 /selary/, got $s4SeasonsFound", s4SeasonsFound.size >= 3)
+        assertEquals("Expected all 4 seasons [1, 2, 3, 4] on S4 /selary/, got $s4SeasonsFound", listOf(1, 2, 3, 4), s4SeasonsFound)
 
         // ── 4. Verify `loadLinks()` + Live Stream HTTP 200/206 Probing ───────
+        CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
         val movieLinks = CopyOnWriteArrayList<ExtractorLink>()
         val movieSubs = CopyOnWriteArrayList<SubtitleFile>()
         val okMovie = api.loadLinks(fall2Load.dataUrl, false, { movieSubs.add(it) }, { movieLinks.add(it) })

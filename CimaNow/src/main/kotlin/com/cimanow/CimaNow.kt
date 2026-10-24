@@ -467,10 +467,18 @@ class CimaNow : MainAPI() {
         return null
     }
 
+    private data class RawEpisodeEntry(
+        val epUrl: String,
+        val explicitSeason: Int?,
+        val epNum: Int?,
+        val epTitle: String,
+        val epPoster: String?,
+    )
+
     private fun parseEpisodesFromContainer(doc: Document, seasonNum: Int): List<Episode> {
         val anchors = doc.select("ul#eps li a[href], ul#episodes li a[href]")
         if (anchors.isEmpty()) return emptyList()
-        val out = ArrayList<Episode>(anchors.size)
+        val rawEntries = ArrayList<RawEpisodeEntry>(anchors.size)
         val seen = HashSet<String>()
 
         for (a in anchors) {
@@ -479,7 +487,7 @@ class CimaNow : MainAPI() {
             val epUrl = CimaNowNetwork.encodeUrl(rawHref)
             if (!seen.add(normalizeUrlKey(epUrl))) continue
 
-            val resolvedSeason = extractExplicitEpisodeSeason(epUrl, a) ?: seasonNum
+            val explicitSeason = extractExplicitEpisodeSeason(epUrl, a)
 
             val emNums = a.select("em").mapNotNull { it.text().trim().toIntOrNull() }
             val textAll = a.text().trim()
@@ -497,18 +505,27 @@ class CimaNow : MainAPI() {
             val epPoster = extractCleanImageUrl(thumbImg)
 
             val epTitle = if (epNum != null) "الحلقة $epNum" else textAll.ifBlank { "حلقة" }
-            val dataJson = JSONObject().put("itemUrl", epUrl).toString()
-
-            out.add(
-                newEpisode(dataJson) {
-                    this.name = epTitle
-                    this.season = resolvedSeason
-                    this.episode = epNum
-                    this.posterUrl = epPoster
-                },
-            )
+            rawEntries.add(RawEpisodeEntry(epUrl, explicitSeason, epNum, epTitle, epPoster))
         }
-        return out
+
+        // On combined root `/selary/` pages (no season switcher), Seasons 2+ have explicit `-جN-` markers
+        // while Season 1 episodes omit any season suffix even though page `<h1>` shows the latest season.
+        val explicitSeasons = rawEntries.mapNotNull { it.explicitSeason }.toSet()
+        val fallbackForUntagged = if (explicitSeasons.isNotEmpty() && 1 !in explicitSeasons && rawEntries.any { it.explicitSeason == null }) {
+            1
+        } else {
+            seasonNum
+        }
+
+        return rawEntries.map { entry ->
+            val dataJson = JSONObject().put("itemUrl", entry.epUrl).toString()
+            newEpisode(dataJson) {
+                this.name = entry.epTitle
+                this.season = entry.explicitSeason ?: fallbackForUntagged
+                this.episode = entry.epNum
+                this.posterUrl = entry.epPoster
+            }
+        }
     }
 
     private fun inferSeasonNumberFromPage(doc: Document, url: String): Int {

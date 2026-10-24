@@ -85,15 +85,27 @@ object CimaNowCrypto {
     // ── 1. `rm.freex2line.online` Gateway Unpacker & HMAC-SHA256 Signer ─────
 
     fun solveGatewayPostBody(vaultHtml: String): String? {
-        val arrMatch = Regex("""window\["[^"]+"\]\s*=\s*\[""").find(vaultHtml) ?: return null
+        val arrMatch = Regex("""(?:window\[["'][^"']+["']\]|var\s+_0x[A-Za-z0-9_]+)\s*=\s*\[""").find(vaultHtml)
+            ?: return null
         val openBracket = vaultHtml.indexOf('[', arrMatch.range.first)
         if (openBracket < 0) return null
 
-        val headSlice = vaultHtml.substring(openBracket + 1, minOf(vaultHtml.length, openBracket + 4608))
-        val b64Joined = buildString {
-            for (m in Regex(""""([A-Za-z0-9+/=]+)"""").findAll(headSlice)) {
+        val maxSliceEnd = minOf(vaultHtml.length, openBracket + 24576)
+        val closeBracket = vaultHtml.indexOf(']', openBracket + 1)
+        val reachedArrayEnd = closeBracket in (openBracket + 1)..maxSliceEnd
+        val sliceEnd = if (reachedArrayEnd) closeBracket else maxSliceEnd
+        val headSlice = vaultHtml.substring(openBracket + 1, sliceEnd)
+
+        val rawJoined = buildString {
+            for (m in Regex("""["']([A-Za-z0-9+/=]+)["']""").findAll(headSlice)) {
                 append(m.groupValues[1])
             }
+        }
+        val b64Joined = if (reachedArrayEnd) {
+            rawJoined
+        } else {
+            // Align truncated prefix down to a 4-char Base64 quantum so JVM Base64 never rejects `len % 4 == 1`
+            rawJoined.substring(0, (rawJoined.length / 4) * 4)
         }
         if (b64Joined.length < 32) return null
 
@@ -102,7 +114,7 @@ object CimaNowCrypto {
         if (raw.size < needle.size + 16) return null
 
         for (off in 0..8) {
-            for (klen in 1..10) {
+            for (klen in 1..12) {
                 val key = ByteArray(klen)
                 for (j in 0 until minOf(klen, needle.size)) {
                     key[(off + j) % klen] = (raw[off + j].toInt() xor needle[j].toInt()).toByte()
@@ -120,20 +132,23 @@ object CimaNowCrypto {
                     (raw[idx].toInt() xor key[idx % klen].toInt()).toByte()
                 }
                 val topDecoded = String(decodedBytes, Charsets.UTF_8)
-                if (!topDecoded.contains("<script>") || !topDecoded.contains("window.")) continue
+                if (!topDecoded.contains("<script", true) || !topDecoded.contains("window.")) continue
 
-                val scriptContent = Regex("""<script>([\s\S]*?)</script>""", RegexOption.IGNORE_CASE)
-                    .find(topDecoded)?.groupValues?.get(1) ?: continue
+                val scriptContent = Regex("""<script[^>]*>([\s\S]*?)</script>""", RegexOption.IGNORE_CASE)
+                    .find(topDecoded)?.groupValues?.get(1) ?: topDecoded
                 val mapBlock = Regex("""window\.map_[A-Za-z0-9_]+\s*=\s*\{([\s\S]*?)\}""")
                     .find(scriptContent)?.groupValues?.get(1) ?: continue
 
-                val chVar = Regex("""ch:\s*'([^']+)'""").find(mapBlock)?.groupValues?.get(1) ?: continue
-                val riVar = Regex("""ri:\s*'([^']+)'""").find(mapBlock)?.groupValues?.get(1) ?: continue
-                val keVar = Regex("""ke:\s*'([^']+)'""").find(mapBlock)?.groupValues?.get(1) ?: continue
-                val seVar = Regex("""se:\s*'([^']+)'""").find(mapBlock)?.groupValues?.get(1) ?: continue
+                fun mapProp(prop: String): String? =
+                    Regex("""['"]?${Regex.escape(prop)}['"]?\s*:\s*['"]([^'"]+)['"]""").find(mapBlock)?.groupValues?.get(1)
+
+                val chVar = mapProp("ch") ?: continue
+                val riVar = mapProp("ri") ?: continue
+                val keVar = mapProp("ke") ?: continue
+                val seVar = mapProp("se") ?: continue
 
                 fun lookupVal(varName: String): String? =
-                    Regex("""'${Regex.escape(varName)}'\s*:\s*'([^']+)'""").find(scriptContent)?.groupValues?.get(1)
+                    Regex("""['"]${Regex.escape(varName)}['"]\s*:\s*['"]([^'"]+)['"]""").find(scriptContent)?.groupValues?.get(1)
 
                 val ch = lookupVal(chVar) ?: continue
                 val ri = lookupVal(riVar) ?: continue
@@ -183,10 +198,25 @@ object CimaNowCrypto {
 
     fun evalMathExpr(rawExpr: String): Long {
         val preprocessed = rawExpr
-            .replace(Regex("""typeof\s+window\.decodeURIComponent\s*===\s*'function'\s*\?\s*1\s*:\s*0"""), "1")
+            .replace(Regex("""typeof\s+window\.decodeURIComponent\s*===\s*['"]function['"]\s*\?\s*1\s*:\s*0"""), "1")
             .replace(Regex("""\b_envOk\b"""), "1")
             .replace(Regex("""'([^']*)'\.indexOf\('([^']*)'\)""")) { m ->
                 m.groupValues[1].indexOf(m.groupValues[2]).toString()
+            }
+            .replace(Regex(""""([^"]*)"\.indexOf\("([^"]*)"\)""")) { m ->
+                m.groupValues[1].indexOf(m.groupValues[2]).toString()
+            }
+            .replace(Regex("""['"]([^'"]*)['"]\.length""")) { m ->
+                m.groupValues[1].length.toString()
+            }
+            .replace(Regex("""['"]([^'"]+)['"]\.charCodeAt\((\d+)\)""")) { m ->
+                val str = m.groupValues[1]
+                val idx = m.groupValues[2].toIntOrNull() ?: 0
+                (if (idx in str.indices) str[idx].code else 0).toString()
+            }
+            .replace(Regex("""parseInt\(\s*['"]([^'"]+)['"]\s*,\s*(\d+)\s*\)""")) { m ->
+                val rad = (m.groupValues[2].toIntOrNull() ?: 10).coerceIn(2, 36)
+                (m.groupValues[1].trim().toLongOrNull(rad) ?: 0L).toString()
             }
 
         val parser = MathExprParser(preprocessed)
@@ -491,44 +521,44 @@ object CimaNowCrypto {
         val s2 = runCatching { String(b64Decode(uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
             ?: return null
 
-        val sigSalt = Regex(""":\s*'(:[^']+)'""").find(s2)?.groupValues?.get(1)?.removePrefix(":") ?: "cnSig12"
+        val sigSalt = Regex(""":\s*['"](:[^'"]+)['"]""").find(s2)?.groupValues?.get(1)?.removePrefix(":") ?: "cnSig12"
         val rfMul = Regex("""i\s*\*\s*(\d+)\s*\+\s*_tkM2""").find(s2)?.groupValues?.get(1)?.toIntOrNull() ?: 11
 
-        val tValExpr = Regex("""_t\.style\.cssText\s*=\s*'[^']*'\s*\+\s*String\(([\s\S]*?)\)\s*\+\s*'px!important""")
+        val tValExpr = Regex("""_t\.style\.cssText\s*=\s*['"][^'"]*['"]\s*\+\s*String\(([\s\S]*?)\)\s*\+\s*['"]px!important""")
             .find(s2)?.groupValues?.get(1) ?: return null
         val tVal = evalMathExpr(tValExpr)
 
-        val fxHtml = Regex("""_fx\.innerHTML\s*=\s*"([\s\S]*?)";_host\.appendChild""")
+        val fxHtml = Regex("""_fx\.innerHTML\s*=\s*"([\s\S]*?)";\s*_host\.appendChild""")
             .find(s2)?.groupValues?.get(1)?.replace("\\'", "'") ?: return null
         val estFlex = computeFlexHeight(fxHtml)
 
-        val listTailExpr = Regex("""_listA\s*=\s*\[_tVal,\s*_flexVal,\s*([\s\S]*?)\];for""")
+        val listTailExpr = Regex("""_listA\s*=\s*\[_tVal,\s*_flexVal,\s*([\s\S]*?)\];\s*for""")
             .find(s2)?.groupValues?.get(1) ?: return null
         val listTailSum = evalMathListSum(listTailExpr)
 
-        val initSB = evalMathExpr(Regex("""var _sB\s*=\s*([\s\S]*?),\s*_maxR\s*=""").find(s2)?.groupValues?.get(1) ?: return null)
+        val initSB = evalMathExpr(Regex("""var\s+_sB\s*=\s*([\s\S]*?),\s*_maxR\s*=""").find(s2)?.groupValues?.get(1) ?: return null)
         val maxR = evalMathExpr(Regex(""",\s*_maxR\s*=\s*([\s\S]*?),\s*_cm\s*=""").find(s2)?.groupValues?.get(1) ?: return null)
         val cm = evalMathExpr(Regex(""",\s*_cm\s*=\s*([\s\S]*?),\s*_ca\s*=""").find(s2)?.groupValues?.get(1) ?: return null)
-        val ca = evalMathExpr(Regex(""",\s*_ca\s*=\s*([\s\S]*?);for\(var _st""").find(s2)?.groupValues?.get(1) ?: return null)
+        val ca = evalMathExpr(Regex(""",\s*_ca\s*=\s*([\s\S]*?);\s*for\s*\(var\s+_st""").find(s2)?.groupValues?.get(1) ?: return null)
 
-        val keyAffix = Regex("""var\s+[A-Za-z0-9_$]+\s*=\s*'([^']*)'\s*\+\s*String\(_kv\)\s*\+\s*'([^']*)'""")
+        val keyAffix = Regex("""var\s+[A-Za-z0-9_$]+\s*=\s*['"]([^'"]*)['"]\s*\+\s*String\(_kv\)\s*\+\s*['"]([^'"]*)['"]""")
             .find(s2)
         val keyPrefix = keyAffix?.groupValues?.get(1) ?: "f"
         val keySuffix = keyAffix?.groupValues?.get(2) ?: "p"
 
         val stpP = evalMathExpr(
-            Regex("""_uninterleave\(_rawP,\s*([\s\S]*?)\);var _dFn""").find(s2)?.groupValues?.get(1) ?: return null,
+            Regex("""_uninterleave\(_rawP,\s*([\s\S]*?)\);\s*var\s+_dFn""").find(s2)?.groupValues?.get(1) ?: return null,
         ).toInt()
         val decBytes = runCatching { b64Decode(uninterleave(rawP, stpP)) }.getOrNull() ?: return null
         if (decBytes.isEmpty()) return null
 
-        val tw = evalMathExpr(Regex("""var _tw\s*=\s*([\s\S]*?),\s*_sb\s*=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
+        val tw = evalMathExpr(Regex("""var\s+_tw\s*=\s*([\s\S]*?),\s*_sb\s*=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
         val sb = evalMathExpr(Regex(""",\s*_sb\s*=\s*([\s\S]*?),\s*_ks\s*=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
         val ks = evalMathExpr(Regex(""",\s*_ks\s*=\s*([\s\S]*?),\s*_jm\s*=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
-        val jm = evalMathExpr(Regex(""",\s*_jm\s*=\s*([\s\S]*?);var _S=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
+        val jm = evalMathExpr(Regex(""",\s*_jm\s*=\s*([\s\S]*?);\s*var\s+_S\s*=""").find(s2)?.groupValues?.get(1) ?: return null).toInt()
 
         val subPrefix = evalMathExpr(
-            Regex("""_x[0-9a-f]+\s*=\s*_x[0-9a-f]+\.substring\(([\s\S]*?)\);try\{if\(pEl""", RegexOption.IGNORE_CASE)
+            Regex("""_x[0-9a-f]+\s*=\s*_x[0-9a-f]+\.substring\(([\s\S]*?)\);\s*try\s*\{\s*if\s*\(pEl""", RegexOption.IGNORE_CASE)
                 .find(s2)?.groupValues?.get(1) ?: return null,
         ).toInt()
 

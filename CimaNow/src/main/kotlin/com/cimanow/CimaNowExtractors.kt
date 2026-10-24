@@ -68,6 +68,9 @@ object CimaNowExtractors {
         "0123456789abcdef".toByteArray(Charsets.UTF_8),
     )
 
+    @Volatile
+    internal var debugLogger: ((String) -> Unit)? = null
+
     private val byseAttestCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
 
     private data class CandidateTask(
@@ -159,54 +162,123 @@ object CimaNowExtractors {
 
     // ── Step 1: Unlock `rm.freex2line.online` -> `/watching/` -> `core.php` ──
 
+    private fun unwrapHrefLiLocation(loc: String?, origin: String): String? {
+        val raw = loc?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val stripped = raw
+            .removePrefix("https://href.li/?")
+            .removePrefix("http://href.li/?")
+            .trim()
+        return when {
+            stripped.startsWith("http://") || stripped.startsWith("https://") -> stripped
+            stripped.startsWith("//") -> "https:$stripped"
+            stripped.startsWith("/") -> "$origin$stripped"
+            else -> null
+        }
+    }
+
     private suspend fun unlockWatchingPage(itemUrl: String, cachedShineUrl: String?): UnlockedSources? {
         return CimaNowNetwork.withStickySession { session ->
+            val pTag = session.proxySpec ?: "direct"
             var shineUrl = cachedShineUrl
             if (shineUrl.isNullOrBlank()) {
-                val (code, html) = session.getText(itemUrl, "${CimaNowNetwork.mainUrl}/home/") ?: return@withStickySession null
-                if (CimaNowNetwork.isCimaBlocked(code, html)) return@withStickySession null
+                val (code, html) = session.getText(itemUrl, "${CimaNowNetwork.mainUrl}/home/") ?: run {
+                    debugLogger?.invoke("[$pTag] detail fetch failed")
+                    return@withStickySession null
+                }
+                if (CimaNowNetwork.isCimaBlocked(code, html)) {
+                    debugLogger?.invoke("[$pTag] detail blocked code=$code")
+                    return@withStickySession null
+                }
                 shineUrl = extractShineUrlFromDetailHtml(html)
             }
-            val gwEntry = shineUrl?.takeIf { it.startsWith("http") } ?: return@withStickySession null
+            val gwEntry = shineUrl?.takeIf { it.startsWith("http") } ?: run {
+                debugLogger?.invoke("[$pTag] missing shineUrl")
+                return@withStickySession null
+            }
             val gwOrigin = originOf(gwEntry)
 
-            // 1. Prime gateway session (`PHPSESSID`)
-            session.getText(gwEntry, itemUrl) ?: return@withStickySession null
-            // 2. Intermediate redirect hop (`redirectingfree/`)
-            session.getText("$gwOrigin/redirectingfree/") ?: return@withStickySession null
-            // 3. Vault page (`2020/02/blog-post.html/`)
-            val (vCode, vaultHtml) = session.getText(
-                "$gwOrigin/2020/02/blog-post.html/",
-                "$gwOrigin/redirectingfree/",
-            ) ?: return@withStickySession null
-            if (vCode !in 200..299 || vaultHtml.length < 512) return@withStickySession null
+            // 1. Prime gateway session (`PHPSESSID`) without following `Location: https://href.li/?...`
+            val hop1 = session.getNoRedirect(gwEntry, itemUrl) ?: run {
+                debugLogger?.invoke("[$pTag] hop1 null on $gwEntry")
+                return@withStickySession null
+            }
+            if (hop1.code !in 200..399) {
+                debugLogger?.invoke("[$pTag] hop1 bad code=${hop1.code}")
+                return@withStickySession null
+            }
+            val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
+                ?.takeIf { originOf(it) == gwOrigin }
+                ?: "$gwOrigin/redirectingfree/"
 
-            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withStickySession null
+            // 2. Intermediate redirect hop (`redirectingfree/`) without touching `href.li`
+            val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: run {
+                debugLogger?.invoke("[$pTag] hop2 null on $hop2Url")
+                return@withStickySession null
+            }
+            if (hop2.code !in 200..399) {
+                debugLogger?.invoke("[$pTag] hop2 bad code=${hop2.code}")
+                return@withStickySession null
+            }
+            val vaultUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
+                ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
+                ?: "$gwOrigin/2020/02/blog-post.html/"
+
+            // 3. Vault page (`2020/02/blog-post.html/`)
+            val (vCode, vaultHtml) = session.getText(vaultUrl, hop2Url) ?: run {
+                debugLogger?.invoke("[$pTag] hop3 null on $vaultUrl")
+                return@withStickySession null
+            }
+            if (vCode !in 200..299 || vaultHtml.length < 512) {
+                debugLogger?.invoke("[$pTag] hop3 bad code=$vCode len=${vaultHtml.length}")
+                return@withStickySession null
+            }
+
+            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: run {
+                debugLogger?.invoke("[$pTag] solveGatewayPostBody returned null (vaultLen=${vaultHtml.length})")
+                return@withStickySession null
+            }
 
             // 4. Server-enforced 10s countdown before minting `?token=<64hex>`
-            delay(10_350L)
+            delay(10_400L)
 
+            val getLinkEndpoint = "${vaultUrl.trimEnd('/')}/get-link.php"
             val (mCode, mintedBody) = session.postForm(
-                url = "$gwOrigin/2020/02/blog-post.html/get-link.php",
+                url = getLinkEndpoint,
                 rawFormBody = postBody,
-                referer = "$gwOrigin/2020/02/blog-post.html/",
+                referer = vaultUrl,
                 origin = gwOrigin,
                 extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-            ) ?: return@withStickySession null
+            ) ?: run {
+                debugLogger?.invoke("[$pTag] get-link.php post null")
+                return@withStickySession null
+            }
 
             val mintedUrl = mintedBody.trim()
             if (mCode !in 200..299 || !mintedUrl.startsWith("http") || !mintedUrl.contains("token=")) {
+                debugLogger?.invoke("[$pTag] get-link.php rejected code=$mCode body='${mintedUrl.take(120)}'")
                 return@withStickySession null
             }
 
             // 5. Fetch `/watching/?token=...` with mandatory gateway Referer
             val (wCode, watchHtml) = session.getText(
                 url = mintedUrl,
-                referer = "$gwOrigin/2020/02/blog-post.html/",
-            ) ?: return@withStickySession null
-            if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) return@withStickySession null
+                referer = vaultUrl,
+            ) ?: run {
+                debugLogger?.invoke("[$pTag] watching fetch null")
+                return@withStickySession null
+            }
+            if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) {
+                debugLogger?.invoke("[$pTag] watching blocked code=$wCode len=${watchHtml.length}")
+                return@withStickySession null
+            }
 
-            val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml) ?: return@withStickySession null
+            val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml) ?: run {
+                debugLogger?.invoke("[$pTag] decodeWatchingVault null (watchLen=${watchHtml.length} hasP=${watchHtml.contains("id=\"p_") || watchHtml.contains("id='p_")})")
+                return@withStickySession null
+            }
+            debugLogger?.invoke(
+                "[$pTag] unlocked watching! initial=${decoded.initialEmbedUrl != null} tabs=${decoded.serverTabs.size} downloads=${decoded.downloads.size} coreTokLen=${decoded.coreToken.length}",
+            )
 
             val watchOrigin = originOf(mintedUrl)
             val embeds = ArrayList<Pair<String, String>>()
@@ -456,16 +528,17 @@ object CimaNowExtractors {
     ) = withContext(Dispatchers.IO) {
         val cookieStore = CimaNowNetwork.SessionCookieStore(false)
         val client = CimaNowNetwork.newIsolatedDirectClient(cookieStore, followRedirects = true, timeoutSec = 14L)
+        val noRedirClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
         val origin = originOf(jetGatewayUrl)
 
-        // 1. Prime `PHPSESSID` via `Jetloadon4/?link=<b64>`
+        // 1. Prime `PHPSESSID` via `Jetloadon4/?link=<b64>` without following `Location: https://href.li/?...`
         val step1Ok = runCatching {
             val req = Request.Builder()
                 .url(CimaNowNetwork.encodeUrl(jetGatewayUrl))
                 .header("User-Agent", DESKTOP_UA)
                 .header("Referer", "${CimaNowNetwork.mainUrl}/")
                 .build()
-            client.newCall(req).execute().use { it.code in 200..399 }
+            noRedirClient.newCall(req).execute().use { it.code in 200..399 }
         }.getOrDefault(false)
         if (!step1Ok) return@withContext
 
