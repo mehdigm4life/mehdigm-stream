@@ -148,8 +148,14 @@ object CimaNowExtractors {
                 }
                 val jetJobs = jetloadTasks.take(5).map { task ->
                     async(Dispatchers.IO) {
-                        withTimeoutOrNull(22_000L) {
-                            extractJetload(task.url, task.qualityHint, dedupCallback)
+                        try {
+                            withTimeoutOrNull(22_000L) {
+                                extractJetload(task.url, task.qualityHint, dedupCallback)
+                            }
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Throwable) {
+                            // Isolate individual Jetload failure
                         }
                     }
                 }
