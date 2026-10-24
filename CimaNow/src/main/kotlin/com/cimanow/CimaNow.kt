@@ -68,13 +68,16 @@ class CimaNow : MainAPI() {
         "category/افلام-هندية" to "أفلام هندية",
         "category/افلام-انيميشن" to "أفلام أنيميشن",
         "category/افلام-مارفل" to "أفلام مارفل",
+        "category/افلام-نتفليكس" to "أفلام نتفليكس",
         "category/مسلسلات-اجنبية" to "مسلسلات أجنبية",
         "category/مسلسلات-عربية" to "مسلسلات عربية",
         "category/مسلسلات-تركية" to "مسلسلات تركية",
         "category/مسلسلات-كورية" to "مسلسلات كورية",
         "category/مسلسلات-انيميشن" to "مسلسلات أنيميشن",
-        "category/رمضان" to "مسلسلات رمضان",
-        "category/نتفليكس" to "إنتاجات نتفليكس",
+        "category/مسلسلات-نتفليكس" to "مسلسلات نتفليكس",
+        "category/رمضان-2026" to "مسلسلات رمضان 2026",
+        "category/رمضان-2025" to "مسلسلات رمضان 2025",
+        "category/رمضان" to "أرشيف مسلسلات رمضان",
         "category/البرامج-التلفزيونية" to "البرامج التلفزيونية",
         "category/مسرحيات" to "مسرحيات",
         "category/حفلات" to "حفلات",
@@ -86,10 +89,16 @@ class CimaNow : MainAPI() {
 
     // ── 1. Main Page Catalogs & Pagination ───────────────────────────────────
 
+    private val singlePageHubSlugs = setOf(
+        "الاكثر-مشاهدة",
+        "category/رمضان",
+        "category/اطفال",
+    )
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val slug = request.data.trim('/')
-        val isSinglePageTrending = slug.contains("الاكثر-مشاهدة")
-        if (page > 1 && isSinglePageTrending) {
+        val isKnownSinglePage = slug in singlePageHubSlugs || slug.contains("الاكثر-مشاهدة")
+        if (page > 1 && isKnownSinglePage) {
             return newHomePageResponse(request.name, emptyList(), hasNext = false)
         }
 
@@ -102,14 +111,21 @@ class CimaNow : MainAPI() {
         val pageRes = CimaNowNetwork.getPage(targetUrl, "$mainUrl/home/")
             ?: return newHomePageResponse(request.name, emptyList(), hasNext = false)
 
+        val isPaginatedArchive = pageRes.doc.selectFirst("section[aria-label=posts]") != null ||
+            pageRes.doc.selectFirst("ul[aria-label=pagination]") != null
+
+        if (page > 1 && !isPaginatedArchive) {
+            return newHomePageResponse(request.name, emptyList(), hasNext = false)
+        }
+
         val items = parseListingCards(pageRes.doc)
-        val hasNext = if (isSinglePageTrending) {
+        val hasNext = if (isKnownSinglePage || !isPaginatedArchive) {
             false
         } else {
             val nextMarker = "/page/${page + 1}/"
             pageRes.doc.select("ul[aria-label=pagination] li a[href]").any { a ->
                 a.attr("href").contains(nextMarker)
-            } || items.size >= 16
+            }
         }
 
         return newHomePageResponse(request.name, items, hasNext = hasNext)
@@ -152,6 +168,7 @@ class CimaNow : MainAPI() {
 
         val anchors = doc.select("section[aria-label=posts] article[aria-label=post] > a[href]")
             .ifEmpty { doc.select("article[aria-label=post] > a[href]") }
+            .ifEmpty { doc.select("section article > a[href], div.owl-carousel article > a[href], article > a[href]") }
 
         for (a in anchors) {
             val item = parseCardAnchor(a) ?: continue
@@ -168,13 +185,17 @@ class CimaNow : MainAPI() {
         val fullUrl = CimaNowNetwork.encodeUrl(rawHref)
         val decodedHref = decodeUrlReadable(fullUrl)
         if (decodedHref.endsWith("/home/") || decodedHref.contains("/category/") ||
-            decodedHref.contains("/release-year/") || decodedHref.contains("/actor/")
+            decodedHref.contains("/release-year/") || decodedHref.contains("/actor/") ||
+            decodedHref.contains("/news/") || decodedHref.endsWith("/news")
         ) {
             return null
         }
 
         val titleLi = a.selectFirst("li[aria-label=title]")
-        val rawTitle = titleLi?.text()?.trim().orEmpty().ifBlank { a.attr("title").trim() }
+            ?: a.select("ul.info > li").lastOrNull { !it.hasAttr("aria-label") || it.attr("aria-label") == "title" }
+        val rawTitle = titleLi?.text()?.trim().orEmpty()
+            .ifBlank { a.attr("title").trim() }
+            .ifBlank { a.selectFirst("img[alt]")?.attr("alt")?.trim().orEmpty() }
         if (rawTitle.isBlank()) return null
 
         val yearText = a.selectFirst("li[aria-label=year]")?.text()?.trim()

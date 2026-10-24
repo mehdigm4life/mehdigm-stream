@@ -27,7 +27,8 @@ class CimaNowLiveE2ETest {
                 "(((Math.abs(-9)) * 54) + (('abZ'.indexOf('Z') + (-2)))) + " +
                 "((Math.min(83, 106)) ^ (Math.max(16, 40))) + " +
                 "((Math.min(571, 595)) * (typeof window.decodeURIComponent === 'function' ? 1 : 0))) / 3)"
-        assertEquals(615L, CimaNowCrypto.evalMathExpr(expr))
+        assertEquals(610L, CimaNowCrypto.evalMathExpr(expr))
+        assertEquals(280L, CimaNowCrypto.evalMathExpr("0xFF + 0b1010 + 0o17"))
 
         // 2. FNV-1a base36 `core.php` signature
         val sig = CimaNowCrypto.calcCoreSig(
@@ -57,8 +58,11 @@ class CimaNowLiveE2ETest {
             MainPageRequest("أفلام أجنبية", "category/افلام-اجنبية", false),
             MainPageRequest("أفلام عربية", "category/افلام-عربية", false),
             MainPageRequest("مسلسلات أجنبية", "category/مسلسلات-اجنبية", false),
-            MainPageRequest("مسلسلات رمضان", "category/رمضان", false),
+            MainPageRequest("مسلسلات رمضان 2026", "category/رمضان-2026", false),
+            MainPageRequest("أرشيف مسلسلات رمضان", "category/رمضان", false),
+            MainPageRequest("مسلسلات نتفليكس", "category/مسلسلات-نتفليكس", false),
             MainPageRequest("مسلسلات أنيميشن", "category/مسلسلات-انيميشن", false),
+            MainPageRequest("أطفال", "category/اطفال", false),
         )
 
         for (req in shelvesToCheck) {

@@ -386,6 +386,24 @@ object CimaNowCrypto {
                     else -> args[0]
                 }
             }
+            if (pos + 2 < s.length && s[pos] == '0' && (s[pos + 1] == 'x' || s[pos + 1] == 'X')) {
+                pos += 2
+                val hexStart = pos
+                while (pos < s.length && (s[pos].isDigit() || s[pos] in 'a'..'f' || s[pos] in 'A'..'F')) pos++
+                return s.substring(hexStart, pos).toLongOrNull(16)?.toDouble() ?: 0.0
+            }
+            if (pos + 2 < s.length && s[pos] == '0' && (s[pos + 1] == 'b' || s[pos + 1] == 'B')) {
+                pos += 2
+                val binStart = pos
+                while (pos < s.length && (s[pos] == '0' || s[pos] == '1')) pos++
+                return s.substring(binStart, pos).toLongOrNull(2)?.toDouble() ?: 0.0
+            }
+            if (pos + 2 < s.length && s[pos] == '0' && (s[pos + 1] == 'o' || s[pos + 1] == 'O')) {
+                pos += 2
+                val octStart = pos
+                while (pos < s.length && s[pos] in '0'..'7') pos++
+                return s.substring(octStart, pos).toLongOrNull(8)?.toDouble() ?: 0.0
+            }
             val numStart = pos
             while (pos < s.length && (s[pos].isDigit() || s[pos] == '.')) pos++
             val token = s.substring(numStart, pos)
