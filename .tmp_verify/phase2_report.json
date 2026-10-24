@@ -1,0 +1,739 @@
+{
+  "timestamp": 1792836424,
+  "config": {
+    "data": [
+      {
+        "cimacloud": "https://www.cima-cloud.com",
+        "cloudday": "https://1654865.xyz",
+        "splash_screen": "",
+        "update_title": "يتوفر تحديث جديد لي سيما كلاود والذي يوفر العديد من الميزات الجديدة *ملاحظة: - التحميل من الموقع الرسمي",
+        "update": "",
+        "ads_link": "https://t.me/cimacloudcontent",
+        "ads_image": "8",
+        "btn_txt": "تابعنا",
+        "txt_ads": "اشترك في قناتنا على تيليجرام لتصلك آخر التحديثات، الإضافات الجديدة، والتنبيهات المهمة أولاً بأول.",
+        "alert_text": "انضم إلينا على تيليجرام",
+        "show_dialog": "show",
+        "animeday": "https://anime-day.com",
+        "telegram": "https://t.me/cimacloudcontent",
+        "youtube": "https://youtube.com/@cimacloudcontent",
+        "email": "cimacloudcontact@gmail.com",
+        "appkey_applovin": "674fe61dc1806951",
+        "checkadsvideo": "",
+        "ad_interval_minutes": "15",
+        "packageName": "com.video.power",
+        "action_video": "video.power",
+        "name_video": "Video Power",
+        "check_video": "2",
+        "check_ads": "",
+        "tv_free_watch": "free",
+        "check_install_source": "show",
+        "no_play_store_internal": "show",
+        "extractorUrl": "https://cloud-day.online/cimacloud/extractor.php",
+        "checkads_noplay": "show",
+        "checkadsvideo_noplay": "show",
+        "htmlExtractorUrl": "https://cloud-day.online/cimacloud/html_extractor.php",
+        "checkads_ep_nav": "",
+        "advancedExtractorUrl": "https://cloud-day.online/cimacloud/advanced_extractor.php",
+        "original_app_url": "https://www.cima-cloud.com",
+        "unity_game_id": "5850762",
+        "unity_placement_id": "Interstitial_Android",
+        "unity_test_mode": "",
+        "ads_priority": "applovin",
+        "check_applovin": "",
+        "check_unity": "",
+        "player_version_code": "28",
+        "player_force_update": ""
+      }
+    ]
+  },
+  "auth_variant_check": {
+    "clean_28549120": 200,
+    "legacy_err": 200
+  },
+  "home_summary": [
+    {
+      "section_id": 1,
+      "section_name": "سلايدر",
+      "section_type": "slider",
+      "count": 10,
+      "sample_types": [
+        "movie",
+        "serie"
+      ]
+    },
+    {
+      "section_id": 2,
+      "section_name": "اخر الحلقات",
+      "section_type": "episodes",
+      "count": 20,
+      "sample_types": [
+        "episode"
+      ]
+    },
+    {
+      "section_id": 3,
+      "section_name": "احدث المسلسلات ",
+      "section_type": "series",
+      "count": 10,
+      "sample_types": [
+        "serie"
+      ]
+    },
+    {
+      "section_id": 4,
+      "section_name": "احدث الأفلام ",
+      "section_type": "movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    },
+    {
+      "section_id": 5,
+      "section_name": "احدث الأعمال التركية",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    },
+    {
+      "section_id": 6,
+      "section_name": "احدث الأنميات والكرتون",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie",
+        "serie"
+      ]
+    },
+    {
+      "section_id": 7,
+      "section_name": "احدث الأعمال الهندية",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    },
+    {
+      "section_id": 8,
+      "section_name": "احدث الأعمال الكورية",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    },
+    {
+      "section_id": 9,
+      "section_name": "احدث الأعمال الأجنبية",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    },
+    {
+      "section_id": 10,
+      "section_name": "احدث الأعمال الآسيوية",
+      "section_type": "series_movies",
+      "count": 10,
+      "sample_types": [
+        "movie"
+      ]
+    }
+  ],
+  "phony_in_home": {
+    "section": "احدث المسلسلات ",
+    "item": {
+      "id": "12827",
+      "name": "Phony",
+      "poster": "https://image.tmdb.org/t/p/w500/iCyQc8cSSHkxUHbkvzbC77owALt.jpg",
+      "type": "serie",
+      "status": "مستمر",
+      "release_date": "2026-10-20",
+      "vote_average": "7.2",
+      "categories": [
+        {
+          "id": 3,
+          "name": "مسلسلات أجنبية"
+        }
+      ],
+      "genres": [
+        {
+          "id": 1,
+          "name": "كوميديا"
+        },
+        {
+          "id": 2,
+          "name": "دراما"
+        },
+        {
+          "id": 7,
+          "name": "غموض"
+        }
+      ],
+      "is_favorite": false
+    }
+  },
+  "star_one_in_home": {
+    "section": "احدث الأفلام ",
+    "item": {
+      "id": "27295",
+      "name": "Star One",
+      "poster": "https://image.tmdb.org/t/p/w500/mLAxffrOZkghXrmf98MZniy5prL.jpg",
+      "type": "movie",
+      "status": "مستمر",
+      "release_date": "2026-07-03",
+      "vote_average": "0.0",
+      "categories": [
+        {
+          "id": 4,
+          "name": "أفلام أجنبية"
+        }
+      ],
+      "genres": [
+        {
+          "id": 5,
+          "name": "حركة"
+        },
+        {
+          "id": 12,
+          "name": "خيال علمي"
+        }
+      ],
+      "is_favorite": false
+    }
+  },
+  "targets": {
+    "star_one_movie_27295": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "detail_no_token": 200,
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "phony_series_12827": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "detail_no_token": 200,
+      "episodes": {
+        "status": true,
+        "auth": false,
+        "version": "1.3",
+        "force_update": 0,
+        "name": false,
+        "email": false,
+        "photo_url": false,
+        "is_subscribed": false,
+        "created_date": false,
+        "data": [],
+        "seasons": [
+          {
+            "id": "1",
+            "season_number": "1",
+            "title": "الموسم 1",
+            "episodes": [
+              {
+                "id": "370096",
+                "title": "الحلقة 1",
+                "name": "Phony",
+                "cover": "https://image.tmdb.org/t/p/w500/iCyQc8cSSHkxUHbkvzbC77owALt.jpg",
+                "image": "https://image.tmdb.org/t/p/w780/g2r69hj61xfhMxnrYm8QyMs0gs1.jpg",
+                "filer": false,
+                "watched": false
+              },
+              {
+                "id": "370097",
+                "title": "الحلقة 2",
+                "name": "Phony",
+                "cover": "https://image.tmdb.org/t/p/w500/iCyQc8cSSHkxUHbkvzbC77owALt.jpg",
+                "image": "https://image.tmdb.org/t/p/w780/g2r69hj61xfhMxnrYm8QyMs0gs1.jpg",
+                "filer": false,
+                "watched": false
+              }
+            ]
+          }
+        ]
+      },
+      "ep1_370096_detail": {
+        "status": 200,
+        "encrypted_len": 624,
+        "raw_preview": "{\"status\":true,\"auth\":false,\"version\":\"1.3\",\"force_update\":0,\"name\":false,\"email\":false,\"photo_url\":false,\"is_subscribed\":false,\"created_date\":false,\"data\":[],\"",
+        "decrypt_error": null,
+        "json": {
+          "status": true,
+          "auth": false,
+          "version": "1.3",
+          "force_update": 0,
+          "name": false,
+          "email": false,
+          "photo_url": false,
+          "is_subscribed": false,
+          "created_date": false,
+          "data": [],
+          "episode": {
+            "id": "370096",
+            "type": "episode",
+            "name": "الحلقة 1",
+            "overview": "",
+            "air_date": "",
+            "year": null,
+            "runtime": null,
+            "vote_average": "0.0",
+            "views": 0,
+            "tmdb_id": null,
+            "poster": "",
+            "backdrop": "",
+            "season_number": 1,
+            "episode_number": 1,
+            "prev": false,
+            "next": "370097",
+            "series": {
+              "id": "12827",
+              "name": "Phony",
+              "poster": "https://image.tmdb.org/t/p/w500/iCyQc8cSSHkxUHbkvzbC77owALt.jpg",
+              "backdrop": "https://image.tmdb.org/t/p/w780/g2r69hj61xfhMxnrYm8QyMs0gs1.jpg",
+              "is_favorite": false
+            }
+          }
+        }
+      },
+      "ep1_370096_servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "ep2_370097_servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "anime_series_frieren_12819": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "ep1_369392_servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "cartoon_series_kaijudo_12830": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "ep1_370424_servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "anime_movie_hxh_27291": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "anime_movie_bluelock_27206": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "cartoon_movie_toystory5_27040": {
+      "detail": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      },
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "extra_movie_27270": {
+      "name": "معجزة في الزنزانة 7 مدبلج",
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "extra_movie_27288": {
+      "name": "Udaipur Files: Kanhaiya Lal Tailor Murder",
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    },
+    "extra_movie_27254": {
+      "name": "The Last Song You Left Behind",
+      "servers": {
+        "status": 200,
+        "encrypted_len": 41,
+        "raw_preview": "{\"status\":false,\"blocked\":true,\"data\":[]}",
+        "decrypt_error": null,
+        "json": {
+          "status": false,
+          "blocked": true,
+          "data": []
+        }
+      }
+    }
+  },
+  "catalog_probe": {
+    "movies_categories": {
+      "2": {
+        "total": 350,
+        "total_pages": 35,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "4": {
+        "total": 20617,
+        "total_pages": 2062,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "6": {
+        "total": 3017,
+        "total_pages": 302,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "8": {
+        "total": 855,
+        "total_pages": 86,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "10": {
+        "total": 2945,
+        "total_pages": 295,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "12": {
+        "total": 3083,
+        "total_pages": 309,
+        "sample_cats": null,
+        "sample_name": null
+      }
+    },
+    "series_categories": {
+      "1": {
+        "total": 1167,
+        "total_pages": 117,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "3": {
+        "total": 4664,
+        "total_pages": 467,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "4": {
+        "total": 1,
+        "total_pages": 1,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "5": {
+        "total": 5015,
+        "total_pages": 502,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "7": {
+        "total": 1148,
+        "total_pages": 115,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "9": {
+        "total": 244,
+        "total_pages": 25,
+        "sample_cats": null,
+        "sample_name": null
+      },
+      "11": {
+        "total": 2215,
+        "total_pages": 222,
+        "sample_cats": null,
+        "sample_name": null
+      }
+    },
+    "sections_auth": {
+      "1": {
+        "status": 200,
+        "section_name": "سلايدر",
+        "section_type": "slider",
+        "has_more": false,
+        "items_count": 14
+      },
+      "2": {
+        "status": 200,
+        "section_name": "اخر الحلقات",
+        "section_type": "episodes",
+        "has_more": true,
+        "items_count": 30
+      },
+      "3": {
+        "status": 200,
+        "section_name": "احدث المسلسلات ",
+        "section_type": "series",
+        "has_more": true,
+        "items_count": 30
+      },
+      "4": {
+        "status": 200,
+        "section_name": "احدث الأفلام ",
+        "section_type": "movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "5": {
+        "status": 200,
+        "section_name": "احدث الأعمال التركية",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "6": {
+        "status": 200,
+        "section_name": "احدث الأنميات والكرتون",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "7": {
+        "status": 200,
+        "section_name": "احدث الأعمال الهندية",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "8": {
+        "status": 200,
+        "section_name": "احدث الأعمال الكورية",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "9": {
+        "status": 200,
+        "section_name": "احدث الأعمال الأجنبية",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      },
+      "10": {
+        "status": 200,
+        "section_name": "احدث الأعمال الآسيوية",
+        "section_type": "series_movies",
+        "has_more": true,
+        "items_count": 30
+      }
+    },
+    "pagination_verify": {
+      "movies_cat6_p1_ids": [],
+      "movies_cat6_p2_ids": [],
+      "series_cat5_p1_ids": [],
+      "series_cat5_p2_ids": []
+    },
+    "latest_ep_probes": {
+      "/episodes?page=1": {
+        "status": 404,
+        "keys": null,
+        "count": 0
+      },
+      "/latest-episodes?page=1": {
+        "status": 404,
+        "keys": null,
+        "count": 0
+      },
+      "/section/2?page=1": {
+        "status": 200,
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "section_id",
+          "section_name",
+          "section_type",
+          "page",
+          "per_page",
+          "has_more",
+          "section_items"
+        ],
+        "count": 30
+      },
+      "/section/2?page=2": {
+        "status": 200,
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "section_id",
+          "section_name",
+          "section_type",
+          "page",
+          "per_page",
+          "has_more",
+          "section_items"
+        ],
+        "count": 30
+      }
+    }
+  },
+  "probed_servers_count": 0,
+  "probed_servers": []
+}
