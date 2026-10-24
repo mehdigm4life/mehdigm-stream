@@ -665,11 +665,11 @@ object WitAnimeNetwork {
                 val candidates = LinkedHashSet<String>()
                 coroutineScope {
                     PROXY_FEEDS.map { (scheme, feedUrl) ->
-                        async {
+                        async<List<String>> {
                             try {
                                 val req = Request.Builder().url(feedUrl).header("User-Agent", DEFAULT_UA).build()
                                 feedClient.newCall(req).execute().use { resp ->
-                                    if (!resp.isSuccessful) return@use
+                                    if (!resp.isSuccessful) return@use emptyList()
                                     val lines = resp.body?.string()?.lineSequence()?.take(250)?.toList().orEmpty()
                                     lines.mapNotNull { line ->
                                         val clean = line.trim()
