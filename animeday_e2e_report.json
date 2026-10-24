@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-24T11:38:55.031Z",
+  "timestamp": "2026-10-24T11:49:00.525Z",
   "config": {
     "cimacloud": "https://www.anime-day.com",
     "cloudday": "https://20042026.site",
@@ -172,8 +172,18 @@
       "kind": "series",
       "id": "12819",
       "note": "Frieren (Dubbed Anime Series)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "فريرن: ما وراء نهاية الرحلة",
+      "dub": true,
+      "year": 2023,
+      "genres": [
+        "دراما",
+        "رسوم متحركة",
+        "خيال علمي وفانتازيا",
+        "حركة ومغامرة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "8.8",
       "detailDecrypted": false,
       "seasons": 1,
       "totalEpisodes": 6,
@@ -227,8 +237,19 @@
       "kind": "series",
       "id": "12815",
       "note": "Hunter x Hunter (Subbed Anime Series)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "Hunter x Hunter",
+      "dub": false,
+      "year": 1999,
+      "genres": [
+        "كوميديا",
+        "دراما",
+        "رسوم متحركة",
+        "خيال علمي وفانتازيا",
+        "حركة ومغامرة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "8.4",
       "detailDecrypted": false,
       "seasons": 1,
       "totalEpisodes": 62,
@@ -306,8 +327,18 @@
       "kind": "series",
       "id": "12773",
       "note": "Avatar: Seven Havens (Cartoon Series)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "Avatar: Seven Havens",
+      "dub": false,
+      "year": 2026,
+      "genres": [
+        "عائلي",
+        "رسوم متحركة",
+        "خيال علمي وفانتازيا",
+        "حركة ومغامرة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "8.8",
       "detailDecrypted": false,
       "seasons": 1,
       "totalEpisodes": 6,
@@ -355,16 +386,10 @@
         {
           "url": "https://vidaraa.cc/e/fZw395EaIB9eC",
           "host": "vidaraa.cc",
-          "status": "http_404",
-          "finalHost": "vidaraa.cc",
-          "flags": {
-            "hasPacker": false,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "ok_vidara",
+          "qualities": [
+            "Avatar.Seven.Havens.S01E01.1080p"
+          ]
         },
         {
           "url": "https://fastvid.cam/embed/6whan21fyvys",
@@ -444,16 +469,7 @@
         {
           "url": "https://morencius.com/embed/t4fsivqujrr2",
           "host": "morencius.com",
-          "status": "http_200",
-          "finalHost": "morencius.com",
-          "flags": {
-            "hasPacker": true,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "err:The operation was aborted due to timeout"
         },
         {
           "url": "https://vidmoly.net/embed-4fjeshihsnyy.html",
@@ -696,17 +712,44 @@
         {
           "url": "https://streamtape.com/v/rBKZvYOZG7f8LP/Avatar_Seven_Havens_S01_001_720p.mp4",
           "host": "streamtape.com",
-          "status": "direct_http_404"
+          "status": "http_404",
+          "finalHost": "streamtape.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
         },
         {
           "url": "https://streamtape.com/v/bRbKJYkwBaTPeP4/Avatar_Seven_Havens_S01_001_1080p.mp4",
           "host": "streamtape.com",
-          "status": "direct_http_404"
+          "status": "http_404",
+          "finalHost": "streamtape.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
         },
         {
           "url": "https://streamtape.com/v/DPd4OvBAb1FkPKe/Avatar_Seven_Havens_S01_001_480p.mp4",
           "host": "streamtape.com",
-          "status": "direct_http_404"
+          "status": "http_404",
+          "finalHost": "streamtape.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
         }
       ]
     },
@@ -714,8 +757,18 @@
       "kind": "series",
       "id": "4561",
       "note": "Detective Conan (Long Dubbed Anime)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "المحقق كونان",
+      "dub": true,
+      "year": 1996,
+      "genres": [
+        "كوميديا",
+        "جريمة",
+        "غموض",
+        "رسوم متحركة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "8.0",
       "detailDecrypted": false,
       "seasons": 11,
       "totalEpisodes": 693,
@@ -779,8 +832,20 @@
       "kind": "movie",
       "id": "27070",
       "note": "The Bad Guys 2 (Dubbed Cartoon Movie)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "الأشرار 2 (مدبلج مصري)",
+      "dub": true,
+      "year": 2025,
+      "genres": [
+        "كوميديا",
+        "عائلي",
+        "جريمة",
+        "حركة",
+        "رسوم متحركة",
+        "مغامرة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "7.6",
       "detailDecrypted": false,
       "serversDecrypted": true,
       "serverCount": 25,
@@ -946,7 +1011,16 @@
         {
           "url": "https://vkvideo.ru/video_ext.php?oid=-239012485&id=456239033&hash=31dece39e5814d93&hd=2",
           "host": "vkvideo.ru",
-          "status": "err:fetch failed"
+          "status": "http_200",
+          "finalHost": "vkvideo.ru",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
         },
         {
           "url": "https://ok.ru/videoembed/16276069288665",
@@ -993,7 +1067,16 @@
         {
           "url": "https://bysesukior.com/e/drg2kqzqvw4s/The.Bad.Guys.2.2025.Dubbed.mp4",
           "host": "bysesukior.com",
-          "status": "ok_direct_200"
+          "status": "http_200",
+          "finalHost": "bysesukior.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
         },
         {
           "url": "https://hgcloud.to/e/dt4pdinlcwyi",
@@ -1113,8 +1196,17 @@
       "kind": "movie",
       "id": "27232",
       "note": "Mononoke Movie III (Subbed Anime Movie)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "Mononoke the Movie: Chapter III - The Curse of the Serpent",
+      "dub": false,
+      "year": 2026,
+      "genres": [
+        "غموض",
+        "رسوم متحركة",
+        null
+      ],
+      "recommendationsCount": 0,
+      "vote": "9.0",
       "detailDecrypted": false,
       "serversDecrypted": true,
       "serverCount": 20,
@@ -1209,30 +1301,12 @@
         {
           "url": "https://morencius.com/v/hj2rt2vqtw4t",
           "host": "morencius.com",
-          "status": "http_200",
-          "finalHost": "morencius.com",
-          "flags": {
-            "hasPacker": true,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "err:The operation was aborted due to timeout"
         },
         {
           "url": "https://morencius.com/v/2zotdcejv984",
           "host": "morencius.com",
-          "status": "http_200",
-          "finalHost": "morencius.com",
-          "flags": {
-            "hasPacker": true,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "err:The operation was aborted due to timeout"
         },
         {
           "url": "https://luluvdo.com/e/cyp90a5r1sok",
@@ -1265,30 +1339,18 @@
         {
           "url": "https://vidaraa.cc/e/yb4MUcvQxvMGO",
           "host": "vidaraa.cc",
-          "status": "http_200",
-          "finalHost": "vidaraa.cc",
-          "flags": {
-            "hasPacker": false,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "ok_vidara",
+          "qualities": [
+            "hls"
+          ]
         },
         {
           "url": "https://vidaraa.cc/e/SPWJ0fpqJPqyK",
           "host": "vidaraa.cc",
-          "status": "http_200",
-          "finalHost": "vidaraa.cc",
-          "flags": {
-            "hasPacker": false,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "ok_vidara",
+          "qualities": [
+            "hls"
+          ]
         },
         {
           "url": "https://updown.icu/a7ut7rpguu7s.html",
@@ -1335,30 +1397,16 @@
         {
           "url": "https://tuktuk.upns.one/#m9iusq",
           "host": "tuktuk.upns.one",
-          "status": "http_200",
-          "finalHost": "tuktuk.upns.one",
-          "flags": {
-            "hasPacker": false,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "ok_upnshare",
+          "qualities": [
+            "cfNative_hls",
+            "source_hls"
+          ]
         },
         {
           "url": "https://tuktuk.p2pstream.vip/#unzey6",
           "host": "tuktuk.p2pstream.vip",
-          "status": "http_200",
-          "finalHost": "tuktuk.p2pstream.vip",
-          "flags": {
-            "hasPacker": false,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "err:error:1C80006B:Provider routines::wrong final block length"
         },
         {
           "url": "https://megamax.me/iframe/RPBYJdqG5FxQL",
@@ -1405,16 +1453,7 @@
         {
           "url": "https://morencius.com/v/mdei0xv709dh",
           "host": "morencius.com",
-          "status": "http_200",
-          "finalHost": "morencius.com",
-          "flags": {
-            "hasPacker": true,
-            "hasM3u8": false,
-            "hasMp4": false,
-            "hasEnc": false,
-            "hasDataOptions": false,
-            "phpCount": 0
-          }
+          "status": "err:The operation was aborted due to timeout"
         }
       ]
     },
@@ -1422,8 +1461,18 @@
       "kind": "movie",
       "id": "27226",
       "note": "Detective Conan Movie (Subbed Anime Movie)",
-      "detailOk": false,
-      "name": null,
+      "detailOk": true,
+      "name": "Detective Conan: The Counterfeit Case of Ultra 30",
+      "dub": false,
+      "year": 2026,
+      "genres": [
+        "جريمة",
+        "حركة",
+        "غموض",
+        "رسوم متحركة"
+      ],
+      "recommendationsCount": 0,
+      "vote": "7.2",
       "detailDecrypted": false,
       "serversDecrypted": true,
       "serverCount": 3,

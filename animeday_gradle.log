@@ -17,35 +17,41 @@ Daemon will be stopped at the end of the build
 > Task :AnimeDay:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :AnimeDay:preBuild UP-TO-DATE
 > Task :AnimeDay:preDebugBuild UP-TO-DATE
-> Task :AnimeDay:generateDebugResValues
 > Task :CimaCloud:generateDebugResValues
+> Task :AnimeDay:generateDebugResValues
 > Task :AnimeDay:generateDebugResources
 > Task :CimaCloud:generateDebugResources
-> Task :AnimeDay:packageDebugResources
 > Task :CimaCloud:packageDebugResources
+> Task :AnimeDay:packageDebugResources
 > Task :CimaCloud:parseDebugLocalResources
 > Task :AnimeDay:parseDebugLocalResources
 > Task :AnimeDay:generateDebugRFile
 > Task :CimaCloud:generateDebugRFile
-
-> Task :AnimeDay:compileDebugKotlin FAILED
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/AnimeDay/src/main/kotlin/com/animeday/AnimeDayExtractors.kt:732:31 Unresolved reference 'safeJsonArray'.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/AnimeDay/src/main/kotlin/com/animeday/AnimeDayExtractors.kt:940:59 The feature "break continue in inline lambdas" is only available since language version 2.2
-
 > Task :CimaCloud:compileDebugKotlin
+> Task :AnimeDay:compileDebugKotlin
 
-FAILURE: Build failed with an exception.
+> Task :CimaCloud:compileDex
+Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/CimaCloud/build/intermediates/classes.dex
 
-* What went wrong:
-Execution failed for task ':AnimeDay:compileDebugKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
+> Task :AnimeDay:compileDex
+Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/AnimeDay/build/intermediates/classes.dex
 
-* Try:
-> Run with --stacktrace option to get the stack trace.
-> Run with --info or --debug option to get more log output.
-> Run with --scan to get full insights.
-> Get more help at https://help.gradle.org.
+> Task :AnimeDay:generateManifest
+> Task :CimaCloud:generateManifest
 
-BUILD FAILED in 36s
-13 actionable tasks: 12 executed, 1 up-to-date
+> Task :AnimeDay:make
+Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/AnimeDay/build/AnimeDay.cs3
+
+> Task :CimaCloud:make
+Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/CimaCloud/build/CimaCloud.cs3
+
+BUILD SUCCESSFUL in 34s
+19 actionable tasks: 18 executed, 1 up-to-date
+Archive:  build/AnimeDay.cs3
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+      106  1980-02-01 00:00   manifest.json
+   299644  1980-02-01 00:00   classes.dex
+---------                     -------
+   299750                     2 files
+Wrote animeday_e2e_report.json successfully.
