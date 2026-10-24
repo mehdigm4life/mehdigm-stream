@@ -31,37 +31,13 @@ jobs:
           chmod +x /tmp/re/jadx/bin/jadx
           curl -fL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk" -o /tmp/re/apks/TimeMovies_1092.apk
 
-          python3 - <<'PY' > /tmp/re/report/icon_arsc.txt
+          python3 - <<'PY'
           import zipfile
-          try:
-              from loguru import logger
-              logger.disable("androguard")
-          except Exception:
-              pass
-          from androguard.core.axml import ARSCParser, AXMLPrinter
-
           z = zipfile.ZipFile("/tmp/re/apks/TimeMovies_1092.apk")
-          arsc = ARSCParser(z.read("resources.arsc"))
-          pkg = arsc.get_packages_names()[0]
-          for rid in [0x7f110000, 0x7f110001, 0x7f110002]:
-              print(f"=== {hex(rid)} ===")
-              try:
-                  print(arsc.get_resolved_res_configs(rid))
-              except Exception as e:
-                  print("err:", e)
-          for name in ["res/FG.png", "res/5c.webp", "res/iE.webp"]:
+          for name in ["res/sK.webp", "res/mB.png", "classes.dex"]:
               if name in z.namelist():
                   with open("/tmp/re/report/icons/" + name.replace("/", "_"), "wb") as f:
                       f.write(z.read(name))
-          for name in z.namelist():
-              if name.startswith("res/") and name.endswith(".xml"):
-                  raw = z.read(name)
-                  try:
-                      xml = AXMLPrinter(raw).get_xml().decode("utf-8", "ignore")
-                      if "adaptive-icon" in xml or "mB" in xml or "ic_launcher" in xml:
-                          print(f"=== XML {name} ===\n{xml}")
-                  except Exception:
-                      pass
           PY
 
       - name: Compile NDK memory DEX dumper and prepare emulator script
@@ -142,7 +118,7 @@ jobs:
           #!/usr/bin/env bash
           set -x
           exec > /tmp/re/report/emu_trace.txt 2>&1
-          mkdir -p /tmp/re/dumped_1092
+          mkdir -p /tmp/re/dumped_1092 /tmp/re/appdata_1092
           adb root || true
           sleep 1
           adb remount || true
@@ -150,12 +126,15 @@ jobs:
           adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
           adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1092"
           adb install -r /tmp/re/apks/TimeMovies_1092.apk
+          adb logcat -c || true
           adb shell am start -n com.extremeqr.proapps/.ui.screens.activity.MainActivity || true
-          sleep 7
+          sleep 15
           PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
           echo "1092 PID=$PID92"
-          adb shell "/data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092"
+          adb shell "/data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092" || true
           adb pull /data/local/tmp/tm1092 /tmp/re/dumped_1092/ || true
+          adb pull /data/data/com.extremeqr.proapps /tmp/re/appdata_1092/ || true
+          adb logcat -d > /tmp/re/report/logcat_1092.txt 2>&1 || true
           echo "done"
           EMUSCRIPT
           chmod +x /tmp/re/run_emu.sh
@@ -177,13 +156,13 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -writable-system
           script: bash /tmp/re/run_emu.sh
 
-      - name: Extract DEX strings, decompile app defpackage classes, and publish check-runs
+      - name: Decompile with --show-bad-code, dump critical bytecode + appdata, publish check-runs
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 - <<'PY' > /tmp/re/report/dex_intel.txt
-          import glob, re
+          python3 - <<'PY' > /tmp/re/report/small_dex_and_appdata.txt
+          import glob, os, re, sqlite3
           try:
               from loguru import logger
               logger.disable("androguard")
@@ -191,126 +170,169 @@ jobs:
               pass
           from androguard.core.dex import DEX
 
-          dex_files = sorted(glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True))
-          print("DEX files:", dex_files)
-          re_hex32 = re.compile(r"^[0-9a-f]{32}$")
-          re_hex24 = re.compile(r"^[0-9a-f]{24}$")
-          keywords = (
-              "http://", "https://", "://", "apks.lol", "devmagics", "tmovies", "subtools",
-              "doomplayer", "doomvideo", "vplayer", "timesn", "timesd", "resolve-play", "resolve-download",
-              "HmacSHA", "AES/GCM", "AES/CBC", "ECDSA", "SecretKeySpec", "PBKDF2",
-              "/api/v", "/api/player", "x-t", "x-b", "x-p", "m-a", "watch_token", "prepare_token"
-          )
-
-          for df in dex_files:
-              if "_23436.dex" in df or "_12840.dex" in df:
-                  continue
-              print(f"\n================ {df} ================")
+          # 1. Inspect small dumped DEXes + stub classes.dex completely
+          small_dexes = sorted(glob.glob("/tmp/re/dumped_1092/**/dump_00[4-9]_*.dex", recursive=True))
+          if os.path.exists("/tmp/re/report/icons/classes.dex"):
+              small_dexes.append("/tmp/re/report/icons/classes.dex")
+          for df in small_dexes:
+              print(f"\n================ SMALL DEX: {df} ({os.path.getsize(df)} B) ================")
               d = DEX(open(df, "rb").read())
-              strs = d.get_strings()
-              print(f"Total strings: {len(strs)}")
-              hex32 = [s for s in strs if re_hex32.match(s)]
-              hex24 = [s for s in strs if re_hex24.match(s)]
-              print(f"HEX32 ({len(hex32)}):", hex32)
-              print(f"HEX24 ({len(hex24)}):", hex24)
-              hits = [s for s in strs if any(k in s for k in keywords) and len(s) < 300]
-              print(f"Keyword hits ({len(hits)}):")
-              for h in sorted(set(hits)):
-                  print("  STR:", repr(h))
+              print("Strings:", d.get_strings()[:250])
+              for c in d.get_classes():
+                  print("  CLASS:", c.get_name(), "super=", c.get_superclassname())
+                  for m in c.get_methods():
+                      print("    METHOD:", m.get_name(), m.get_descriptor(), "flags=", hex(m.get_access_flags()))
+                      code = m.get_code()
+                      if code:
+                          bc = code.get_bc()
+                          insns = list(bc.get_instructions())
+                          for ins in insns[:120]:
+                              print("      ", ins.get_name(), ins.get_output())
+
+          # 2. Inspect /tmp/re/appdata_1092
+          print("\n================ APPDATA FILES ================")
+          for root, dirs, files in os.walk("/tmp/re/appdata_1092"):
+              if "code_cache" in root or "cache/image_cache" in root:
+                  continue
+              for fn in sorted(files):
+                  fp = os.path.join(root, fn)
+                  sz = os.path.getsize(fp)
+                  print(f"FILE: {fp} ({sz} B)")
+                  if sz < 250000 and any(k in fp.lower() for k in ("datastore", "shared_prefs", "device_key", "rasplab", "protector", "json", "xml", ".pb", "secret")):
+                      raw = open(fp, "rb").read()
+                      strs = re.findall(b"[ -~]{4,}", raw)
+                      print("  ASCII:", [s.decode("ascii", "ignore")[:300] for s in strs[:60]])
+                  if fn.endswith(".db") or "database" in root.lower():
+                      try:
+                          con = sqlite3.connect(fp)
+                          cur = con.cursor()
+                          tabs = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                          print("  SQLITE TABLES:", tabs)
+                          for tb in tabs:
+                              cnt = cur.execute(f"SELECT count(*) FROM `{tb}`").fetchone()[0]
+                              print(f"    {tb}: {cnt} rows")
+                              if cnt > 0 and tb not in ("android_metadata", "room_master_table"):
+                                  rows = cur.execute(f"SELECT * FROM `{tb}` LIMIT 3").fetchall()
+                                  print("    sample:", repr(rows)[:600])
+                          con.close()
+                      except Exception as e:
+                          print("  sqlite err:", e)
           PY
 
-          mkdir -p /tmp/re/jadx_tm1092 /tmp/re/r4_defpkg
-          DEXS=$(find /tmp/re/dumped_1092 -name "dump_00[0-3]_*.dex" | sort)
-          /tmp/re/jadx/bin/jadx -j 4 -d /tmp/re/jadx_tm1092 $DEXS || true
+          # Filter relevant lines from logcat
+          grep -iE "extremeqr|okhttp|retrofit|apks\.lol|protector|firebase|Exception|Error " /tmp/re/report/logcat_1092.txt | tail -n 250 > /tmp/re/report/logcat_filtered.txt || true
+          rm -f /tmp/re/report/logcat_1092.txt /tmp/re/report/icons/classes.dex
+
+          # Run jadx WITH --show-bad-code on ALL dumped DEXes + stub APK classes.dex
+          mkdir -p /tmp/re/jadx_bad /tmp/re/jadx_stub /tmp/re/r5_src
+          ALL_DEXS=$(find /tmp/re/dumped_1092 -name "dump_*.dex" | sort)
+          /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_bad $ALL_DEXS || true
+          /tmp/re/jadx/bin/jadx -j 4 --show-bad-code --no-res -d /tmp/re/jadx_stub /tmp/re/apks/TimeMovies_1092.apk || true
 
           python3 - <<'PY'
-          import os, re, shutil
+          import glob, os, re, shutil
+          try:
+              from loguru import logger
+              logger.disable("androguard")
+          except Exception:
+              pass
+          from androguard.core.dex import DEX
 
-          src_dir = "/tmp/re/jadx_tm1092/sources/defpackage"
-          out_dir = "/tmp/re/r4_defpkg"
-          os.makedirs(out_dir, exist_ok=True)
+          # Copy all stub/protector/tm classes
+          for root_base in ["/tmp/re/jadx_stub/sources", "/tmp/re/jadx_bad/sources"]:
+              for sub in ["com/protector", "tm", "com/extremeqr/proapps/security", "com/extremeqr/proapps/utils"]:
+                  p = os.path.join(root_base, sub)
+                  if os.path.isdir(p):
+                      dst = os.path.join("/tmp/re/r5_src", sub)
+                      os.makedirs(dst, exist_ok=True)
+                      for fn in os.listdir(p):
+                          if fn.endswith(".java"):
+                              shutil.copy2(os.path.join(p, fn), os.path.join(dst, fn))
 
+          # Target defpackage classes (all crypto/interceptors/UUID callers/auth/media/subtitles)
           explicit = {
-              "fx", "y52", "lb9", "bb8", "q00", "de9", "ek2", "ro", "dk2", "f18",
-              "kv", "jw6", "hx6", "cw9", "dw9", "jy8", "uc1", "tc1", "g92",
-              "bj2", "dj2", "ej2", "fj2", "gj2", "hj2", "ij2", "jj2", "kj2", "lj2",
-              "mj2", "nj2", "oj2", "pj2", "qj2", "rj2", "wj2"
+              "q86", "r86", "s86", "t86", "u86", "uu1", "tu1", "vu1", "u04", "v04", "w04",
+              "pe3", "q52", "y52", "hq7", "j18", "wc7", "ro", "to", "dk2", "ek2", "f18",
+              "de9", "q00", "jw9", "zy1", "pr4", "c33", "mx", "ow1", "cw9", "dw9",
+              "fx", "ex", "bb8", "kv", "at5", "bt5", "ct5", "dt5", "et5",
+              "kd", "od", "rca", "cca", "k0", "f81", "fv3", "yb3", "nv", "mv",
+              "xv", "fw", "qv", "lv", "jw", "rv", "hw", "ax", "zu9", "tu9", "vu9",
+              "tba", "qca", "uba", "vba", "wba", "d24", "hx6", "ax6", "jw6", "l41",
+              "u6", "v6", "r6", "e41", "f41", "g41"
           }
 
-          high_value_terms = (
-              "retrofit2.", "okhttp3.Interceptor", "CertificatePinner", "X509TrustManager",
-              "HostnameVerifier", "javax.crypto", "HmacSHA", "AES/GCM", "GCMParameterSpec",
-              "SecretKeySpec", "KeyPairGenerator", "AndroidKeyStore", "ECDSA",
-              "apks.lol", "devmagics", "tmovies", "subtools", "timesn", "timesd",
-              "doomplayer", "doomvideo", "vplayer", "resolve-play", "resolve-download",
-              "60129f", "6a5216", "hm25", "1.0.6.5", "PBKDF2", "Mac.getInstance", "Cipher.getInstance",
-              "com.protector", "VidStream", "MediaV2", "MediaGrant", "MediaQualit",
-              "FreeDownload", "WKI", "WKC", "AHMRS", "HMRS", "CategoryPageWorkList",
-              "GenrePageWorkList", "SearchTripleResponse", "ApiPageResult", "ApiWorkResult",
-              "ApiSearchPageResult", "DeviceKey", "AppData", "AST", "DWI", "EDWI", "SubtitleTrack"
+          re_hex32 = re.compile(r'"[0-9a-f]{32}"')
+          must_terms = (
+              "AES/GCM", "AES/CBC", "HmacSHA", "SecretKeySpec", "GCMParameterSpec",
+              "X-Media-Grant", "\"x-t\"", "\"x-t.v2\"", "\"x-p\"", "\"m-a\"", "\"x-b\"",
+              "60129f949ea4ea03d6598c06", "6a3e1c72b864f954c0ef8d54",
+              "VidStream", "FreeDownloadPrepareResponse", "FreeDownloadConfirmRequest",
+              "WKC", "EDWI", "ExternalExecutionDto", "SubtitleTrack", "subtools",
+              "signInAnonymously", "getIdToken", "prepare_token", "watch_token",
+              "timesnizz", "timesdizz", "resolve-play", "resolve-download",
+              "tm.Protector", "com.protector"
           )
 
-          selected = set()
-          core_seeds = set()
-          re_imp = re.compile(r"import defpackage\.([A-Za-z0-9_$]+);")
+          defpkg_dir = "/tmp/re/jadx_bad/sources/defpackage"
+          out_defpkg = "/tmp/re/r5_src/defpackage"
+          os.makedirs(out_defpkg, exist_ok=True)
 
-          all_files = {}
-          if os.path.isdir(src_dir):
-              for fn in os.listdir(src_dir):
+          selected = set()
+          if os.path.isdir(defpkg_dir):
+              for fn in os.listdir(defpkg_dir):
                   if not fn.endswith(".java"):
                       continue
                   cls = fn[:-5]
-                  p = os.path.join(src_dir, fn)
-                  with open(p, "r", encoding="utf-8", errors="ignore") as f:
-                      txt = f.read()
-                  all_files[cls] = txt
-
-                  if cls in explicit:
+                  fp = os.path.join(defpkg_dir, fn)
+                  txt = open(fp, "r", encoding="utf-8", errors="ignore").read()
+                  if cls in explicit or re_hex32.search(txt) or any(t in txt for t in must_terms):
                       selected.add(cls)
-                      core_seeds.add(cls)
-                      continue
+                      shutil.copy2(fp, os.path.join(out_defpkg, fn))
 
-                  if any(t in txt for t in high_value_terms):
-                      # Skip pure Compose UI lambdas unless they touch player/intents/ViewModel/repo
-                      if "androidx.compose." in txt and not any(k in txt for k in (
-                          "Intent", "Uri", "times", "doom", "vplayer", "Base64", "fx", "bb8",
-                          "Interceptor", "Cipher", "Mac", "SecretKey", "HttpUrl", "Request"
-                      )):
-                          continue
-                      selected.add(cls)
-                      if any(t in txt for t in (
-                          "retrofit2.", "okhttp3.Interceptor", "javax.crypto", "HmacSHA",
-                          "AES/GCM", "GCMParameterSpec", "SecretKeySpec", "apks.lol",
-                          "devmagics", "timesn", "timesd", "doomplayer", "doomvideo", "vplayer"
-                      )):
-                          core_seeds.add(cls)
-                  elif "com.extremeqr.proapps" in txt and "androidx.compose." not in txt:
-                      selected.add(cls)
+          # Also include any immediate helper classes referenced inside q86, uu1, ex, at5, kd, rca, bb8
+          re_imp = re.compile(r"\b([a-z][a-z0-9]{1,4})\b")
+          pivots = ["q86", "uu1", "t86", "ex", "at5", "kd", "rca", "bb8", "xv", "fw", "qv", "lv", "mv", "jw", "k0"]
+          for pv in pivots:
+              pf = os.path.join(out_defpkg, pv + ".java")
+              if os.path.exists(pf):
+                  txt = open(pf).read()
+                  for tok in set(re_imp.findall(txt)):
+                      cand = os.path.join(defpkg_dir, tok + ".java")
+                      if tok not in selected and os.path.exists(cand) and os.path.getsize(cand) < 80000:
+                          ct = open(cand, "r", encoding="utf-8", errors="ignore").read()
+                          if "androidx.compose." not in ct and "androidx.fragment." not in ct:
+                              selected.add(tok)
+                              shutil.copy2(cand, os.path.join(out_defpkg, tok + ".java"))
 
-          # Expand 2 hops from core_seeds (fx, bb8, q00, interceptors, crypto, network modules)
-          frontier = set(core_seeds)
-          for hop in range(2):
-              nxt = set()
-              for cls in frontier:
-                  txt = all_files.get(cls, "")
-                  for m in re_imp.finditer(txt):
-                      dep = m.group(1)
-                      if dep in all_files and dep not in selected:
-                          dtxt = all_files[dep]
-                          if "androidx.compose." not in dtxt and len(dtxt) < 120000:
-                              selected.add(dep)
-                              nxt.add(dep)
-              frontier = nxt
+          print(f"Copied {len(selected)} defpackage classes to r5_src/defpackage")
 
-          print(f"Selected {len(selected)} defpackage classes out of {len(all_files)}")
-          with open("/tmp/re/report/selected_defpkg.txt", "w") as f:
-              for cls in sorted(selected):
-                  f.write(cls + "\n")
-                  shutil.copy2(os.path.join(src_dir, cls + ".java"), os.path.join(out_dir, cls + ".java"))
+          # Dalvik bytecode fallback for any method in critical classes so ZERO instructions can be lost!
+          bytecode_targets = {
+              f"L{c};" for c in [
+                  "q86", "r86", "s86", "t86", "uu1", "u04", "v04", "w04",
+                  "ex", "at5", "kd", "rca", "od", "bb8", "pe3",
+                  "xv", "fw", "qv", "lv", "mv", "jw", "rv", "hw", "ax", "k0"
+              ]
+          }
+          with open("/tmp/re/report/bytecode_critical.txt", "w") as out_bc:
+              for df in sorted(glob.glob("/tmp/re/dumped_1092/**/dump_00[0-3]_*.dex", recursive=True)):
+                  d = DEX(open(df, "rb").read())
+                  for c in d.get_classes():
+                      cname = c.get_name()
+                      if cname in bytecode_targets or cname.startswith("Ltm/") or cname.startswith("Lcom/protector/"):
+                          out_bc.write(f"\n================ {cname} ({os.path.basename(df)}) ================\n")
+                          for f in c.get_fields():
+                              out_bc.write(f"  FIELD: {f.get_name()}:{f.get_descriptor()} init={f.get_init_value()}\n")
+                          for m in c.get_methods():
+                              out_bc.write(f"  METHOD: {m.get_name()}{m.get_descriptor()} flags={hex(m.get_access_flags())}\n")
+                              code = m.get_code()
+                              if code:
+                                  for ins in code.get_bc().get_instructions():
+                                      out_bc.write(f"    {ins.get_name():20s} {ins.get_output()}\n")
           PY
 
-          tar -czf /tmp/re/r4_bundle.tar.gz -C /tmp/re report r4_defpkg
-          ls -lh /tmp/re/r4_bundle.tar.gz
+          tar -czf /tmp/re/r5_bundle.tar.gz -C /tmp/re report r5_src
+          ls -lh /tmp/re/r5_bundle.tar.gz
 
           python3 - <<'PY'
           import os, base64, json, subprocess
@@ -326,7 +348,7 @@ jobs:
               chunk_sz = 60000
               chunks = [b64[i:i+chunk_sz] for i in range(0, len(b64), chunk_sz)]
               print(f"Uploading {prefix}: {len(b64)} b64 chars in {len(chunks)} chunks")
-              for idx, ch in enumerate(chunks[:55]):
+              for idx, ch in enumerate(chunks[:60]):
                   payload = {
                       "name": f"{prefix}-{idx:02d}",
                       "head_sha": sha,
@@ -346,5 +368,5 @@ jobs:
                   if p.returncode != 0:
                       print("ERR:", p.stderr.decode("utf-8", "ignore")[:300])
 
-          upload_tar("/tmp/re/r4_bundle.tar.gz", "r4-tm")
+          upload_tar("/tmp/re/r5_bundle.tar.gz", "r5-tm")
           PY
