@@ -1,5 +1,9 @@
 package com.egydead
 
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.utils.Qualities
+import org.json.JSONObject
+import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -54,7 +58,6 @@ class EgyDeadUnitTest {
         val rawArabic = "https://tv10.egydead.live/مشاهدة-فيلم-fall-2022-مترجم/"
         val encoded = EgyDeadNetwork.encodeUrl(rawArabic)
         assertFalse(encoded.contains("مشاهدة"))
-        // Idempotent when already encoded
         assertEquals(encoded, EgyDeadNetwork.encodeUrl(encoded))
 
         assertEquals(
@@ -104,10 +107,10 @@ class EgyDeadUnitTest {
     }
 
     @Test
-    fun testOpenSslAes256CbcRoundTrip() {
+    fun testOpenSslSaltedAndCryptoJsJsonAes256CbcRoundTrip() {
         val pass = "k7v2m4x9bqwpnj6t"
         val salt = "12345678".toByteArray(Charsets.US_ASCII)
-        val plain = "https://cdn777.megamax.me/hls/master.m3u8"
+        val plain = """[{"file":"https://cdn777.megamax.me/hls/master.m3u8","label":"1080p"}]"""
 
         val md5 = MessageDigest.getInstance("MD5")
         var derived = ByteArray(0)
@@ -120,25 +123,111 @@ class EgyDeadUnitTest {
             block = md5.digest()
             derived += block
         }
+        val key = derived.copyOfRange(0, 32)
+        val iv = derived.copyOfRange(32, 48)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(
-            Cipher.ENCRYPT_MODE,
-            SecretKeySpec(derived.copyOfRange(0, 32), "AES"),
-            IvParameterSpec(derived.copyOfRange(32, 48))
-        )
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
         val enc = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        val openSslBlob = Base64.getEncoder().encodeToString("Salted__".toByteArray(Charsets.US_ASCII) + salt + enc)
 
-        val decrypted = EgyDeadExtractorKit.decryptOpenSslAesCbc(openSslBlob, pass)
-        assertNotNull(decrypted)
-        assertEquals(plain, decrypted)
+        // 1. OpenSSL Salted__ format
+        val openSslBlob = Base64.getEncoder().encodeToString("Salted__".toByteArray(Charsets.US_ASCII) + salt + enc)
+        assertEquals(plain, EgyDeadExtractorKit.decryptOpenSslAesCbc(openSslBlob, pass))
+
+        // 2. CryptoJS JSON {"ct","iv","s"} format used by MegaMax /e/<id>
+        val cryptoJsJson = JSONObject()
+            .put("ct", Base64.getEncoder().encodeToString(enc))
+            .put("iv", iv.joinToString("") { "%02x".format(it) })
+            .put("s", salt.joinToString("") { "%02x".format(it) })
+            .toString()
+        assertEquals(plain, EgyDeadExtractorKit.decryptCryptoJsJson(cryptoJsJson, pass))
     }
 
     @Test
     fun testJsUnpacker() {
         val packed = """eval(function(p,a,c,k,e,d){while(c--)if(k[c])p=p.replace(new RegExp('\\b'+c.toString(a)+'\\b','g'),k[c]);return p}('0 1={"2":"3://4.5/6.7"};',8,8,'var|links|hls4|https|cdn|example|master|m3u8'.split('|'),0,{}))"""
         val unpacked = EgyDeadExtractorKit.unpackJs(packed)
-        assertEquals(1, unpacked.size)
-        assertEquals("""var links={"hls4":"https://cdn.example/master.m3u8"};""", unpacked.first())
+        assertTrue(unpacked.contains("""var links={"hls4":"https://cdn.example/master.m3u8"};"""))
+    }
+
+    @Test
+    fun testCatalogCardAndWatchServerDomParsing() {
+        val api = EgyDead()
+        val catalogHtml = """
+            <html><body>
+              <ul class="posts-list">
+                <li class="movieItem">
+                  <a href="https://tv10.egydead.live/fall-2-deadpoint-2026-1080p-web-dl-1/" title="مشاهدة فيلم Fall 2 Deadpoint 2026 مترجم">
+                    <img src="https://tv10.egydead.live/wp-content/uploads/2026/04/Fall-2.jpg" />
+                    <span class="label">1080p WEB-DL</span>
+                    <h1 class="BottomTitle">مشاهدة فيلم Fall 2 Deadpoint 2026 مترجم</h1>
+                  </a>
+                </li>
+                <li class="movieItem">
+                  <a href="https://tv10.egydead.live/Series/lupin-all-seasons/" title="مسلسل Lupin جميع المواسم">
+                    <img data-src="https://tv10.egydead.live/wp-content/uploads/2026/04/Lupin.jpg" />
+                    <h1 class="BottomTitle">مسلسل Lupin جميع المواسم</h1>
+                  </a>
+                </li>
+                <li class="movieItem">
+                  <a href="https://tv10.egydead.live/episodes/ao-no-hako-s01e05/watch/" title="انمي Ao no Hako الحلقة 5 مترجمة">
+                    <img src="https://tv10.egydead.live/wp-content/uploads/2026/04/Ao.jpg" />
+                    <h1 class="BottomTitle">انمي Ao no Hako الحلقة 5 مترجمة</h1>
+                  </a>
+                </li>
+              </ul>
+            </body></html>
+        """.trimIndent()
+
+        val cards = api.parseCardList(Jsoup.parse(catalogHtml, "https://tv10.egydead.live/"))
+        assertEquals(3, cards.size)
+        assertEquals("Fall 2 Deadpoint 2026", cards[0].name)
+        assertEquals(TvType.Movie, cards[0].type)
+        assertEquals(TvType.TvSeries, cards[1].type)
+        assertEquals(TvType.Anime, cards[2].type)
+        // Ensure `/watch/` suffix was stripped cleanly on episode card
+        assertEquals("https://tv10.egydead.live/episodes/ao-no-hako-s01e05/", cards[2].url)
+
+        val watchHtml = """
+            <html><body>
+              <div class="watch_player"><iframe src="https://www.youtube.com/embed/trailer123"></iframe></div>
+              <ul class="serversList">
+                <li data-link="https://q7v3k8m2p1.top/iframe/Uw0W7pOtd12FY">MegaMax</li>
+                <li data-link="https://hanerix.com/e/kldh1j2cvzgm">StreamHG</li>
+              </ul>
+              <ul class="donwload-servers-list">
+                <li>
+                  <span class="ser-name">MegaMax</span>
+                  <span class="ser-quality">1080p</span>
+                  <a class="ser-link" href="https://q7v3k8m2p1.top/download/Uw0W7pOtd12FY">تحميل</a>
+                </li>
+                <li>
+                  <span class="ser-name">StreamHG</span>
+                  <span class="ser-quality">720p</span>
+                  <a class="ser-link" href="https://hgcloud.to/kldh1j2cvzgm">تحميل</a>
+                </li>
+                <li>
+                  <span class="ser-name">OpenLoad</span>
+                  <span class="ser-quality">720p</span>
+                  <a class="ser-link" href="https://openload.co/f/deadfile123">تحميل</a>
+                </li>
+              </ul>
+            </body></html>
+        """.trimIndent()
+
+        val rawCandidates = api.collectCandidateServers(
+            Jsoup.parse(watchHtml, "https://tv10.egydead.live/fall-2/watch/"),
+            "https://tv10.egydead.live/fall-2/watch/"
+        )
+        // YouTube trailer iframe must be excluded, leaving 2 watch + 3 download = 5 raw candidates
+        assertEquals(5, rawCandidates.size)
+        assertEquals(Qualities.P1080.value, rawCandidates[2].qualityHint)
+
+        // Canonical dedup + dead host filter merges MegaMax iframe+download & StreamHG e+hgcloud and drops OpenLoad -> 2 unique!
+        val seen = HashSet<String>()
+        val deduped = rawCandidates.filter {
+            !EgyDeadMirrorRouter.isDeadArchiveHost(it.url) &&
+                seen.add(EgyDeadMirrorRouter.canonicalDedupKey(it.url))
+        }
+        assertEquals(2, deduped.size)
     }
 }

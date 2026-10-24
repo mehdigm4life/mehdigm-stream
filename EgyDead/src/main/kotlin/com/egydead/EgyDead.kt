@@ -332,7 +332,7 @@ class EgyDead : MainAPI() {
         }
     }
 
-    private fun parseCardList(doc: Document): List<SearchResponse> {
+    internal fun parseCardList(doc: Document): List<SearchResponse> {
         val seen = HashSet<String>()
         val out = mutableListOf<SearchResponse>()
         for (card in doc.select("div.movies-list li.movieItem, div.catHolder li.movieItem, ul.posts-list li.movieItem, li.movieItem")) {
@@ -947,14 +947,14 @@ class EgyDead : MainAPI() {
     // Load Watch & Download Video Links (`/watch/` + Legacy Fallback)
     // =========================================================================
 
-    private data class CandidateServer(
+    internal data class CandidateServer(
         val url: String,
         val serverName: String,
         val qualityHint: Int,
         val referer: String
     )
 
-    private fun collectCandidateServers(doc: Document, pageReferer: String): List<CandidateServer> {
+    internal fun collectCandidateServers(doc: Document, pageReferer: String): List<CandidateServer> {
         val candidates = mutableListOf<CandidateServer>()
 
         // 1. Watch servers list (`ul.serversList li[data-link]`, etc.)

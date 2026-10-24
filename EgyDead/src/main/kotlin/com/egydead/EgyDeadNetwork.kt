@@ -2,45 +2,40 @@ package com.egydead
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.FormBody
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import okhttp3.dnsoverhttps.DnsOverHttps
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
-import java.net.URLEncoder
-import java.net.UnknownHostException
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
+/**
+ * Resilient network & dynamic domain discovery engine for EgyDead:
+ * 1. Discovers the active `tvXX.egydead.live` mirror automatically via `egydead.live` /
+ *    `egydead.fyi` redirect beacons (stripping landing suffixes such as `/h3/`).
+ * 2. Bypasses Arab ISP DNS poisoning via Cloudflare (`1.1.1.1`) & Google (`8.8.8.8`) DoH.
+ * 3. Validates saved/custom domains so dead legacy mirrors (e.g. `tv5.egydead.live`)
+ *    never break users upgrading from older versions.
+ * 4. Integrates with `CloudflareSolver` (Android WebView) when Cloudflare JS/Turnstile challenges occur.
+ */
 object EgyDeadNetwork {
     private const val TAG = "EgyDeadNet"
 
     const val DEFAULT_BASE_URL = "https://tv10.egydead.live"
 
     const val DEFAULT_UA =
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     private val BEACON_DOMAINS = listOf(
         "https://tv10.egydead.live",
@@ -48,138 +43,103 @@ object EgyDeadNetwork {
         "https://egydead.fyi",
         "https://tv11.egydead.live",
         "https://tv12.egydead.live",
-        "https://tv13.egydead.live",
         "https://tv9.egydead.live"
     )
 
-    private val PROXY_FEEDS = listOf(
-        "socks5" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
-        "http" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/https.txt",
-        "socks5" to "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-        "socks5" to "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
-        "socks5" to "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"
-    )
-
-    private const val DOMAIN_TTL_MS = 20 * 60 * 1000L
+    private const val DOMAIN_CACHE_TTL_MS = 30 * 60 * 1000L
 
     private val domainMutex = Mutex()
-    private val proxyMutex = Mutex()
 
     @Volatile
-    private var cachedBaseUrl: String? = null
+    private var resolvedBaseUrl: String? = null
 
     @Volatile
-    private var cachedAtMs: Long = 0L
+    private var resolvedAtMs: Long = 0L
 
-    @Volatile
-    private var directBlockedUntilMs: Long = 0L
+    val currentUserAgent: String
+        get() = EgyDeadPrefs.savedUserAgent ?: DEFAULT_UA
 
-    private val dnsCache = ConcurrentHashMap<String, Pair<Long, List<InetAddress>>>()
-    private val workingProxies = CopyOnWriteArrayList<String>()
-    private val deadProxies = ConcurrentHashMap.newKeySet<String>()
-    private val proxyFailCounts = ConcurrentHashMap<String, Int>()
-    private val sharedProxyClients = ConcurrentHashMap<String, OkHttpClient>()
+    // ---- Hybrid DNS (System DNS -> Cloudflare 1.1.1.1 DoH -> Google 8.8.8.8 DoH) ----
 
-    private val trustAllManager: X509TrustManager = object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    private val bootstrapClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(4, 2, TimeUnit.MINUTES))
+            .build()
     }
 
-    private val trustAllSslFactory = SSLContext.getInstance("TLS").apply {
-        init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-    }.socketFactory
+    private val cloudflareDoh: DnsOverHttps by lazy {
+        DnsOverHttps.Builder()
+            .client(bootstrapClient)
+            .url("https://1.1.1.1/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(
+                InetAddress.getByName("1.1.1.1"),
+                InetAddress.getByName("1.0.0.1")
+            )
+            .build()
+    }
 
-    private val dohBootstrapClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .sslSocketFactory(trustAllSslFactory, trustAllManager)
-            .hostnameVerifier { _, _ -> true }
-            .connectTimeout(7, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+    private val googleDoh: DnsOverHttps by lazy {
+        DnsOverHttps.Builder()
+            .client(bootstrapClient)
+            .url("https://dns.google/dns-query".toHttpUrl())
+            .bootstrapDnsHosts(
+                InetAddress.getByName("8.8.8.8"),
+                InetAddress.getByName("8.8.4.4")
+            )
             .build()
     }
 
     val hybridDns: Dns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
-            val key = hostname.lowercase()
-            val now = System.currentTimeMillis()
-            dnsCache[key]?.let { (exp, addrs) ->
-                if (exp > now && addrs.isNotEmpty()) return addrs
-            }
+            runCatching { Dns.SYSTEM.lookup(hostname) }
+                .getOrNull()
+                ?.takeIf { list -> list.isNotEmpty() && list.none { it.isLoopbackAddress || it.isAnyLocalAddress } }
+                ?.let { return it }
 
-            val sysAddrs = runCatching { Dns.SYSTEM.lookup(hostname) }
-                .getOrDefault(emptyList())
-                .filter { addr ->
-                    !addr.isLoopbackAddress && !addr.isAnyLocalAddress && addr.hostAddress != "0.0.0.0"
-                }
-            if (sysAddrs.isNotEmpty()) {
-                dnsCache[key] = (now + 600_000L) to sysAddrs
-                return sysAddrs
-            }
+            runCatching { cloudflareDoh.lookup(hostname) }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
 
-            for (dohUrl in listOf(
-                "https://1.1.1.1/dns-query?name=$hostname&type=A",
-                "https://8.8.8.8/resolve?name=$hostname&type=A"
-            )) {
-                val resolved = runCatching {
-                    val req = Request.Builder().url(dohUrl).header("Accept", "application/dns-json").build()
-                    dohBootstrapClient.newCall(req).execute().use { res ->
-                        if (!res.isSuccessful) return@use emptyList()
-                        val ans = JSONObject(res.body?.string().orEmpty()).optJSONArray("Answer") ?: return@use emptyList()
-                        val out = ArrayList<InetAddress>()
-                        for (i in 0 until ans.length()) {
-                            val rec = ans.optJSONObject(i) ?: continue
-                            if (rec.optInt("type") == 1) {
-                                val ip = rec.optString("data").trim()
-                                if (ip.isNotEmpty() && ip != "0.0.0.0" && !ip.startsWith("127.")) {
-                                    out.add(InetAddress.getByName(ip))
-                                }
-                            }
-                        }
-                        out
-                    }
-                }.getOrDefault(emptyList())
-
-                if (resolved.isNotEmpty()) {
-                    dnsCache[key] = (now + 600_000L) to resolved
-                    return resolved
-                }
-            }
-            throw UnknownHostException("Unable to resolve $hostname via System DNS or DoH")
+            return googleDoh.lookup(hostname)
         }
     }
 
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .dns(hybridDns)
-            .sslSocketFactory(trustAllSslFactory, trustAllManager)
-            .hostnameVerifier { _, _ -> true }
-            .connectTimeout(14, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(10, 3, TimeUnit.MINUTES))
             .build()
     }
 
-    val currentUserAgent: String
-        get() = EgyDeadPrefs.savedUserAgent ?: DEFAULT_UA
-
-    data class HttpResult(
+    data class RawHttpResult(
         val code: Int,
         val body: String,
         val finalUrl: String,
-        val cookies: Map<String, String> = emptyMap()
+        val headers: Map<String, List<String>>
     )
 
-    fun originOf(rawUrl: String): String? = runCatching {
-        val uri = URI(encodeUrl(rawUrl))
-        val scheme = uri.scheme ?: return null
-        val host = uri.host ?: return null
-        val portPart = if (uri.port != -1 && uri.port != 80 && uri.port != 443) ":${uri.port}" else ""
-        "$scheme://$host$portPart"
-    }.getOrNull()
+    fun originOf(rawUrl: String?): String? {
+        if (rawUrl.isNullOrBlank()) return null
+        return runCatching {
+            val uri = URI(encodeUrl(rawUrl.trim()))
+            val scheme = uri.scheme?.lowercase() ?: return null
+            val host = uri.host?.lowercase() ?: return null
+            val portPart = if (uri.port > 0 && uri.port != 80 && uri.port != 443) ":${uri.port}" else ""
+            "$scheme://$host$portPart"
+        }.getOrNull()
+    }
 
+    /**
+     * Percent-encodes non-ASCII (Arabic) characters while preserving existing `%XX` escapes.
+     */
     fun encodeUrl(raw: String): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return trimmed
@@ -199,13 +159,12 @@ object EgyDeadNetwork {
                 }
                 ch.code > 127 || ch == '"' || ch == '<' || ch == '>' || ch == '\\' ||
                     ch == '^' || ch == '`' || ch == '{' || ch == '|' || ch == '}' -> {
-                    val cp = Character.codePointAt(trimmed, i)
-                    val bytes = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8)
+                    val bytes = ch.toString().toByteArray(Charsets.UTF_8)
                     for (b in bytes) {
                         sb.append('%')
                         sb.append(String.format("%02X", b.toInt() and 0xFF))
                     }
-                    i += Character.charCount(cp)
+                    i++
                 }
                 else -> {
                     sb.append(ch)
@@ -219,477 +178,259 @@ object EgyDeadNetwork {
     private fun Char.isHexDigit(): Boolean =
         this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
 
+    /**
+     * Converts legacy singular paths (`/episode/`, `/season/`, `/serie/`, `/assembly/`)
+     * to current plural EgyDead paths (`/episodes/`, `/seasons/`, `/Series/`, `/film-series/`).
+     */
+    fun upgradeLegacyPath(url: String): String =
+        url
+            .replace(Regex("(?i)/episode/"), "/episodes/")
+            .replace(Regex("(?i)/season/"), "/seasons/")
+            .replace(Regex("(?i)/serie/"), "/Series/")
+            .replace(Regex("(?i)/series/"), "/Series/")
+            .replace(Regex("(?i)/assembly/"), "/film-series/")
+
     fun isCloudflareBlock(code: Int, body: String): Boolean {
-        if (code == 403 || code == 503 || code == 429) return true
-        if (body.length < 8000 && (
-                body.contains("cf-browser-verification") ||
-                    body.contains("challenge-platform") ||
-                    body.contains("cf_chl_opt") ||
-                    body.contains("Just a moment") ||
-                    body.contains("Attention Required! | Cloudflare")
-                )
-        ) return true
+        if (code in listOf(403, 429, 503)) {
+            if (
+                body.contains("cf-mitigated", ignoreCase = true) ||
+                body.contains("Just a moment", ignoreCase = true) ||
+                body.contains("challenge-platform", ignoreCase = true) ||
+                body.contains("cf_chl_opt", ignoreCase = true) ||
+                body.contains("cf-browser-verification", ignoreCase = true) ||
+                body.contains("Attention Required! | Cloudflare", ignoreCase = true)
+            ) {
+                return true
+            }
+        }
         return false
     }
 
     fun isValidEgyDeadHtml(body: String): Boolean {
-        if (body.length < 500) return false
-        return body.contains("movieItem") ||
-            body.contains("singleTitle") ||
-            body.contains("serversList") ||
-            body.contains("donwload-servers-list") ||
-            body.contains("ايجي ديد")
+        if (body.length < 400) return false
+        return body.contains("movieItem", ignoreCase = true) ||
+            body.contains("singleTitle", ignoreCase = true) ||
+            body.contains("EpsList", ignoreCase = true) ||
+            body.contains("watch_player", ignoreCase = true) ||
+            body.contains("serversList", ignoreCase = true) ||
+            body.contains("donwload-servers-list", ignoreCase = true) ||
+            body.contains("salery-list", ignoreCase = true) ||
+            body.contains("EgyDead", ignoreCase = true) ||
+            body.contains("ايجي ديد", ignoreCase = true)
     }
 
-    private fun isEgyDeadHost(host: String): Boolean =
-        host.lowercase().contains("egydead")
-
-    // =========================================================================
-    // SOCKS5 / HTTP Proxy Pool (Automatic VPN / Datacenter 403 Bypass)
-    // =========================================================================
-
-    private fun buildJavaProxy(spec: String): Proxy? = runCatching {
-        val scheme = spec.substringBefore("://", "socks5").lowercase()
-        val hp = spec.substringAfter("://")
-        val host = hp.substringBeforeLast(':').trim()
-        val port = hp.substringAfterLast(':').trim().toIntOrNull() ?: return null
-        if (host.isBlank() || port !in 1..65535) return null
-        val type = if (scheme.startsWith("socks")) Proxy.Type.SOCKS else Proxy.Type.HTTP
-        Proxy(type, InetSocketAddress(host, port))
-    }.getOrNull()
-
-    private fun buildProxyClient(javaProxy: Proxy, connectSec: Long = 7L, readSec: Long = 15L): OkHttpClient =
-        OkHttpClient.Builder()
-            .proxy(javaProxy)
-            .dns(hybridDns)
-            .sslSocketFactory(trustAllSslFactory, trustAllManager)
-            .hostnameVerifier { _, _ -> true }
-            .connectTimeout(connectSec, TimeUnit.SECONDS)
-            .readTimeout(readSec, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .build()
-
-    private fun getSharedProxyClient(spec: String): OkHttpClient? {
-        sharedProxyClients[spec]?.let { return it }
-        val jp = buildJavaProxy(spec) ?: return null
-        return buildProxyClient(jp).also { sharedProxyClients[spec] = it }
+    fun invalidateDomainCache() {
+        resolvedBaseUrl = null
+        resolvedAtMs = 0L
     }
-
-    private fun markProxyFailure(spec: String) {
-        val fails = (proxyFailCounts[spec] ?: 0) + 1
-        proxyFailCounts[spec] = fails
-        if (fails >= 3) {
-            deadProxies.add(spec)
-            workingProxies.remove(spec)
-            sharedProxyClients.remove(spec)
-        } else if (workingProxies.size > 1 && workingProxies.remove(spec)) {
-            workingProxies.add(spec)
-        }
-    }
-
-    private suspend fun ensureProxiesAvailable(probeBaseUrl: String = DEFAULT_BASE_URL): List<String> {
-        if (workingProxies.isNotEmpty()) return workingProxies.toList()
-        return proxyMutex.withLock {
-            if (workingProxies.isNotEmpty()) return@withLock workingProxies.toList()
-            if (deadProxies.size > 600) deadProxies.clear()
-
-            val candidates = coroutineScope {
-                PROXY_FEEDS.map { (scheme, feedUrl) ->
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            val req = Request.Builder().url(feedUrl).header("User-Agent", DEFAULT_UA).build()
-                            dohBootstrapClient.newCall(req).execute().use { res ->
-                                if (!res.isSuccessful) return@use emptyList()
-                                res.body?.string().orEmpty()
-                                    .lineSequence()
-                                    .map { line ->
-                                        line.trim()
-                                            .removePrefix("socks5h://")
-                                            .removePrefix("socks5://")
-                                            .removePrefix("https://")
-                                            .removePrefix("http://")
-                                    }
-                                    .filter { Regex("""^\d+\.\d+\.\d+\.\d+:\d+$""").matches(it) }
-                                    .take(45)
-                                    .map { "$scheme://$it" }
-                                    .filterNot { deadProxies.contains(it) }
-                                    .toList()
-                            }
-                        }.getOrDefault(emptyList())
-                    }
-                }.awaitAll().flatten().distinct()
-            }
-
-            val sem = Semaphore(25)
-            val verified = ConcurrentHashMap<String, Long>()
-            for (batch in candidates.chunked(35)) {
-                if (verified.size >= 6) break
-                coroutineScope {
-                    batch.map { spec ->
-                        async(Dispatchers.IO) {
-                            if (verified.size >= 6) return@async
-                            sem.withPermit {
-                                if (verified.size >= 6) return@withPermit
-                                val jp = buildJavaProxy(spec) ?: return@withPermit
-                                val probeClient = buildProxyClient(jp, connectSec = 5L, readSec = 8L)
-                                val t0 = System.currentTimeMillis()
-                                val res = executeOnClient(probeClient, "$probeBaseUrl/movies/", "$probeBaseUrl/")
-                                if (res != null && res.code in 200..299 &&
-                                    !isCloudflareBlock(res.code, res.body) &&
-                                    isValidEgyDeadHtml(res.body)
-                                ) {
-                                    verified[spec] = System.currentTimeMillis() - t0
-                                    originOf(res.finalUrl)?.takeIf { isEgyDeadHost(it) }?.let { active ->
-                                        cachedBaseUrl = active
-                                        cachedAtMs = System.currentTimeMillis()
-                                    }
-                                } else {
-                                    deadProxies.add(spec)
-                                }
-                            }
-                        }
-                    }.awaitAll()
-                }
-            }
-
-            val sorted = verified.entries.sortedBy { it.value }.map { it.key }
-            for (s in sorted) {
-                if (!workingProxies.contains(s)) workingProxies.add(s)
-            }
-            workingProxies.toList()
-        }
-    }
-
-    // =========================================================================
-    // Domain Discovery & URL Rewriting
-    // =========================================================================
 
     suspend fun getBaseUrl(forceRefresh: Boolean = false): String {
         val now = System.currentTimeMillis()
-        cachedBaseUrl?.let { cached ->
-            if (!forceRefresh && now - cachedAtMs < DOMAIN_TTL_MS) return cached
+        val cached = resolvedBaseUrl
+        if (!forceRefresh && !cached.isNullOrBlank() && (now - resolvedAtMs) < DOMAIN_CACHE_TTL_MS) {
+            return cached
         }
         return domainMutex.withLock {
-            val recheckNow = System.currentTimeMillis()
-            cachedBaseUrl?.let { cached ->
-                if (!forceRefresh && recheckNow - cachedAtMs < DOMAIN_TTL_MS) return@withLock cached
+            val again = resolvedBaseUrl
+            if (!forceRefresh && !again.isNullOrBlank() && (System.currentTimeMillis() - resolvedAtMs) < DOMAIN_CACHE_TTL_MS) {
+                return@withLock again
             }
-            val resolved = discoverLiveDomain()
-            cachedBaseUrl = resolved
-            cachedAtMs = System.currentTimeMillis()
-            EgyDeadPrefs.discoveredDomain = resolved
-            resolved
+            val discovered = discoverLiveDomain()
+            resolvedBaseUrl = discovered
+            resolvedAtMs = System.currentTimeMillis()
+            EgyDeadPrefs.discoveredDomain = discovered
+            discovered
         }
     }
 
     private suspend fun discoverLiveDomain(): String = withContext(Dispatchers.IO) {
-        val candidates = buildList {
-            EgyDeadPrefs.customDomain?.let { add(it) }
-            EgyDeadPrefs.discoveredDomain?.let { add(it) }
-            addAll(BEACON_DOMAINS)
-        }.map { it.trim().trimEnd('/') }.distinct()
+        val candidates = LinkedHashSet<String>()
+        EgyDeadPrefs.customDomain?.takeIf { it.startsWith("http") }?.let { candidates.add(it.trimEnd('/')) }
+        EgyDeadPrefs.discoveredDomain?.takeIf { it.startsWith("http") }?.let { candidates.add(it.trimEnd('/')) }
+        BEACON_DOMAINS.forEach { candidates.add(it.trimEnd('/')) }
 
-        // 1. Try direct HTTP first unless direct is known-blocked
-        if (System.currentTimeMillis() >= directBlockedUntilMs && !EgyDeadPrefs.useProxy) {
-            var sawBlock = false
-            for (candidate in candidates.take(4)) {
-                val probe = executeRawGet("$candidate/", referer = "$candidate/") ?: continue
-                if (probe.code in 200..299 && !isCloudflareBlock(probe.code, probe.body) && isValidEgyDeadHtml(probe.body)) {
-                    val activeOrigin = originOf(probe.finalUrl) ?: candidate
-                    runCatching { Log.d(TAG, "Discovered live EgyDead origin (direct): $activeOrigin") }
-                    return@withContext activeOrigin
-                }
-                if (isCloudflareBlock(probe.code, probe.body)) {
-                    sawBlock = true
-                    break
-                }
+        for (candidate in candidates) {
+            val probe = executeRawGet("$candidate/", referer = "$candidate/", timeoutSec = 10) ?: continue
+            val landedOrigin = originOf(probe.finalUrl) ?: originOf(candidate) ?: continue
+            if (probe.code in 200..299 && isValidEgyDeadHtml(probe.body) && !isCloudflareBlock(probe.code, probe.body)) {
+                runCatching { Log.d(TAG, "Discovered live EgyDead origin: $landedOrigin (from $candidate)") }
+                return@withContext landedOrigin
             }
-            if (sawBlock) {
-                directBlockedUntilMs = System.currentTimeMillis() + 10 * 60 * 1000L
+            if (landedOrigin != candidate.trimEnd('/') && landedOrigin.contains("egydead.")) {
+                return@withContext landedOrigin
             }
         }
-
-        // 2. Discover via verified SOCKS5/HTTP proxy pool when direct IP is Cloudflare-blocked
-        val proxies = ensureProxiesAvailable(candidates.firstOrNull() ?: DEFAULT_BASE_URL)
-        cachedBaseUrl?.let { return@withContext it }
-        for (spec in proxies.take(3)) {
-            val pClient = getSharedProxyClient(spec) ?: continue
-            for (candidate in listOf("https://egydead.live", DEFAULT_BASE_URL)) {
-                val probe = executeOnClient(pClient, "$candidate/", "$candidate/") ?: continue
-                if (probe.code in 200..299 && !isCloudflareBlock(probe.code, probe.body) && isValidEgyDeadHtml(probe.body)) {
-                    return@withContext originOf(probe.finalUrl) ?: candidate
-                }
-            }
-        }
-
-        EgyDeadPrefs.discoveredDomain ?: DEFAULT_BASE_URL
+        DEFAULT_BASE_URL
     }
 
     suspend fun rewriteToActiveBase(rawUrl: String): String {
         val activeBase = getBaseUrl()
-        val trimmed = rawUrl.trim()
-        if (trimmed.isEmpty()) return activeBase
-        if (trimmed.startsWith("/")) return "$activeBase$trimmed"
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-            return "$activeBase/${trimmed.trimStart('/')}"
+        val upgraded = upgradeLegacyPath(rawUrl.trim())
+        if (upgraded.isEmpty()) return activeBase
+        if (upgraded.startsWith("/")) return encodeUrl("$activeBase$upgraded")
+        if (!upgraded.startsWith("http://") && !upgraded.startsWith("https://")) {
+            return encodeUrl("$activeBase/${upgraded.trimStart('/')}")
         }
+        val encoded = encodeUrl(upgraded)
         return runCatching {
-            val encoded = encodeUrl(trimmed)
             val uri = URI(encoded)
-            val host = uri.host ?: return@runCatching encoded
-            if (isEgyDeadHost(host)) {
+            val host = uri.host?.lowercase().orEmpty()
+            if (host.contains("egydead.")) {
                 val path = uri.rawPath?.ifEmpty { "/" } ?: "/"
                 val query = uri.rawQuery?.let { "?$it" } ?: ""
                 "$activeBase$path$query"
             } else {
                 encoded
             }
-        }.getOrDefault(encodeUrl(trimmed))
+        }.getOrDefault(encoded)
     }
 
-    fun upgradeLegacyPath(url: String): String {
-        return url
-            .replace(Regex("(?i)/episode/"), "/episodes/")
-            .replace(Regex("(?i)/season/"), "/seasons/")
-            .replace(Regex("(?i)/serie/"), "/Series/")
-            .replace(Regex("(?i)/series/"), "/Series/")
-            .replace(Regex("(?i)/assembly/"), "/film-series/")
+    private fun resolveClient(timeoutSec: Long): OkHttpClient {
+        val customProxyStr = if (EgyDeadPrefs.useProxy) EgyDeadPrefs.customProxy else null
+        val customProxy = parseUserProxy(customProxyStr)
+        if (customProxy == null && timeoutSec == 20L) return httpClient
+        return httpClient.newBuilder().apply {
+            if (timeoutSec != 20L) {
+                connectTimeout(timeoutSec, TimeUnit.SECONDS)
+                readTimeout(timeoutSec, TimeUnit.SECONDS)
+            }
+            if (customProxy != null) proxy(customProxy)
+        }.build()
     }
 
-    // =========================================================================
-    // HTTP Execution (Direct + Automatic Proxy Pool + Cloudflare Solver)
-    // =========================================================================
+    private fun parseUserProxy(spec: String?): Proxy? = runCatching {
+        if (spec.isNullOrBlank()) return null
+        val s = spec.trim()
+        val isSocks = s.startsWith("socks", ignoreCase = true)
+        val hp = s.substringAfter("://", s)
+        val host = hp.substringBefore(':').trim()
+        val port = hp.substringAfter(':', "").trim().toIntOrNull() ?: return null
+        if (host.isEmpty() || port !in 1..65535) return null
+        Proxy(if (isSocks) Proxy.Type.SOCKS else Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port))
+    }.getOrNull()
 
-    private fun executeOnClient(
-        client: OkHttpClient,
-        url: String,
-        referer: String? = null,
-        extraHeaders: Map<String, String> = emptyMap()
-    ): HttpResult? = runCatching {
-        val safeUrl = encodeUrl(url)
-        val reqBuilder = Request.Builder()
-            .url(safeUrl)
-            .header("User-Agent", currentUserAgent)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-
+    private fun buildHeaders(
+        safeUrl: String,
+        referer: String?,
+        extraHeaders: Map<String, String>
+    ): Map<String, String> = LinkedHashMap<String, String>().apply {
+        put("User-Agent", currentUserAgent)
+        put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        put("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
         if (!referer.isNullOrBlank()) {
-            reqBuilder.header("Referer", encodeUrl(referer))
+            put("Referer", encodeUrl(referer))
+        } else {
+            originOf(safeUrl)?.let { put("Referer", "$it/") }
         }
         EgyDeadPrefs.cfClearance?.let { token ->
-            val existingCookie = extraHeaders["Cookie"]
-            val combined = if (existingCookie.isNullOrBlank()) "cf_clearance=$token" else "$existingCookie; cf_clearance=$token"
-            reqBuilder.header("Cookie", combined)
+            if (safeUrl.contains("egydead.", ignoreCase = true)) {
+                val existing = extraHeaders["Cookie"]
+                val cookieValue = if (token.contains("cf_clearance=")) token else "cf_clearance=$token"
+                put("Cookie", if (existing.isNullOrBlank()) cookieValue else "$existing; $cookieValue")
+            }
         }
         for ((k, v) in extraHeaders) {
-            if (!k.equals("Cookie", ignoreCase = true) || EgyDeadPrefs.cfClearance == null) {
-                reqBuilder.header(k, v)
+            if (!k.equals("Cookie", ignoreCase = true) || !containsKey("Cookie")) {
+                put(k, v)
             }
         }
-
-        client.newCall(reqBuilder.build()).execute().use { resp ->
-            val cookies = LinkedHashMap<String, String>()
-            for (sc in resp.headers("Set-Cookie")) {
-                val pair = sc.substringBefore(';').trim()
-                val eq = pair.indexOf('=')
-                if (eq > 0) {
-                    cookies[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
-                }
-            }
-            HttpResult(
-                code = resp.code,
-                body = resp.body?.string().orEmpty(),
-                finalUrl = resp.request.url.toString(),
-                cookies = cookies
-            )
-        }
-    }.getOrNull()
+    }
 
     fun executeRawGet(
         url: String,
         referer: String? = null,
-        extraHeaders: Map<String, String> = emptyMap()
-    ): HttpResult? = executeOnClient(httpClient, url, referer, extraHeaders)
-
-    /**
-     * Executes GET directly first, and if blocked (403/503) retries via verified SOCKS5/HTTP proxy pool.
-     */
-    suspend fun executeGetWithProxyFallback(
-        url: String,
-        referer: String? = null,
-        extraHeaders: Map<String, String> = emptyMap()
-    ): HttpResult? = withContext(Dispatchers.IO) {
-        val direct = executeOnClient(httpClient, url, referer, extraHeaders)
-        if (direct != null && direct.code in 200..299 && !isCloudflareBlock(direct.code, direct.body)) {
-            return@withContext direct
-        }
-        val proxies = ensureProxiesAvailable()
-        for (spec in proxies.take(4)) {
-            val pClient = getSharedProxyClient(spec) ?: continue
-            val res = executeOnClient(pClient, url, referer, extraHeaders)
-            if (res != null && res.code in 200..299) {
-                return@withContext res
-            }
-            markProxyFailure(spec)
-        }
-        direct
-    }
-
-    fun executeRawPost(
-        url: String,
-        formData: Map<String, String> = emptyMap(),
-        jsonBody: String? = null,
-        referer: String? = null,
         extraHeaders: Map<String, String> = emptyMap(),
-        client: OkHttpClient = httpClient
-    ): HttpResult? = runCatching {
+        timeoutSec: Long = 20L
+    ): RawHttpResult? = runCatching {
         val safeUrl = encodeUrl(url)
-        val body = if (jsonBody != null) {
-            jsonBody.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-        } else {
-            FormBody.Builder().apply {
-                formData.forEach { (k, v) -> add(k, v) }
-            }.build()
-        }
-
-        val reqBuilder = Request.Builder()
-            .url(safeUrl)
-            .post(body)
-            .header("User-Agent", currentUserAgent)
-            .header("Accept", "text/html,application/xhtml+xml,application/json,*/*;q=0.8")
-            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-
-        if (!referer.isNullOrBlank()) {
-            val safeRef = encodeUrl(referer)
-            reqBuilder.header("Referer", safeRef)
-            originOf(safeRef)?.let { reqBuilder.header("Origin", it) }
-        }
-        EgyDeadPrefs.cfClearance?.let { token ->
-            val existingCookie = extraHeaders["Cookie"]
-            val combined = if (existingCookie.isNullOrBlank()) "cf_clearance=$token" else "$existingCookie; cf_clearance=$token"
-            reqBuilder.header("Cookie", combined)
-        }
-        for ((k, v) in extraHeaders) {
-            if (!k.equals("Cookie", ignoreCase = true) || EgyDeadPrefs.cfClearance == null) {
-                reqBuilder.header(k, v)
-            }
-        }
-
-        client.newCall(reqBuilder.build()).execute().use { resp ->
-            val cookies = LinkedHashMap<String, String>()
-            for (sc in resp.headers("Set-Cookie")) {
-                val pair = sc.substringBefore(';').trim()
-                val eq = pair.indexOf('=')
-                if (eq > 0) {
-                    cookies[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
-                }
-            }
-            HttpResult(
+        val reqBuilder = Request.Builder().url(safeUrl)
+        buildHeaders(safeUrl, referer, extraHeaders).forEach { (k, v) -> reqBuilder.header(k, v) }
+        resolveClient(timeoutSec).newCall(reqBuilder.build()).execute().use { resp ->
+            RawHttpResult(
                 code = resp.code,
                 body = resp.body?.string().orEmpty(),
                 finalUrl = resp.request.url.toString(),
-                cookies = cookies
+                headers = resp.headers.toMultimap()
             )
         }
     }.getOrNull()
 
-    suspend fun fetchDocument(
-        rawUrl: String,
-        referer: String? = null
-    ): Document? = withContext(Dispatchers.IO) {
-        val targetUrl = rewriteToActiveBase(rawUrl)
-        val effectiveRef = referer?.let { rewriteToActiveBase(it) } ?: "${getBaseUrl()}/"
-
-        // 1. Direct HTTP when not known-blocked and user didn't force proxy
-        if (!EgyDeadPrefs.useProxy && System.currentTimeMillis() >= directBlockedUntilMs) {
-            var res = executeRawGet(targetUrl, referer = effectiveRef)
-            if (res == null || res.code == 404) {
-                val upgraded = upgradeLegacyPath(targetUrl)
-                if (upgraded != targetUrl) {
-                    res = executeRawGet(upgraded, referer = effectiveRef)
-                }
-            }
-            if (res != null && res.code in 200..299 && !isCloudflareBlock(res.code, res.body)) {
-                originOf(res.finalUrl)?.takeIf { isEgyDeadHost(it) }?.let { active ->
-                    cachedBaseUrl = active
-                    cachedAtMs = System.currentTimeMillis()
-                }
-                return@withContext Jsoup.parse(res.body, res.finalUrl)
-            }
-            if (res != null && isCloudflareBlock(res.code, res.body)) {
-                // Try silent WebView Cloudflare solver on Android first
-                val ctx = EgyDeadPrefs.appContext
-                if (ctx != null) {
-                    val solved = runCatching { CloudflareSolver.solve(ctx, targetUrl, currentUserAgent) }.getOrNull()
-                    if (solved != null && !solved.cfClearance.isNullOrBlank()) {
-                        EgyDeadPrefs.cfClearance = solved.cfClearance
-                        EgyDeadPrefs.savedUserAgent = solved.userAgent
-                        val afterSolve = executeRawGet(targetUrl, referer = effectiveRef)
-                        if (afterSolve != null && afterSolve.code in 200..299 && !isCloudflareBlock(afterSolve.code, afterSolve.body)) {
-                            return@withContext Jsoup.parse(afterSolve.body, afterSolve.finalUrl)
-                        }
-                    }
-                }
-                directBlockedUntilMs = System.currentTimeMillis() + 10 * 60 * 1000L
-            }
+    fun executeRawPostForm(
+        url: String,
+        formFields: Map<String, String>,
+        referer: String? = null,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): RawHttpResult? = runCatching {
+        val safeUrl = encodeUrl(url)
+        val formBuilder = FormBody.Builder()
+        formFields.forEach { (k, v) -> formBuilder.add(k, v) }
+        val reqBuilder = Request.Builder().url(safeUrl).post(formBuilder.build())
+        buildHeaders(safeUrl, referer, extraHeaders).forEach { (k, v) -> reqBuilder.header(k, v) }
+        originOf(safeUrl)?.let { reqBuilder.header("Origin", it) }
+        resolveClient(20L).newCall(reqBuilder.build()).execute().use { resp ->
+            RawHttpResult(
+                code = resp.code,
+                body = resp.body?.string().orEmpty(),
+                finalUrl = resp.request.url.toString(),
+                headers = resp.headers.toMultimap()
+            )
         }
-
-        // 2. Custom Web Proxy if configured by user
-        EgyDeadPrefs.customProxy?.let { cp ->
-            val prefix = if (cp.contains("=") || cp.endsWith("/")) cp else "$cp?url="
-            val encodedTarget = runCatching { URLEncoder.encode(encodeUrl(targetUrl), "UTF-8") }.getOrDefault(targetUrl)
-            val res = executeRawGet("$prefix$encodedTarget")
-            if (res != null && res.code in 200..299 && isValidEgyDeadHtml(res.body)) {
-                return@withContext Jsoup.parse(res.body, targetUrl)
-            }
-        }
-
-        // 3. Verified SOCKS5 / HTTP Proxy Pool (fast parallel rotation)
-        for (attempt in 0..1) {
-            val proxies = ensureProxiesAvailable(getBaseUrl())
-            for (spec in proxies.take(5)) {
-                val pClient = getSharedProxyClient(spec) ?: continue
-                var res = executeOnClient(pClient, targetUrl, effectiveRef)
-                if (res != null && res.code == 404) {
-                    val upgraded = upgradeLegacyPath(targetUrl)
-                    if (upgraded != targetUrl) {
-                        res = executeOnClient(pClient, upgraded, effectiveRef)
-                    }
-                }
-                if (res != null && res.code in 200..299 && !isCloudflareBlock(res.code, res.body) && res.body.isNotBlank()) {
-                    return@withContext Jsoup.parse(res.body, res.finalUrl)
-                }
-                markProxyFailure(spec)
-            }
-            if (workingProxies.isNotEmpty()) break
-        }
-        null
-    }
+    }.getOrNull()
 
     suspend fun postDocument(
         rawUrl: String,
-        data: Map<String, String>,
+        formFields: Map<String, String>,
         referer: String? = null
-    ): Document? = withContext(Dispatchers.IO) {
-        val targetUrl = rewriteToActiveBase(rawUrl)
-        val effectiveRef = referer?.let { rewriteToActiveBase(it) } ?: targetUrl
+    ): Document? = fetchDocument(rawUrl, referer = referer, postFields = formFields)
 
-        if (!EgyDeadPrefs.useProxy && System.currentTimeMillis() >= directBlockedUntilMs) {
-            val res = executeRawPost(targetUrl, formData = data, referer = effectiveRef)
-            if (res != null && res.code in 200..299 && !isCloudflareBlock(res.code, res.body) && res.body.isNotBlank()) {
-                return@withContext Jsoup.parse(res.body, res.finalUrl)
+    suspend fun fetchDocument(
+        rawUrl: String,
+        referer: String? = null,
+        postFields: Map<String, String>? = null
+    ): Document? = withContext(Dispatchers.IO) {
+        val base = getBaseUrl(false)
+        var targetUrl = rewriteToActiveBase(rawUrl)
+        val effectiveReferer = referer?.let { rewriteToActiveBase(it) } ?: "$base/"
+
+        var result = if (!postFields.isNullOrEmpty()) {
+            executeRawPostForm(targetUrl, postFields, effectiveReferer)
+                ?.takeIf { it.code in 200..299 && isValidEgyDeadHtml(it.body) && !isCloudflareBlock(it.code, it.body) }
+                ?: executeRawGet(targetUrl, effectiveReferer)
+        } else {
+            executeRawGet(targetUrl, effectiveReferer)
+        }
+
+        if ((result == null || (result.code >= 500 && !isCloudflareBlock(result.code, result.body))) &&
+            targetUrl.contains("egydead.", ignoreCase = true)
+        ) {
+            val refreshedBase = getBaseUrl(forceRefresh = true)
+            if (refreshedBase != base) {
+                targetUrl = rewriteToActiveBase(rawUrl)
+                result = executeRawGet(targetUrl, "$refreshedBase/")
             }
         }
 
-        val proxies = ensureProxiesAvailable(getBaseUrl())
-        for (spec in proxies.take(4)) {
-            val pClient = getSharedProxyClient(spec) ?: continue
-            val res = executeRawPost(targetUrl, formData = data, referer = effectiveRef, client = pClient)
-            if (res != null && res.code in 200..299 && !isCloudflareBlock(res.code, res.body) && res.body.isNotBlank()) {
-                return@withContext Jsoup.parse(res.body, res.finalUrl)
+        if (result != null && isCloudflareBlock(result.code, result.body)) {
+            val ctx = EgyDeadPrefs.appContext
+            if (ctx != null) {
+                val solved = runCatching { CloudflareSolver.solve(ctx, targetUrl, currentUserAgent) }.getOrNull()
+                if (solved != null) {
+                    solved.cfClearance?.takeIf { it.isNotBlank() }?.let { EgyDeadPrefs.cfClearance = it }
+                    solved.userAgent.takeIf { it.isNotBlank() }?.let { EgyDeadPrefs.savedUserAgent = it }
+                    result = if (!postFields.isNullOrEmpty()) {
+                        executeRawPostForm(targetUrl, postFields, effectiveReferer)
+                            ?.takeIf { it.code in 200..299 && isValidEgyDeadHtml(it.body) }
+                            ?: executeRawGet(targetUrl, effectiveReferer)
+                    } else {
+                        executeRawGet(targetUrl, effectiveReferer)
+                    }
+                }
             }
-            markProxyFailure(spec)
+        }
+
+        val finalBody = result?.body
+        if (!finalBody.isNullOrBlank() && !isCloudflareBlock(result?.code ?: 0, finalBody)) {
+            return@withContext Jsoup.parse(finalBody, result?.finalUrl ?: targetUrl)
         }
         null
     }

@@ -20,13 +20,37 @@ import com.lagradost.cloudstream3.plugins.Plugin
 class EgyDeadPlugin : Plugin() {
     override fun load(context: Context) {
         EgyDeadPrefs.init(context)
+
+        // Register main provider
         registerMainAPI(EgyDead())
-        registerExtractorAPI(EgyDeadMegaMaxApi())
-        registerExtractorAPI(EgyDeadMegaMaxMeApi())
-        registerExtractorAPI(EgyDeadShare4MaxApi())
-        registerExtractorAPI(EgyDeadStreamHgApi())
-        registerExtractorAPI(EgyDeadVibuxerApi())
-        registerExtractorAPI(EgyDeadHgCloudApi())
+
+        // Register custom pure-Kotlin multi-quality video & download extractors
+        registerExtractorAPI(EgyDeadMegaMaxExtractor())
+        registerExtractorAPI(EgyDeadShare4MaxExtractor())
+        registerExtractorAPI(EgyDeadMegaMaxRotatingExtractor())
+        registerExtractorAPI(EgyDeadByseExtractor())
+        registerExtractorAPI(EgyDeadUpnShareExtractor())
+        registerExtractorAPI(EgyDeadStreamP2PExtractor())
+        registerExtractorAPI(EgyDeadRpmShareExtractor())
+        registerExtractorAPI(EgyDeadFireStreamExtractor())
+        registerExtractorAPI(EgyDeadVidaraExtractor())
+        registerExtractorAPI(EgyDeadStreamHGExtractor())
+        registerExtractorAPI(EgyDeadHanerixExtractor())
+        registerExtractorAPI(EgyDeadHgCloudExtractor())
+        registerExtractorAPI(EgyDeadEarnVidsExtractor())
+        registerExtractorAPI(EgyDeadMixdropExtractor())
+        registerExtractorAPI(EgyDeadDoodExtractor())
+        registerExtractorAPI(EgyDeadVoeExtractor())
+        registerExtractorAPI(EgyDeadFileMoonExtractor())
+        registerExtractorAPI(EgyDeadMediaFireExtractor())
+        registerExtractorAPI(EgyDeadMp4UploadExtractor())
+        registerExtractorAPI(EgyDeadUqloadExtractor())
+        registerExtractorAPI(EgyDeadVkExtractor())
+        registerExtractorAPI(EgyDeadVidozaExtractor())
+        registerExtractorAPI(EgyDeadKoramaUpExtractor())
+        registerExtractorAPI(EgyDeadUpvidExtractor())
+        registerExtractorAPI(EgyDeadSaveFilesExtractor())
+        registerExtractorAPI(EgyDeadLuluStreamExtractor())
 
         openSettings = { ctx ->
             showSettingsDialog(ctx)
@@ -69,7 +93,7 @@ class EgyDeadPlugin : Plugin() {
 
         val activeDomainLabel = TextView(context).apply {
             val active = EgyDeadPrefs.customDomain ?: EgyDeadPrefs.discoveredDomain ?: EgyDeadNetwork.DEFAULT_BASE_URL
-            text = "الدومين النشط حالياً: $active\n(يتم اكتشاف الدومين الجديد تلقائياً دون الحاجة لتعديل يدوي)"
+            text = "الدومين النشط حالياً: $active\n(يتم اكتشاف الدومين الجديد تلقائياً مع دعم DoH)"
             textSize = 12f
             setTextColor(Color.parseColor("#A0A8B8"))
             gravity = Gravity.CENTER
@@ -91,7 +115,7 @@ class EgyDeadPlugin : Plugin() {
         root.addView(domainInput)
 
         val proxySwitch = Switch(context).apply {
-            text = "تفعيل البروكسي لتجاوز حجب الشبكة"
+            text = "تفعيل البروكسي المخصص"
             setTextColor(Color.WHITE)
             textSize = 14f
             isChecked = EgyDeadPrefs.useProxy
@@ -101,7 +125,7 @@ class EgyDeadPlugin : Plugin() {
         root.addView(proxySwitch)
 
         val proxyInput = EditText(context).apply {
-            hint = "رابط بروكسي مخصص (اختياري)"
+            hint = "بروكسي اختياري (مثال: socks5://host:1080 أو host:8080)"
             setHintTextColor(Color.parseColor("#687080"))
             setTextColor(Color.WHITE)
             textSize = 13f
@@ -122,6 +146,7 @@ class EgyDeadPlugin : Plugin() {
                 EgyDeadPrefs.useProxy = proxySwitch.isChecked
                 EgyDeadPrefs.customProxy = proxyInput.text?.toString()
                 EgyDeadPrefs.clearCookies()
+                EgyDeadNetwork.invalidateDomainCache()
                 Toast.makeText(context, "تم حفظ إعدادات EgyDead بنجاح", Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton("إعادة الضبط التلقائي") { _, _ ->
@@ -130,6 +155,7 @@ class EgyDeadPlugin : Plugin() {
                 EgyDeadPrefs.useProxy = false
                 EgyDeadPrefs.customProxy = null
                 EgyDeadPrefs.clearCookies()
+                EgyDeadNetwork.invalidateDomainCache()
                 Toast.makeText(context, "تم تفعيل الاكتشاف التلقائي للدومين", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("إلغاء", null)
