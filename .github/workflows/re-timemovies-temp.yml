@@ -1,0 +1,508 @@
+name: Inspect TimeMovies Temp
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'arena/5a5a9059-mehdigm-stream'
+    paths:
+      - '.github/workflows/re-timemovies-temp.yml'
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 & Python tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install jadx, pyelftools, capstone, and download APKs
+        run: |
+          mkdir -p /tmp/re/apks /tmp/re/jadx /tmp/re/out /tmp/re/report
+          pip install -q pyelftools capstone androguard cryptography requests
+
+          curl -sSL -o /tmp/re/jadx.zip "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip"
+          unzip -q /tmp/re/jadx.zip -d /tmp/re/jadx
+          chmod +x /tmp/re/jadx/bin/jadx
+
+          curl -sSL -o /tmp/re/apks/TimeMovies_1092.apk \
+            "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk"
+          curl -sSL -o /tmp/re/apks/DoomVideoPlayer_1126.apk \
+            "https://github.com/magicsol255/timefiles/releases/download/player/DoomVideoPlayer.v1.0.6.7.build.1126.apk"
+          curl -sSL -o /tmp/re/apks/TimeMoviesTV_1086.apk \
+            "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMoviesTV.v5.0.6.1.build.1086-p1.apk"
+          ls -lh /tmp/re/apks/
+
+      - name: Static analysis of 1092 & DoomVideoPlayer (.so + manifest + icons + unpacked check)
+        run: |
+          python3 - <<'PY' > /tmp/re/report/static_summary.txt 2>&1
+          import zipfile, os, struct, base64
+          from elftools.elf.elffile import ELFFile
+          from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+          from loguru import logger
+          logger.remove()
+          from androguard.core.axml import AXMLPrinter
+          from androguard.core.dex import DEX
+
+          for name, path in [
+              ("TimeMovies_1092", "/tmp/re/apks/TimeMovies_1092.apk"),
+              ("DoomPlayer_1126", "/tmp/re/apks/DoomVideoPlayer_1126.apk"),
+              ("TimeMoviesTV_1086", "/tmp/re/apks/TimeMoviesTV_1086.apk"),
+          ]:
+              print(f"================ {name} ================")
+              zf = zipfile.ZipFile(path, 'r')
+              names = zf.namelist()
+              dexes = [n for n in names if n.endswith('.dex')]
+              sos = [n for n in names if n.endswith('.so')]
+              assets = [n for n in names if n.startswith('assets/')]
+              pngs = [n for n in names if ('ic_launcher' in n or 'logo' in n or 'icon' in n) and n.endswith(('.png', '.webp'))]
+              print("DEX:", dexes)
+              print("SO:", sos)
+              print("ASSETS:", assets[:30])
+              print("ICONS:", pngs[:20])
+
+              if 'AndroidManifest.xml' in names:
+                  xml = AXMLPrinter(zf.read('AndroidManifest.xml')).get_xml().decode('utf-8', errors='replace')
+                  for line in xml.splitlines():
+                      if any(k in line for k in ('package=', '<application', '<activity', '<service', '<provider', 'scheme=', 'host=')):
+                          print("  MAN:", line.strip()[:180])
+
+              for dx in dexes[:5]:
+                  d = DEX(zf.read(dx))
+                  cls = [c.get_name() for c in d.get_classes()]
+                  print(f"  {dx}: {len(cls)} classes, sample={cls[:8]}")
+
+          # Extract best icon from TimeMovies_1092
+          zf = zipfile.ZipFile("/tmp/re/apks/TimeMovies_1092.apk", 'r')
+          icon_cands = [
+              (zf.getinfo(n).file_size, n)
+              for n in zf.namelist()
+              if n.startswith('res/') and n.endswith(('.png', '.webp')) and ('launcher' in n or 'logo' in n) and 'foreground' not in n
+          ]
+          icon_cands.sort(reverse=True)
+          print("Top icon candidates:", icon_cands[:10])
+          if icon_cands:
+              with open("/tmp/re/report/icon_best.bin", "wb") as f:
+                  f.write(zf.read(icon_cands[0][1]))
+              with open("/tmp/re/report/icon_name.txt", "w") as f:
+                  f.write(icon_cands[0][1])
+
+          # Decode libapi_path_guard.so and libtime.so from TimeMovies_1092
+          os.makedirs("/tmp/re/so1092", exist_ok=True)
+          for n in zf.namelist():
+              if n.startswith("lib/x86_64/") and n.endswith(".so"):
+                  zf.extract(n, "/tmp/re/so1092")
+
+          def voff(elf, vaddr):
+              for seg in elf.iter_segments():
+                  if seg['p_type'] == 'PT_LOAD':
+                      if seg['p_vaddr'] <= vaddr < seg['p_vaddr'] + seg['p_filesz']:
+                          return seg['p_offset'] + (vaddr - seg['p_vaddr'])
+              return None
+
+          apg_path = "/tmp/re/so1092/lib/x86_64/libapi_path_guard.so"
+          if os.path.exists(apg_path):
+              print("\n--- 1092 libapi_path_guard.so ---")
+              raw = open(apg_path, 'rb').read()
+              elf = ELFFile(open(apg_path, 'rb'))
+              symtab = elf.get_section_by_name('.dynsym')
+              for sym in symtab.iter_symbols():
+                  if sym['st_value']:
+                      print("SYM:", hex(sym['st_value']), sym['st_size'], sym.name)
+              # Find hm... key in rodata
+              ro = elf.get_section_by_name('.rodata')
+              print("RODATA:", ro.data())
+              rel_map = {}
+              for sec in elf.iter_sections():
+                  if hasattr(sec, 'iter_relocations'):
+                      for rel in sec.iter_relocations():
+                          rel_map[rel['r_offset']] = rel['r_addend']
+              # Locate data.rel.ro table
+              drel = elf.get_section_by_name('.data.rel.ro')
+              if drel:
+                  base_v = drel['sh_addr']
+                  cnt = drel['sh_size'] // 24
+                  key9 = b'hm2534925'
+                  for i in range(cnt):
+                      ev = base_v + i * 24
+                      ptr = rel_map.get(ev)
+                      off = voff(elf, ev)
+                      _, f1, f2 = struct.unpack('<QQQ', raw[off:off+24])
+                      if ptr and 1 <= f1 <= 128:
+                          enc = raw[voff(elf, ptr):voff(elf, ptr)+int(f1)]
+                          dec = bytes([enc[j] ^ key9[j % len(key9)] for j in range(len(enc))])
+                          print(f"  PATH id={f2} (len={f1}): {dec.decode('utf-8', errors='replace')!r}")
+
+          lt_path = "/tmp/re/so1092/lib/x86_64/libtime.so"
+          if os.path.exists(lt_path):
+              print("\n--- 1092 libtime.so ---")
+              raw = open(lt_path, 'rb').read()
+              elf = ELFFile(open(lt_path, 'rb'))
+              md = Cs(CS_ARCH_X86, CS_MODE_64)
+              symtab = elf.get_section_by_name('.dynsym')
+              key9 = b'hm2534925'
+              for sym in sorted(symtab.iter_symbols(), key=lambda s: s['st_value']):
+                  if not sym.name.startswith('Java_'): continue
+                  vaddr = sym['st_value']
+                  code = raw[voff(elf, vaddr):voff(elf, vaddr)+sym['st_size']]
+                  leas = []
+                  imms = []
+                  malloc_sz = None
+                  for ins in md.disasm(code, vaddr):
+                      if ins.mnemonic == 'mov' and ins.op_str.startswith('edi, ') and malloc_sz is None:
+                          malloc_sz = int(ins.op_str.split(', ')[1], 0)
+                      if ins.mnemonic == 'lea' and '[rip -' in ins.op_str:
+                          disp = int(ins.op_str.split('[rip - ')[1].rstrip(']'), 0)
+                          leas.append(ins.address + ins.size - disp)
+                      if ins.mnemonic == 'mov' and 'ptr [rax]' in ins.op_str:
+                          imms.append((ins.op_str, ins.bytes.hex()))
+                  if len(leas) >= 2 and malloc_sz and malloc_sz > 5:
+                      enc = raw[voff(elf, leas[1]):voff(elf, leas[1])+malloc_sz-1]
+                      dec = bytes([enc[i] ^ key9[i % 9] for i in range(len(enc))])
+                      print(f"  {sym.name} => {dec.decode('utf-8', errors='replace')!r}")
+                  else:
+                      print(f"  {sym.name} => malloc={malloc_sz}, imms={imms}")
+          PY
+          cat /tmp/re/report/static_summary.txt
+
+      - name: Compile NDK memory DEX dumper
+        run: |
+          cat <<'EOF' > /tmp/re/dexdump_mem.c
+          #define _GNU_SOURCE
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <stdint.h>
+          #include <string.h>
+          #include <fcntl.h>
+          #include <unistd.h>
+          #include <sys/stat.h>
+
+          static int is_dex_at(const uint8_t *buf, size_t pos, size_t region_len, uint32_t *out_size, int *out_type) {
+              if (pos + 0x70 > region_len) return 0;
+              // Standard DEX or magic-zeroed DEX: header_size == 0x70 && endian_tag == 0x12345678
+              uint32_t file_size = 0, header_size = 0, endian_tag = 0, map_off = 0, string_ids_size = 0;
+              memcpy(&file_size, buf + pos + 0x20, 4);
+              memcpy(&header_size, buf + pos + 0x24, 4);
+              memcpy(&endian_tag, buf + pos + 0x28, 4);
+              memcpy(&map_off, buf + pos + 0x34, 4);
+              memcpy(&string_ids_size, buf + pos + 0x38, 4);
+
+              if (header_size == 0x70 && endian_tag == 0x12345678 &&
+                  file_size >= 1024 && file_size <= (64u * 1024u * 1024u) &&
+                  map_off >= 0x70 && map_off < file_size &&
+                  string_ids_size < 2000000u) {
+                  *out_size = file_size;
+                  *out_type = 1;
+                  return 1;
+              }
+              // Compact DEX: "cdex001\0"
+              if (memcmp(buf + pos, "cdex001", 7) == 0 &&
+                  file_size >= 1024 && file_size <= (64u * 1024u * 1024u)) {
+                  *out_size = file_size;
+                  *out_type = 2;
+                  return 1;
+              }
+              return 0;
+          }
+
+          int main(int argc, char **argv) {
+              if (argc < 3) {
+                  fprintf(stderr, "Usage: %s <pid> <outdir>\n", argv[0]);
+                  return 1;
+              }
+              int pid = atoi(argv[1]);
+              const char *outdir = argv[2];
+              mkdir(outdir, 0777);
+
+              char maps_path[128], mem_path[128];
+              snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
+              snprintf(mem_path, sizeof(mem_path), "/proc/%d/mem", pid);
+
+              FILE *maps = fopen(maps_path, "r");
+              int mem_fd = open(mem_path, O_RDONLY);
+              if (!maps || mem_fd < 0) {
+                  perror("open proc");
+                  return 2;
+              }
+
+              char line[1024];
+              int dump_idx = 0;
+              while (fgets(line, sizeof(line), maps)) {
+                  unsigned long start = 0, end = 0;
+                  char perms[8] = {0};
+                  char path[512] = {0};
+                  int n = sscanf(line, "%lx-%lx %4s %*s %*s %*s %511[^\n]", &start, &end, perms, path);
+                  if (n < 3) continue;
+                  if (perms[0] != 'r') continue;
+                  if (strncmp(path, "/system/", 8) == 0 ||
+                      strncmp(path, "/apex/", 6) == 0 ||
+                      strncmp(path, "/vendor/", 8) == 0 ||
+                      strncmp(path, "/dev/", 5) == 0) {
+                      continue;
+                  }
+                  size_t len = end - start;
+                  if (len < 1024 || len > (128u * 1024u * 1024u)) continue;
+
+                  uint8_t *buf = malloc(len);
+                  if (!buf) continue;
+                  ssize_t rd = pread64(mem_fd, buf, len, (off64_t)start);
+                  if (rd > 0x70) {
+                      for (size_t pos = 0; pos + 0x70 <= (size_t)rd; pos += 4) {
+                          uint32_t dsize = 0;
+                          int dtype = 0;
+                          if (is_dex_at(buf, pos, (size_t)rd, &dsize, &dtype)) {
+                              uint8_t *dexbuf = malloc(dsize);
+                              if (dexbuf) {
+                                  ssize_t drd = pread64(mem_fd, dexbuf, dsize, (off64_t)(start + pos));
+                                  if (drd >= 1024) {
+                                      if (dtype == 1 && memcmp(dexbuf, "dex\n", 4) != 0) {
+                                          memcpy(dexbuf, "dex\n035\0", 8);
+                                      }
+                                      char outp[512];
+                                      snprintf(outp, sizeof(outp), "%s/dump_%03d_%lx_%u.%s",
+                                               outdir, dump_idx++, start + pos, dsize,
+                                               dtype == 2 ? "cdex" : "dex");
+                                      FILE *of = fopen(outp, "wb");
+                                      if (of) {
+                                          fwrite(dexbuf, 1, (size_t)drd, of);
+                                          fclose(of);
+                                          printf("DUMPED %s (from %s)\n", outp, path);
+                                      }
+                                  }
+                                  free(dexbuf);
+                              }
+                              if (dsize >= 0x70) {
+                                  pos += ((dsize - 4) & ~3u);
+                              }
+                          }
+                      }
+                  }
+                  free(buf);
+              }
+              close(mem_fd);
+              fclose(maps);
+              return 0;
+          }
+          EOF
+          CLANG=$(find "$ANDROID_NDK_LATEST_HOME" -name "x86_64-linux-android30-clang" | head -n 1)
+          echo "Using clang: $CLANG"
+          "$CLANG" -O2 -static /tmp/re/dexdump_mem.c -o /tmp/re/dexdump_mem
+          ls -lh /tmp/re/dexdump_mem
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run Android Emulator to unpack Virbox DEXs
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb root || true
+            sleep 2
+            adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
+            adb shell chmod 755 /data/local/tmp/dexdump_mem
+
+            echo "=== Installing TimeMovies_1092 ==="
+            adb install -r /tmp/re/apks/TimeMovies_1092.apk
+            adb logcat -c
+            TM_ACT=$(adb shell cmd package resolve-activity --brief com.funpainty.funtime | tail -n 1 | tr -d '\r')
+            echo "Resolved TM launcher: $TM_ACT"
+            adb shell am start -n "$TM_ACT" || adb shell monkey -p com.funpainty.funtime -c android.intent.category.LAUNCHER 1
+            sleep 18
+            TM_PID=$(adb shell pidof com.funpainty.funtime | tr -d '\r')
+            echo "TimeMovies PID: $TM_PID"
+            for P in $TM_PID; do
+              adb shell "/data/local/tmp/dexdump_mem $P /data/local/tmp/tm_dex" || true
+            done
+            adb logcat -d > /tmp/re/report/tm_logcat.txt || true
+            mkdir -p /tmp/re/dumped_tm
+            adb pull /data/local/tmp/tm_dex /tmp/re/dumped_tm || true
+
+            echo "=== Installing DoomVideoPlayer_1126 ==="
+            adb install -r /tmp/re/apks/DoomVideoPlayer_1126.apk || true
+            DOOM_PKG=$(python3 -c "from loguru import logger; logger.remove(); from androguard.core.axml import AXMLPrinter; import zipfile, re; x=AXMLPrinter(zipfile.ZipFile('/tmp/re/apks/DoomVideoPlayer_1126.apk').read('AndroidManifest.xml')).get_xml().decode(); print(re.search(r'package=\"([^\"]+)\"', x).group(1))")
+            echo "Doom pkg: $DOOM_PKG"
+            DP_ACT=$(adb shell cmd package resolve-activity --brief "$DOOM_PKG" | tail -n 1 | tr -d '\r')
+            adb shell am start -n "$DP_ACT" || adb shell monkey -p "$DOOM_PKG" -c android.intent.category.LAUNCHER 1 || true
+            sleep 14
+            DP_PID=$(adb shell pidof "$DOOM_PKG" | tr -d '\r')
+            echo "DoomPlayer PID: $DP_PID"
+            for P in $DP_PID; do
+              adb shell "/data/local/tmp/dexdump_mem $P /data/local/tmp/dp_dex" || true
+            done
+            mkdir -p /tmp/re/dumped_dp
+            adb pull /data/local/tmp/dp_dex /tmp/re/dumped_dp || true
+
+      - name: Decompile unpacked DEXs with jadx & publish check-run parts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -lh /tmp/re/dumped_tm/tm_dex/ || true
+          ls -lh /tmp/re/dumped_dp/dp_dex/ || true
+
+          mkdir -p /tmp/re/jadx_tm /tmp/re/jadx_dp
+          # Run jadx on dumped TimeMovies DEX files (or APK if unpacked)
+          TM_DEXS=$(find /tmp/re/dumped_tm -name "*.dex" | sort)
+          if [ -n "$TM_DEXS" ]; then
+            /tmp/re/jadx/bin/jadx --show-bad-code -j 4 -d /tmp/re/jadx_tm $TM_DEXS || true
+          else
+            /tmp/re/jadx/bin/jadx --show-bad-code -j 4 -d /tmp/re/jadx_tm /tmp/re/apks/TimeMovies_1092.apk || true
+          fi
+
+          DP_DEXS=$(find /tmp/re/dumped_dp -name "*.dex" | sort)
+          if [ -n "$DP_DEXS" ]; then
+            /tmp/re/jadx/bin/jadx --show-bad-code -j 4 -d /tmp/re/jadx_dp $DP_DEXS || true
+          else
+            /tmp/re/jadx/bin/jadx --show-bad-code -j 4 -d /tmp/re/jadx_dp /tmp/re/apks/DoomVideoPlayer_1126.apk || true
+          fi
+
+          python3 - <<'PY'
+          import os, tarfile, base64, json, subprocess
+
+          # List all package directories found in jadx_tm and jadx_dp
+          tm_src = "/tmp/re/jadx_tm/sources"
+          dp_src = "/tmp/re/jadx_dp/sources"
+
+          summary_lines = []
+          for label, root in [("TM", tm_src), ("DP", dp_src)]:
+              if not os.path.exists(root): continue
+              for dirpath, dirnames, filenames in os.walk(root):
+                  rel = os.path.relpath(dirpath, root)
+                  if filenames and not rel.startswith((
+                      "androidx/", "android/", "kotlin/", "kotlinx/", "com/google/",
+                      "okhttp3/", "okio/", "retrofit2/", "coil/", "org/intellij/",
+                      "org/jetbrains/", "dagger/", "hilt_aggregated_deps/", "io/reactivex/",
+                      "com/bumptech/", "com/facebook/", "com/airbnb/", "com/squareup/",
+                      "org/apache/", "org/slf4j/", "org/chromium/", "io/ktor/"
+                  )):
+                      for fn in sorted(filenames):
+                          summary_lines.append(f"{label}: {rel}/{fn}")
+
+          with open("/tmp/re/report/app_classes_index.txt", "w") as f:
+              f.write("\n".join(summary_lines))
+
+          print(f"Found {len(summary_lines)} app source files!")
+          for l in summary_lines[:120]:
+              print(" ", l)
+
+          # Bundle prioritized app source files + static_summary + logcat + icon into tar.gz
+          SKIP_PREFIXES = (
+              "androidx/", "android/", "kotlin/", "kotlinx/", "com/google/",
+              "okhttp3/", "okio/", "retrofit2/", "coil/", "org/intellij/",
+              "org/jetbrains/", "dagger/", "hilt_aggregated_deps/", "io/reactivex/",
+              "com/bumptech/", "com/facebook/", "com/airbnb/", "com/squareup/",
+              "org/apache/", "org/slf4j/", "org/chromium/", "io/ktor/", "com/applovin/",
+              "com/unity3d/", "com/ironsource/", "com/vungle/", "com/chartboost/",
+              "com/inmobi/", "com/bytedance/", "com/mbridge/", "com/adjust/", "io/bidmachine/",
+              "com/amazon/", "com/onesignal/", "com/yandex/", "com/pgl/", "io/sentry/",
+              "org/bouncycastle/", "org/conscrypt/", "org/jsoup/", "com/fasterxml/",
+              "com/tradplus/", "com/anythink/", "com/bigossp/", "com/kwad/", "com/moloco/",
+              "com/fyber/", "com/smaato/", "com/pubmatic/", "com/ogury/", "sg/bigo/",
+              "net/pubnative/", "io/appmetrica/", "com/my/target/", "com/tapjoy/"
+          )
+
+          KEYWORDS = (
+              "funpainty", "funtime", "ApiPathGuard", "Constants", "vplayer", "doom",
+              "timesnns", "timesdds", "devmagics", "AES", "GCM", "Hmac", "SecretKeySpec",
+              "IvParameterSpec", "GCMParameterSpec", "Interceptor", "CertificatePinner",
+              "X509TrustManager", "Subtitle", "Stream", "Server", "Episode", "Season",
+              "Movie", "Series", "Category", "Search", "Home", "Quality", "Extractor",
+              "ExoPlayer", "MediaItem", "DefaultHttpDataSource", "Referer", "User-Agent"
+          )
+
+          def publish_tar(prefix_name, tar_path, max_parts=25):
+              raw = open(tar_path, "rb").read()
+              b64 = base64.b64encode(raw).decode("ascii")
+              chunk_size = 58000
+              chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
+              print(f"{prefix_name}: {len(raw)} bytes -> {len(chunks)} parts")
+              repo = os.environ["GITHUB_REPOSITORY"]
+              sha = os.environ["GITHUB_SHA"]
+              for idx, ch in enumerate(chunks[:max_parts]):
+                  payload = {
+                      "name": f"{prefix_name}-{idx:02d}",
+                      "head_sha": sha,
+                      "status": "completed",
+                      "conclusion": "success",
+                      "output": {
+                          "title": f"{prefix_name} {idx+1}/{len(chunks)}",
+                          "summary": f"len={len(ch)} total_parts={len(chunks)}",
+                          "text": ch
+                      }
+                  }
+                  pfile = f"/tmp/re/{prefix_name}_{idx}.json"
+                  with open(pfile, "w") as pf:
+                      json.dump(payload, pf)
+                  subprocess.run(
+                      ["gh", "api", "-X", "POST", f"repos/{repo}/check-runs", "--input", pfile],
+                      check=True,
+                      stdout=subprocess.DEVNULL
+                  )
+
+          def collect_files(root, max_bytes=950_000):
+              if not os.path.exists(root):
+                  return []
+              scored = []
+              for dirpath, _, filenames in os.walk(root):
+                  rel = os.path.relpath(dirpath, root)
+                  if rel.startswith(SKIP_PREFIXES):
+                      continue
+                  for fn in filenames:
+                      full = os.path.join(dirpath, fn)
+                      rel_file = f"{rel}/{fn}"
+                      try:
+                          txt = open(full, "r", encoding="utf-8", errors="ignore").read()
+                      except Exception:
+                          continue
+                      score = 0
+                      if rel_file.startswith(("com/funpainty/", "com/vplayer/", "com/doom/", "com/bebo/")):
+                          score += 100
+                      for kw in KEYWORDS:
+                          if kw in txt or kw in rel_file:
+                              score += 10
+                      scored.append((-score, len(txt), rel_file, full))
+              scored.sort()
+              chosen = []
+              total = 0
+              for neg_s, sz, rel_file, full in scored:
+                  if total + sz > max_bytes * 4 and (-neg_s) == 0:
+                      continue
+                  chosen.append((rel_file, full))
+                  total += sz
+                  if total > max_bytes * 5:
+                      break
+              return chosen
+
+          tm_tar = "/tmp/re/tm_bundle.tar.gz"
+          with tarfile.open(tm_tar, "w:gz") as tf:
+              for rfile in os.listdir("/tmp/re/report"):
+                  tf.add(os.path.join("/tmp/re/report", rfile), arcname=f"report/{rfile}")
+              for rel_file, full in collect_files(tm_src):
+                  tf.add(full, arcname=f"tm_sources/{rel_file}")
+          publish_tar("re-tm-part", tm_tar, max_parts=25)
+
+          dp_tar = "/tmp/re/dp_bundle.tar.gz"
+          with tarfile.open(dp_tar, "w:gz") as tf:
+              for rel_file, full in collect_files(dp_src):
+                  tf.add(full, arcname=f"dp_sources/{rel_file}")
+          publish_tar("re-dp-part", dp_tar, max_parts=20)
+          PY
