@@ -109,11 +109,20 @@ class CimaNowLiveE2ETest {
         assertNotNull("Expected TvSeriesLoadResponse for Lupin /selary/", lupinLoad)
         val seasonsFound = lupinLoad!!.episodes.mapNotNull { it.season }.distinct().sorted()
         println(
-            "[E2E][Load Series] title='${lupinLoad.name}' seasons=$seasonsFound totalEpisodes=${lupinLoad.episodes.size} " +
+            "[E2E][Load Series Root] title='${lupinLoad.name}' seasons=$seasonsFound totalEpisodes=${lupinLoad.episodes.size} " +
                 "plotLen=${lupinLoad.plot?.length ?: 0} actors=${lupinLoad.actors?.size ?: 0}",
         )
-        assertTrue("Expected multi-season Lupin >= 3 seasons", seasonsFound.size >= 3)
+        assertTrue("Expected multi-season Lupin >= 3 seasons on root /selary/, got $seasonsFound", seasonsFound.size >= 3)
         assertTrue("Expected >= 15 total episodes across Lupin seasons", lupinLoad.episodes.size >= 15)
+
+        val lupinS4SelaryUrl = "https://cimanow.cc/selary/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val lupinS4Load = api.load(lupinS4SelaryUrl) as? TvSeriesLoadResponse
+        assertNotNull("Expected TvSeriesLoadResponse for Lupin S4 /selary/", lupinS4Load)
+        val s4SeasonsFound = lupinS4Load!!.episodes.mapNotNull { it.season }.distinct().sorted()
+        println(
+            "[E2E][Load Series S4] title='${lupinS4Load.name}' seasons=$s4SeasonsFound totalEpisodes=${lupinS4Load.episodes.size}",
+        )
+        assertTrue("Expected multi-season Lupin >= 3 seasons on S4 /selary/, got $s4SeasonsFound", s4SeasonsFound.size >= 3)
 
         // ── 4. Verify `loadLinks()` + Live Stream HTTP 200/206 Probing ───────
         val movieLinks = CopyOnWriteArrayList<ExtractorLink>()

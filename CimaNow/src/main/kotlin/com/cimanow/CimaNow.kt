@@ -425,7 +425,16 @@ class CimaNow : MainAPI() {
     }
 
     private fun parseSeasonLinks(doc: Document): List<Pair<Int, String>> {
-        val anchors = doc.select("section[aria-label=seasons] ul li a[href]")
+        val primary = doc.select("section[aria-label=seasons] ul li a[href], #seasons a[href], ul[aria-label=seasons] a[href]")
+        val anchors: List<Element> = if (primary.isNotEmpty()) {
+            primary
+        } else {
+            doc.select("a[href*='/selary/']").filter { a ->
+                a.parents().none { p -> p.id() == "related" || p.attr("aria-label") == "posts" } &&
+                    Regex("""(?:الموسم|الجزء)\s*(?:\d+|الأول|الاول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر)""")
+                        .containsMatchIn(a.text())
+            }
+        }
         if (anchors.isEmpty()) return emptyList()
         val out = ArrayList<Pair<Int, String>>(anchors.size)
         val seen = HashSet<String>()
@@ -436,10 +445,26 @@ class CimaNow : MainAPI() {
             val encHref = CimaNowNetwork.encodeUrl(rawHref)
             if (!seen.add(normalizeUrlKey(encHref))) continue
             val text = a.text().trim()
-            val sNum = parseArabicSeasonNumber(text) ?: (idx + 1)
+            val sNum = parseArabicSeasonNumber(text.substringBefore("(")) ?: (idx + 1)
             out.add(sNum to encHref)
         }
         return out
+    }
+
+    private fun extractExplicitEpisodeSeason(epUrl: String, a: Element): Int? {
+        val decodedHref = decodeUrlReadable(epUrl)
+        Regex("""(?:^|-|/)ج(\d+)(?=-|/|$)""").find(decodedHref)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        Regex("""(?:موسم|الموسم|الجزء)-(\d+)(?=-|/|$)""").find(decodedHref)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+
+        val epAlt = a.select("img[alt]")
+            .map { it.attr("alt").trim() }
+            .firstOrNull { it.isNotEmpty() && !it.equals("logo", true) }
+            .orEmpty()
+        val beforeEp = epAlt.substringBefore("الحلقة").substringBefore("حلقة")
+        if (Regex("""(?:الموسم|موسم|الجزء|season)\s*\S+|\bج\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(beforeEp)) {
+            parseArabicSeasonNumber(beforeEp)?.let { return it }
+        }
+        return null
     }
 
     private fun parseEpisodesFromContainer(doc: Document, seasonNum: Int): List<Episode> {
@@ -454,11 +479,14 @@ class CimaNow : MainAPI() {
             val epUrl = CimaNowNetwork.encodeUrl(rawHref)
             if (!seen.add(normalizeUrlKey(epUrl))) continue
 
+            val resolvedSeason = extractExplicitEpisodeSeason(epUrl, a) ?: seasonNum
+
             val emNums = a.select("em").mapNotNull { it.text().trim().toIntOrNull() }
             val textAll = a.text().trim()
             val epNum = emNums.lastOrNull()
                 ?: Regex("""(?:ح|حلقة|الحلقة)\s*(\d+)""").find(textAll)?.groupValues?.get(1)?.toIntOrNull()
                 ?: Regex("""-ح(\d+)(?:-|/|$)""").find(decodeUrlReadable(epUrl))?.groupValues?.get(1)?.toIntOrNull()
+                ?: Regex("""الحلقة-(\d+)(?:-|/|$)""").find(decodeUrlReadable(epUrl))?.groupValues?.get(1)?.toIntOrNull()
 
             // Episode cards on `/selary/` often contain 2 `<img>` tags (logo + episode still/poster)
             val imgs = a.select("img[data-src], img[src]")
@@ -474,7 +502,7 @@ class CimaNow : MainAPI() {
             out.add(
                 newEpisode(dataJson) {
                     this.name = epTitle
-                    this.season = seasonNum
+                    this.season = resolvedSeason
                     this.episode = epNum
                     this.posterUrl = epPoster
                 },
