@@ -1,0 +1,24 @@
+Found 8 working proxies: ['socks5h://5.191.253.56:1080', 'socks5h://45.74.31.42:13949', 'socks4://123.253.124.28:5678', 'http://103.182.22.58:8000']
+
+=== TEST 1: Catalog, Pagination & Search ===
+Home /: status=200, latest_ep_cards=12
+/new-episodes?page=2: status=200, cards=12, hasOlder=True
+GET /browse: status=200, unique_items=28
+GET /browse/page/2: status=200, unique_items=28
+GET /movies: status=200, unique_items=28
+GET /movies/page/2: status=200, unique_items=28
+GET /seasonal: status=200, unique_items=72
+GET /schedule: status=200, unique_items=67
+GET /search?q=tokyo: status=200, unique_items=25
+
+=== TEST 2: Series, 1180+ Episodes (incl. Fractional 1030.5), & Movie Detail ===
+Tokyo Revengers Santen Sensou-hen episodes (8): ['https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/1', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/2', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/3', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/1', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/2', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/3', 'https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4']
+One Piece total episodes in 1 request: 2402, has 1030.5=True, first=https://witanime.site/watch/one-piece/1, last=https://witanime.site/watch/one-piece/1180
+Movie detail watch link: https://witanime.site/watch/movie/boku-no-kokoro-no-yabai-yatsu-movie
+
+=== USER PRIMARY TARGET: Tokyo Revengers Santen Sensou-hen Ep 4 (https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4) ===
+Traceback (most recent call last):
+  File "<stdin>", line 372, in <module>
+  File "<stdin>", line 134, in resolve_all_gates
+  File "<stdin>", line 102, in open_ws
+TypeError: 'NoneType' object is not subscriptable

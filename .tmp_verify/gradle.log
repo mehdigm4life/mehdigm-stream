@@ -25,30 +25,18 @@ Fetching JAR: cloudstream.jar
 > Task :WitAnime:parseDebugLocalResources
 > Task :WitAnime:generateDebugRFile
 
-> Task :WitAnime:compileDebugKotlin FAILED
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:680:33 Cannot infer type for this parameter. Specify it explicitly.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:680:33 Not enough information to infer type argument for 'T'.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:34 Cannot infer type for this parameter. Specify it explicitly.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:34 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
-fun <T> Iterable<Iterable<T>>.flatten(): List<T>
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:44 Cannot infer type for this parameter. Specify it explicitly.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:44 Not enough information to infer type argument for 'T'.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:55 Cannot infer type for this parameter. Specify it explicitly.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:55 Not enough information to infer type argument for 'T'.
-e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:683:65 Cannot infer type for this parameter. Specify it explicitly.
+> Task :WitAnime:compileDebugKotlin
+w: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeExtractors.kt:424:42 'constructor(lang: String, url: String): SubtitleFile' is deprecated. Use newSubtitleFile method.
+w: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:463:13 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
 
-FAILURE: Build failed with an exception.
+> Task :WitAnime:compileDex
+Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/build/intermediates/classes.dex
 
-* What went wrong:
-Execution failed for task ':WitAnime:compileDebugKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
+> Task :WitAnime:generateManifest
 
-* Try:
-> Run with --stacktrace option to get the stack trace.
-> Run with --info or --debug option to get more log output.
-> Run with --scan to get full insights.
-> Get more help at https://help.gradle.org.
+> Task :WitAnime:make
+Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/build/WitAnime.cs3
 
-BUILD FAILED in 1m 27s
-6 actionable tasks: 6 executed
+BUILD SUCCESSFUL in 1m 45s
+9 actionable tasks: 9 executed
+WitAnime.cs3 size=137811
