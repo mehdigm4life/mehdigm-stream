@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.FileCollectionDependency
+
 version = 1
 
 cloudstream {
@@ -29,8 +31,11 @@ android {
 
 dependencies {
     val testImplementation by configurations
+    val compileOnly by configurations
+    compileOnly.dependencies.withType<FileCollectionDependency>().all {
+        testImplementation(files)
+    }
     testImplementation("junit:junit:4.13.2")
-    testImplementation("com.lagradost:cloudstream3:pre-release")
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
 }
