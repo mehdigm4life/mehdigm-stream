@@ -288,4 +288,45 @@ class EgyDeadUnitTest {
         assertEquals(1, recent.size)
         assertEquals("Spider Man Brand New Day 2026", recent[0].name)
     }
+
+    @Test
+    fun testV19CloudflareChallengeAndPositiveDomGuards() {
+        val arabicChallenge200 = """
+            <html dir="rtl" lang="ar">
+              <head><title>لحظة من فضلك...</title></head>
+              <body>
+                <div class="main-wrapper"><h1>tv10.egydead.live</h1></div>
+                <div id="XWAst9"><div><div><input type="hidden" name="cf-turnstile-response" /></div></div></div>
+                <script>window._cf_chl_opt={cZone:'tv10.egydead.live'};</script>
+              </body>
+            </html>
+        """.trimIndent()
+        assertTrue(EgyDeadNetwork.isCloudflareBlock(200, arabicChallenge200))
+        assertTrue(EgyDeadNetwork.isCloudflareBlock(403, arabicChallenge200))
+        assertTrue(!EgyDeadNetwork.isValidEgyDeadHtml(200, arabicChallenge200))
+
+        val englishChallenge200 = """
+            <html dir="ltr" lang="en-US">
+              <head><title>Just a moment...</title></head>
+              <body>
+                <h1>tv10.egydead.live</h1>
+                <script src="https://challenges.cloudflare.com/turnstile/v0/g/f17545a2/api.js"></script>
+                <script>window._cf_chl_opt={cZone:'tv10.egydead.live'};</script>
+              </body>
+            </html>
+        """.trimIndent()
+        assertTrue(EgyDeadNetwork.isCloudflareBlock(200, englishChallenge200))
+        assertTrue(!EgyDeadNetwork.isValidEgyDeadHtml(200, englishChallenge200))
+
+        val realWatchUnlockedHtml = """
+            <html><body>
+              <div class="singleTitle">مشاهدة فيلم Fall 2 2026 مترجم</div>
+              <ul class="serversList">
+                <li data-link="https://q7v3k8m2p1.top/iframe/Uw0W7pOtd12FY"><p>MegaMax</p></li>
+              </ul>
+            </body></html>
+        """.trimIndent()
+        assertTrue(!EgyDeadNetwork.isCloudflareBlock(200, realWatchUnlockedHtml))
+        assertTrue(EgyDeadNetwork.isValidEgyDeadHtml(200, realWatchUnlockedHtml))
+    }
 }

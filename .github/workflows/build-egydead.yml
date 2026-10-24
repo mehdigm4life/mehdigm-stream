@@ -29,11 +29,12 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Live Cloudflare & Transport Forensics (Temporary Dev Probe)
-        id: cf_probe
+      - name: Start Live Cloudflare Turnstile Bypass Bridge, Run E2E Tests & Build EgyDead.cs3
+        id: gradle_build
         run: |
+          set -euo pipefail
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list >/dev/null
           sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp xdotool
           warp-cli --accept-tos registration new || true
           warp-cli --accept-tos mode proxy || warp-cli --accept-tos set-mode proxy || true
@@ -41,41 +42,73 @@ jobs:
           warp-cli --accept-tos connect || true
           sleep 3
 
-          python3 -m pip install --quiet -U "camoufox[geoip]" pillow curl_cffi
+          python3 -m pip install --quiet -U "camoufox[geoip]" pillow
           python3 -m camoufox fetch
-          xvfb-run -a --server-args="-screen 0 1280x960x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
-          import time, json, subprocess
+
+          rm -f /tmp/cf_bridge_ready /tmp/cf_bridge_failed /tmp/cf_bridge_stop
+          cat > /tmp/run_cf_bridge.py <<'PY'
+          import json, os, queue, subprocess, threading, time, urllib.parse
+          from http.server import BaseHTTPRequestHandler, HTTPServer
           from PIL import Image
-          from curl_cffi import requests as creq
           from camoufox.sync_api import Camoufox
 
-          print("=== CAMOUFOX (HARDWARE WEBGL) + WARP + PIXEL-VERIFIED XDOTOOL CLICK ===")
+          req_q = queue.Queue()
+
+          class BridgeHandler(BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  pass
+
+              def do_POST(self):
+                  if self.path != "/fetch":
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+                  length = int(self.headers.get("Content-Length", "0"))
+                  raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                  payload = json.loads(raw)
+                  resp_q = queue.Queue(maxsize=1)
+                  req_q.put((payload, resp_q))
+                  try:
+                      result = resp_q.get(timeout=40.0)
+                  except queue.Empty:
+                      result = {"status": 504, "body": ""}
+                  out = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(out)))
+                  self.end_headers()
+                  self.wfile.write(out)
+
+          srv = HTTPServer(("127.0.0.1", 18799), BridgeHandler)
+          threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+          print("=== STARTING LIVE TURNSTILE SOLVER + BROWSER BRIDGE ON 127.0.0.1:18799 ===", flush=True)
           with Camoufox(
               headless=False,
               humanize=True,
               proxy={"server": "socks5://127.0.0.1:40000"}
           ) as browser:
               page = browser.new_page()
-              real_ua = page.evaluate("navigator.userAgent")
-              nav_lang = page.evaluate("navigator.language")
               t0 = time.time()
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=25000)
-              print(f"[CAMOUFOX+WARP] UA={real_ua} lang={nav_lang} goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              print(f"[BRIDGE] Initial goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}", flush=True)
 
-              for attempt in range(1, 10):
-                  time.sleep(3.0)
+              solved = False
+              for attempt in range(1, 11):
+                  time.sleep(2.8)
                   cards = page.locator("li.movieItem").count()
-                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in page.context.cookies()]
                   if cards > 0:
-                      print(f">>> LIVE CLOUDFLARE BYPASSED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
+                      cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in page.context.cookies()]
+                      print(f"[BRIDGE] LIVE TURNSTILE SOLVED AT POLL #{attempt} ({int((time.time()-t0)*1000)}ms)! cards={cards}, title={page.title()!r}, cookies={cookies_now}", flush=True)
+                      solved = True
                       break
                   info = page.evaluate("""() => {
                       const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
                       let target = null;
                       if (inp && inp.parentElement) {
                           const r = inp.parentElement.getBoundingClientRect();
-                          if (r.width >= 180 && r.height >= 40 && r.height <= 110) {
-                              target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: (inp.value || '').length};
+                          if (r.width >= 180 && r.height >= 40 && r.height <= 120) {
+                              target = {left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: (inp.value || '').length};
                           }
                       }
                       if (!target) {
@@ -85,81 +118,110 @@ jobs:
                               if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
                               const r = d.getBoundingClientRect();
                               if (d.children.length === 0 && r.width >= 180 && r.height >= 45 && r.height <= 95 && r.top > 0) {
-                                  target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: 0};
+                                  target = {left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: 0};
                                   break;
                               }
                           }
                       }
                       return {
-                          title: document.title,
-                          dir: document.documentElement.dir,
-                          screenX: window.mozInnerScreenX || window.screenX,
-                          screenY: window.mozInnerScreenY || (window.screenY + (window.outerHeight - window.innerHeight)),
+                          dir: document.documentElement.dir || '',
+                          screenX: window.mozInnerScreenX || window.screenX || 0,
+                          screenY: window.mozInnerScreenY || (window.screenY + (window.outerHeight - window.innerHeight)) || 0,
                           target
                       };
                   }""")
-                  print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] cookies={cookies_now} info={json.dumps(info, ensure_ascii=False)}")
-                  t = info["target"]
+                  t = info.get("target")
                   if t and t.get("valLen", 0) == 0:
                       page.screenshot(path="/tmp/cfx.png")
                       im = Image.open("/tmp/cfx.png").convert("RGB")
                       cy = int(t["top"] + t["height"] / 2.0)
-                      # Scan [left..right] at cy to see exact 300px Turnstile bounds AND checkbox square!
                       active = [x for x in range(max(0, int(t["left"])), min(im.width, int(t["right"]))) if im.getpixel((x, cy)) not in ((255,255,255),(250,250,250),(249,249,249),(34,34,34),(35,35,35))]
                       if active:
                           w_left, w_right = min(active), max(active)
-                          # Check dark border pixels near left end (w_left..w_left+55) vs right end (w_right-55..w_right)
-                          l_dark = sum(1 for x in range(w_left+8, min(im.width, w_left+52)) for y in range(max(0, cy-14), min(im.height, cy+14)) if im.getpixel((x,y))[0] < 190 and abs(im.getpixel((x,y))[0] - im.getpixel((x,y))[2]) < 30)
-                          r_dark = sum(1 for x in range(max(0, w_right-52), min(im.width, w_right-8)) for y in range(max(0, cy-14), min(im.height, cy+14)) if im.getpixel((x,y))[0] < 190 and abs(im.getpixel((x,y))[0] - im.getpixel((x,y))[2]) < 30)
-                          # Note: Cloudflare orange/black logo is on the OPPOSITE side of the checkbox! Cloudflare logo has orange pixels (R - B > 80)!
                           l_orange = sum(1 for x in range(w_left+4, min(im.width, w_left+90)) for y in range(max(0, cy-20), min(im.height, cy+20)) if im.getpixel((x,y))[0] - im.getpixel((x,y))[2] > 70)
                           r_orange = sum(1 for x in range(max(0, w_right-90), min(im.width, w_right-4)) for y in range(max(0, cy-20), min(im.height, cy+20)) if im.getpixel((x,y))[0] - im.getpixel((x,y))[2] > 70)
-                          # Checkbox is ALWAYS on the opposite side of the orange Cloudflare logo!
                           client_x = (w_left + 28) if r_orange >= l_orange else (w_right - 28)
-                          print(f"[WIDGET SCAN] widget=[{w_left}..{w_right}] (w={w_right-w_left}) l_orange={l_orange} r_orange={r_orange} -> checkbox client_x={client_x}, cy={cy}")
                       else:
                           is_rtl = (info.get("dir") or "").lower() == "rtl"
                           client_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
-                          print(f"[WIDGET SCAN] no active pixels yet, fallback client_x={client_x}")
-
                       abs_x = int(round(info["screenX"] + client_x))
                       abs_y = int(round(info["screenY"] + cy))
-                      print(f"[CLICK #{attempt}] mozInnerScreen=({info['screenX']}, {info['screenY']}) -> X11=({abs_x}, {abs_y})")
-                      if attempt % 2 == 1:
-                          subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 90)), str(max(20, abs_y - 60))], check=False)
-                          time.sleep(0.08)
-                          subprocess.run(["xdotool", "mousemove", str(abs_x), str(abs_y)], check=False)
-                          time.sleep(0.08)
-                          subprocess.run(["xdotool", "click", "1"], check=False)
-                      else:
-                          page.mouse.click(client_x, cy)
+                      print(f"[BRIDGE] Click #{attempt} -> X11=({abs_x}, {abs_y})", flush=True)
+                      subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 80)), str(max(20, abs_y - 50))], check=False)
+                      time.sleep(0.08)
+                      subprocess.run(["xdotool", "mousemove", str(abs_x), str(abs_y)], check=False)
+                      time.sleep(0.08)
+                      subprocess.run(["xdotool", "click", "1"], check=False)
 
-              cards = page.locator("li.movieItem").count()
-              cookies = page.context.cookies()
-              print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], c['domain'], len(c['value'])) for c in cookies]}")
+              if not solved:
+                  with open("/tmp/cf_bridge_failed", "w") as fh:
+                      fh.write("failed")
+                  raise SystemExit("Failed to solve live Turnstile before timeout")
 
-              if cards > 0:
-                  for path in ["/movies/", "/movies/page/2/", "/?s=Lupin"]:
-                      tf = time.time()
-                      res = page.evaluate("""async (p) => {
-                          const r = await fetch(p, {credentials: 'include'});
+              with open("/tmp/cf_bridge_ready", "w") as fh:
+                  fh.write("ready")
+
+              while not os.path.exists("/tmp/cf_bridge_stop"):
+                  try:
+                      payload, resp_q = req_q.get(timeout=0.25)
+                  except queue.Empty:
+                      continue
+                  url = payload.get("url", "")
+                  method = (payload.get("method") or "GET").upper()
+                  form = payload.get("form")
+                  encoded_body = urllib.parse.urlencode(form) if (form and method == "POST") else None
+                  t_req = time.time()
+                  try:
+                      res = page.evaluate("""async (args) => {
+                          const init = {
+                              method: args.method,
+                              credentials: 'include',
+                              redirect: 'follow'
+                          };
+                          if (args.body !== null && args.method === 'POST') {
+                              init.headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'};
+                              init.body = args.body;
+                          }
+                          const r = await fetch(args.url, init);
                           const txt = await r.text();
-                          return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
-                      }""", path)
-                      print(f"[TEST window.fetch({path!r})] ({int((time.time()-tf)*1000)}ms) -> {res}")
-
-                  cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies if 'egydead' in c['domain'])
-                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="firefox133", proxies={"https": "socks5h://127.0.0.1:40000"}, headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
-                  print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
+                          return {status: r.status, url: r.url, body: txt};
+                      }""", {"url": url, "method": method, "body": encoded_body})
+                      print(f"[BRIDGE-FETCH] {method} {url} ({int((time.time()-t_req)*1000)}ms) -> HTTP {res['status']} ({len(res['body'])} bytes)", flush=True)
+                      resp_q.put(res)
+                  except Exception as ex:
+                      print(f"[BRIDGE-ERR] {method} {url} -> {ex}", flush=True)
+                      resp_q.put({"status": 500, "body": ""})
           PY
 
-      - name: Configure Android SDK, test, and build EgyDead plugin
-        id: gradle_build
-        run: |
-          set -o pipefail
+          xvfb-run -a --server-args="-screen 0 1280x960x24" python3 /tmp/run_cf_bridge.py > cf_probe.log 2>&1 &
+          BRIDGE_PID=$!
+          cleanup_bridge() {
+            touch /tmp/cf_bridge_stop
+            kill "$BRIDGE_PID" 2>/dev/null || true
+          }
+          trap cleanup_bridge EXIT
+
+          for i in $(seq 1 90); do
+            if [ -f /tmp/cf_bridge_ready ]; then
+              echo "Live Turnstile bridge is READY!"
+              break
+            fi
+            if [ -f /tmp/cf_bridge_failed ] || ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+              echo "Live Turnstile bridge failed to initialize:"
+              cat cf_probe.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :EgyDead:testDebugUnitTest --tests com.egydead.EgyDeadUnitTest --no-daemon 2>&1 | tee gradle.log
+          export EGYDEAD_LIVE_BRIDGE_URL="http://127.0.0.1:18799/fetch"
+          export EGYDEAD_REQUIRE_LIVE_CF="1"
+          export EGYDEAD_LIVE_TESTS="1"
+          ./gradlew :EgyDead:testDebugUnitTest :EgyDead:make --no-daemon 2>&1 | tee gradle.log
+          touch /tmp/cf_bridge_stop
+          wait "$BRIDGE_PID" || true
 
       - name: Publish Detailed Test & Build Report to Check Run API
         if: always()
@@ -197,11 +259,12 @@ jobs:
           if os.path.exists("cf_probe.log"):
               with open("cf_probe.log", "r", encoding="utf-8", errors="replace") as fh:
                   probe_txt = fh.read()
-              log_text = "### Live CF & Transport Forensics\n```\n" + probe_txt[:25000] + "\n```\n\n" + log_text
-          if not log_text.strip() and os.path.exists("gradle.log"):
+              log_text = "### Live CF Turnstile Bridge Telemetry\n```\n" + probe_txt[:22000] + "\n```\n\n" + log_text
+
+          if not xml_report and os.path.exists("gradle.log"):
               with open("gradle.log", "r", encoding="utf-8", errors="replace") as fh:
                   lines = fh.readlines()
-              log_text = "### Gradle Tail\n```\n" + "".join(lines[-250:])[-50000:] + "\n```"
+              log_text += "\n\n### Gradle Tail\n```\n" + "".join(lines[-250:])[-35000:] + "\n```"
 
           outcome = os.environ.get("OUTCOME", "failure")
           conclusion = "success" if outcome == "success" else "failure"
@@ -233,6 +296,7 @@ jobs:
           path: EgyDead/build/EgyDead.cs3
 
       - name: Commit and push built EgyDead.cs3 to build/
+        if: github.ref == 'refs/heads/main'
         run: |
           if [ -f "EgyDead/build/EgyDead.cs3" ]; then
             mkdir -p build
