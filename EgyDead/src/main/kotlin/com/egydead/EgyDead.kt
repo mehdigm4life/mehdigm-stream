@@ -488,9 +488,27 @@ class EgyDead : MainAPI() {
     )
 
     private fun extractPageMetadata(doc: Document, selfUrl: String): PageMetadata {
-        val rawTitle = doc.selectFirst("div.infoBox div.singleTitle h1, .singleTitle h1, h1.entry-title, h1")
-            ?.text()?.trim()?.takeIf { it.isNotBlank() }
-            ?: doc.title().replace(Regex("""\s*\|\s*ايجي\s*ديد.*$"""), "").trim()
+        val titleSelectors = listOf(
+            "div.infoBox div.singleTitle h1",
+            "div.infoBox div.singleTitle em",
+            "div.infoBox div.singleTitle",
+            ".singleTitle h1",
+            ".singleTitle em",
+            ".singleTitle",
+            "h1.entry-title",
+            "meta[property=og:title]"
+        )
+        val rawTitle = titleSelectors.firstNotNullOfOrNull { sel ->
+            val el = doc.selectFirst(sel) ?: return@firstNotNullOfOrNull null
+            val txt = if (sel.startsWith("meta")) el.attr("content") else el.text()
+            txt.replace(Regex("""\s*[-|–]\s*ايجي\s*ديد.*$"""), "")
+                .trim()
+                .takeIf {
+                    it.isNotBlank() &&
+                        !it.contains("القائمه الرئيسيه") &&
+                        !it.contains("القائمة الرئيسية")
+                }
+        } ?: doc.title().replace(Regex("""\s*[-|–]\s*ايجي\s*ديد.*$"""), "").trim()
 
         val poster = extractPoster(doc.selectFirst("div.singleThumbnail, .single-thumbnail, .Poster"))
             ?: doc.selectFirst("meta[property=og:image]")?.attr("content")?.trim()

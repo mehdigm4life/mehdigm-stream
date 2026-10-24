@@ -213,12 +213,14 @@ class EgyDeadLiveE2ETest {
         val seriesLoad = api.load(seriesCandidate.url)
         println("[LIVE-CF-BYPASS] load(${seriesCandidate.url}) -> type=${seriesLoad?.javaClass?.simpleName}, name=${seriesLoad?.name}")
         assertNotNull("Loading live search item must succeed", seriesLoad)
+        assertFalse("Series title must not be navbar header", seriesLoad!!.name.contains("القائمه"))
 
         // 4. Live Movie Load + Live `POST View=1` Watch-Gate Unlock + Stream Extraction (`loadLinks`)
         val liveMovieItem = p1.first()
         val movieLoad = api.load(liveMovieItem.url) as? MovieLoadResponse
         println("[LIVE-CF-BYPASS] loadMovie(${liveMovieItem.url}) -> name=${movieLoad?.name}, year=${movieLoad?.year}, tags=${movieLoad?.tags?.size}, recs=${movieLoad?.recommendations?.size}, dataUrl=${movieLoad?.dataUrl}")
         assertNotNull("Loading live movie must return MovieLoadResponse", movieLoad)
+        assertFalse("Movie title must not be navbar header", movieLoad!!.name.contains("القائمه"))
 
         val liveMovieLinks = Collections.synchronizedList(mutableListOf<ExtractorLink>())
         val liveMovieSubs = Collections.synchronizedList(mutableListOf<SubtitleFile>())
