@@ -15,6 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Build WitAnime.cs3 via Gradle (Zero Warnings Check)
+        run: |
+          mkdir -p .tmp_verify
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew :WitAnime:make --no-daemon > .tmp_verify/gradle.log 2>&1
+          test -f WitAnime/build/WitAnime.cs3
+          stat -c "WitAnime.cs3 size=%s" WitAnime/build/WitAnime.cs3 | tee -a .tmp_verify/gradle.log
+
       - name: Install Python test deps
         run: pip install -q "requests[socks]" beautifulsoup4 pycryptodome
 
@@ -133,11 +149,11 @@ jobs:
                       if rw.status_code != 200 or "_cf_chl_opt" in rw.text: return None
                       sp = BeautifulSoup(rw.text, "html.parser")
                       csrf_el = sp.select_one("meta[name=csrf-token]")
-                      cfg_el = sp.select_one("[data-watch-config]")
-                      if not csrf_el or not cfg_el: return None
+                      if not csrf_el: return None
                       csrf = csrf_el["content"]
-                      cfg = json.loads(cfg_el["data-watch-config"])
-                      rs = s.post(urljoin(MAIN, cfg["sourcesUrl"]), headers={
+                      m_su = re.search(r"sourcesUrl\s*:\s*['\"]([^'\"]+)['\"]", rw.text)
+                      src_path = m_su.group(1).replace("\\/", "/") if m_su else watch_url.rstrip("/") + "/sources"
+                      rs = s.post(urljoin(MAIN, src_path), data=b"", headers={
                           "Accept": "application/json", "X-CSRF-TOKEN": csrf,
                           "Origin": MAIN, "Referer": watch_url,
                           "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
@@ -147,22 +163,32 @@ jobs:
                       slots = {}
                       ordered = []
                       seen_stream = set()
-                      for ver, vobj in data.get("versions", {}).items():
-                          for q, arr in vobj.get("players", {}).items():
-                              for it in arr:
-                                  k = f"stream|{ver}|{q}|{it['name'].lower()}"
-                                  seen_stream.add(f"{ver}|{q}|{it['name'].lower()}")
-                                  rec = ("stream", ver, q, it["name"], it["token"], k)
-                                  slots[k] = rec
-                                  ordered.append(rec)
-                          for q, arr in vobj.get("downloads", {}).items():
-                              for it in arr:
-                                  if f"{ver}|{q}|{it['name'].lower()}" in seen_stream:
-                                      continue
-                                  k = f"download|{ver}|{q}|{it['name'].lower()}"
-                                  rec = ("download", ver, q, it["name"], it["token"], k)
-                                  slots[k] = rec
-                                  ordered.append(rec)
+                      occ_map = {}
+                      for q, arr in data.get("players", {}).items():
+                          for it in arr:
+                              nm = it.get("label") or it.get("name", "")
+                              ver = it.get("version", "sub")
+                              lg = it.get("lang", "jp")
+                              bk = f"stream|{ver}|{lg}|{q}|{nm.lower()}"
+                              occ = occ_map.get(bk, 0); occ_map[bk] = occ + 1
+                              k = f"{bk}|{occ}"
+                              seen_stream.add(f"{ver}|{lg}|{q}|{nm.lower()}")
+                              rec = ("stream", ver, q, nm, it["token"], k)
+                              slots[k] = rec
+                              ordered.append(rec)
+                      for q, arr in data.get("downloads", {}).items():
+                          for it in arr:
+                              nm = it.get("label") or it.get("name", "")
+                              ver = it.get("version", "sub")
+                              lg = it.get("lang", "jp")
+                              if f"{ver}|{lg}|{q}|{nm.lower()}" in seen_stream:
+                                  continue
+                              bk = f"download|{ver}|{lg}|{q}|{nm.lower()}"
+                              occ = occ_map.get(bk, 0); occ_map[bk] = occ + 1
+                              k = f"{bk}|{occ}"
+                              rec = ("download", ver, q, nm, it["token"], k)
+                              slots[k] = rec
+                              ordered.append(rec)
                       return (s, csrf, slots, ordered) if ordered else None
                   except Exception:
                       return None

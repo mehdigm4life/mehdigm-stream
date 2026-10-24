@@ -940,10 +940,11 @@ object WitAnimeNetwork {
         val qualityLabel: String,
         val version: String,
         val lang: String,
-        val token: String
+        val token: String,
+        val occurrence: Int = 0
     ) {
         val slotKey: String
-            get() = "$kind|$version|${qualityLabel.uppercase()}|${serverName.lowercase()}"
+            get() = "$kind|$version|$lang|${qualityLabel.uppercase()}|${serverName.lowercase()}|$occurrence"
     }
 
     private data class ActiveWatchSession(
@@ -993,25 +994,13 @@ object WitAnimeNetwork {
 
     private fun parseWatchSourcesPayload(jsonText: String): List<RawGateToken> {
         val root = runCatching { JSONObject(jsonText) }.getOrNull() ?: return emptyList()
-        val versionsObj = root.optJSONObject("versions") ?: return emptyList()
 
         val streamTokens = mutableListOf<RawGateToken>()
         val downloadTokens = mutableListOf<RawGateToken>()
         val streamKeys = HashSet<String>()
+        val slotCounts = HashMap<String, Int>()
 
-        val verNames = versionsObj.keys().asSequence().toList().sortedBy {
-            when (it.lowercase()) {
-                "sub" -> 0
-                "dub" -> 1
-                else -> 2
-            }
-        }
-
-        for (ver in verNames) {
-            val verObj = versionsObj.optJSONObject(ver) ?: continue
-            val lang = verObj.optString("lang", if (ver == "dub") "ara" else "jpn")
-
-            val playersObj = verObj.optJSONObject("players")
+        fun collectGroup(playersObj: JSONObject?, downloadsObj: JSONObject?, defaultVer: String = "sub") {
             if (playersObj != null) {
                 val qKeys = playersObj.keys()
                 while (qKeys.hasNext()) {
@@ -1019,17 +1008,21 @@ object WitAnimeNetwork {
                     val arr = playersObj.optJSONArray(qLabel) ?: continue
                     for (i in 0 until arr.length()) {
                         val item = arr.optJSONObject(i) ?: continue
-                        val name = item.optString("name").trim()
+                        val name = item.optString("label").ifBlank { item.optString("name") }.trim()
                         val tok = item.optString("token").trim()
+                        val ver = item.optString("version", defaultVer).ifBlank { defaultVer }
+                        val lang = item.optString("lang", if (ver == "dub") "ar" else "jp")
                         if (name.isNotEmpty() && tok.isNotEmpty()) {
-                            streamTokens.add(RawGateToken("stream", name, qLabel, ver, lang, tok))
-                            streamKeys.add("$ver|${qLabel.uppercase()}|${name.lowercase()}")
+                            val baseKey = "stream|$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}"
+                            val occ = slotCounts[baseKey] ?: 0
+                            slotCounts[baseKey] = occ + 1
+                            streamTokens.add(RawGateToken("stream", name, qLabel, ver, lang, tok, occ))
+                            streamKeys.add("$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}")
                         }
                     }
                 }
             }
 
-            val downloadsObj = verObj.optJSONObject("downloads")
             if (downloadsObj != null) {
                 val qKeys = downloadsObj.keys()
                 while (qKeys.hasNext()) {
@@ -1037,17 +1030,36 @@ object WitAnimeNetwork {
                     val arr = downloadsObj.optJSONArray(qLabel) ?: continue
                     for (i in 0 until arr.length()) {
                         val item = arr.optJSONObject(i) ?: continue
-                        val name = item.optString("name").trim()
+                        val name = item.optString("label").ifBlank { item.optString("name") }.trim()
                         val tok = item.optString("token").trim()
+                        val ver = item.optString("version", defaultVer).ifBlank { defaultVer }
+                        val lang = item.optString("lang", if (ver == "dub") "ar" else "jp")
                         if (name.isNotEmpty() && tok.isNotEmpty()) {
-                            // Deduplicate exact same (version, quality, serverName) already in stream players (e.g. mp4upload SD)
-                            val dedupKey = "$ver|${qLabel.uppercase()}|${name.lowercase()}"
+                            // Deduplicate exact same (version, lang, quality, serverName) already in stream players
+                            val dedupKey = "$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}"
                             if (!streamKeys.contains(dedupKey)) {
-                                downloadTokens.add(RawGateToken("download", name, qLabel, ver, lang, tok))
+                                val baseKey = "download|$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}"
+                                val occ = slotCounts[baseKey] ?: 0
+                                slotCounts[baseKey] = occ + 1
+                                downloadTokens.add(RawGateToken("download", name, qLabel, ver, lang, tok, occ))
                             }
                         }
                     }
                 }
+            }
+        }
+
+        // Primary WitAnime schema: top-level `players` & `downloads` maps keyed by quality ("4K", "FHD", "HD", "SD")
+        if (root.has("players") || root.has("downloads")) {
+            collectGroup(root.optJSONObject("players"), root.optJSONObject("downloads"))
+        }
+
+        // Legacy/nested schema fallback: `versions.<sub|dub>.{players, downloads}`
+        root.optJSONObject("versions")?.let { versionsObj ->
+            val verKeys = versionsObj.keys().asSequence().toList()
+            for (ver in verKeys) {
+                val vObj = versionsObj.optJSONObject(ver) ?: continue
+                collectGroup(vObj.optJSONObject("players"), vObj.optJSONObject("downloads"), ver)
             }
         }
 
@@ -1062,6 +1074,8 @@ object WitAnimeNetwork {
 
         return sortedStreams + sortedDownloads
     }
+
+    private val SOURCES_URL_REGEX = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
 
     private fun openWatchSessionWithClient(
         label: String,
@@ -1083,10 +1097,16 @@ object WitAnimeNetwork {
             val doc = Jsoup.parse(html, watchUrl)
             val csrf = doc.selectFirst("meta[name=csrf-token]")?.attr("content")?.trim()
                 ?.takeIf { it.isNotEmpty() } ?: return null
-            val watchCfgRaw = doc.selectFirst("[data-watch-config]")?.attr("data-watch-config")
-                ?.takeIf { it.isNotBlank() } ?: return null
-            val sourcesUrl = resolveUrl(JSONObject(watchCfgRaw).optString("sourcesUrl"), mainUrl)
-                ?: return null
+
+            val rawSourcesPath = SOURCES_URL_REGEX.find(html)?.groupValues?.get(1)
+                ?.replace("\\/", "/")
+                ?.trim()
+                ?: doc.selectFirst("[data-watch-config]")?.attr("data-watch-config")
+                    ?.let { runCatching { JSONObject(it).optString("sourcesUrl") }.getOrNull() }
+                    ?.takeIf { it.isNotBlank() }
+                ?: "${watchUrl.trimEnd('/')}/sources"
+
+            val sourcesUrl = resolveUrl(rawSourcesPath, mainUrl) ?: return null
 
             val emptyBody = ByteArray(0).toRequestBody(null)
             val srcReq = Request.Builder()
