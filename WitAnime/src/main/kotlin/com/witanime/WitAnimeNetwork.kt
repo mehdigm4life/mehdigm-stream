@@ -1254,10 +1254,16 @@ object WitAnimeNetwork {
         FAILED
     }
 
+    private data class GateAttemptResult(
+        val outcome: GateAttemptOutcome,
+        val resolved: ResolvedWitSource? = null,
+        val rateLimitRemaining: Int = 0
+    )
+
     private fun unlockSingleGate(
         session: ActiveWatchSession,
         item: RawGateToken
-    ): Pair<GateAttemptOutcome, ResolvedWitSource?> {
+    ): GateAttemptResult {
         val emptyBody = ByteArray(0).toRequestBody(null)
         return try {
             if (item.kind == "stream") {
@@ -1279,16 +1285,17 @@ object WitAnimeNetwork {
                 var refPolicy = "no-referrer"
 
                 session.client.newCall(postReq).execute().use { resp ->
-                    if (resp.code == 429) return GateAttemptOutcome.RATE_LIMITED to null
+                    val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                    if (resp.code == 429) return GateAttemptResult(GateAttemptOutcome.RATE_LIMITED, null, rem)
                     val body = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful) return GateAttemptOutcome.FAILED to null
+                    if (!resp.isSuccessful) return GateAttemptResult(GateAttemptOutcome.FAILED)
                     runCatching { JSONObject(body) }.getOrNull()?.let { j ->
                         j.optString("gateUrl").takeIf { it.isNotBlank() }?.let { gatePath = it }
                         j.optString("referrerPolicy").takeIf { it.isNotBlank() }?.let { refPolicy = it }
                     }
                 }
 
-                val fullGateUrl = resolveUrl(gatePath, mainUrl) ?: return GateAttemptOutcome.FAILED to null
+                val fullGateUrl = resolveUrl(gatePath, mainUrl) ?: return GateAttemptResult(GateAttemptOutcome.FAILED)
                 val gateReqBuilder = Request.Builder()
                     .url(fullGateUrl)
                     .get()
@@ -1304,19 +1311,24 @@ object WitAnimeNetwork {
                 }
 
                 session.noRedirect.newCall(gateReqBuilder.build()).execute().use { resp ->
-                    if (resp.code == 429) return GateAttemptOutcome.RATE_LIMITED to null
+                    val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                    if (resp.code == 429) return GateAttemptResult(GateAttemptOutcome.RATE_LIMITED, null, rem)
                     val loc = resp.header("Location")?.trim()
                     if (resp.code in 300..399 && !loc.isNullOrEmpty()) {
                         val resolved = resolveUrl(loc, fullGateUrl) ?: loc
                         val hostReferer = if (refPolicy.equals("origin", ignoreCase = true)) "$mainUrl/" else null
-                        return GateAttemptOutcome.SUCCESS to ResolvedWitSource(
-                            kind = item.kind,
-                            serverName = item.serverName,
-                            qualityLabel = item.qualityLabel,
-                            version = item.version,
-                            lang = item.lang,
-                            resolvedUrl = resolved,
-                            referer = hostReferer
+                        return GateAttemptResult(
+                            GateAttemptOutcome.SUCCESS,
+                            ResolvedWitSource(
+                                kind = item.kind,
+                                serverName = item.serverName,
+                                qualityLabel = item.qualityLabel,
+                                version = item.version,
+                                lang = item.lang,
+                                resolvedUrl = resolved,
+                                referer = hostReferer
+                            ),
+                            rem
                         )
                     }
                     if (resp.code == 200) {
@@ -1324,19 +1336,23 @@ object WitAnimeNetwork {
                         val doc = Jsoup.parse(html, fullGateUrl)
                         val iframeSrc = doc.selectFirst("iframe[src]")?.attr("src")
                         if (!iframeSrc.isNullOrBlank()) {
-                            return GateAttemptOutcome.SUCCESS to ResolvedWitSource(
-                                kind = item.kind,
-                                serverName = item.serverName,
-                                qualityLabel = item.qualityLabel,
-                                version = item.version,
-                                lang = item.lang,
-                                resolvedUrl = resolveUrl(iframeSrc, fullGateUrl) ?: iframeSrc,
-                                referer = "$mainUrl/"
+                            return GateAttemptResult(
+                                GateAttemptOutcome.SUCCESS,
+                                ResolvedWitSource(
+                                    kind = item.kind,
+                                    serverName = item.serverName,
+                                    qualityLabel = item.qualityLabel,
+                                    version = item.version,
+                                    lang = item.lang,
+                                    resolvedUrl = resolveUrl(iframeSrc, fullGateUrl) ?: iframeSrc,
+                                    referer = "$mainUrl/"
+                                ),
+                                rem
                             )
                         }
                     }
                 }
-                GateAttemptOutcome.FAILED to null
+                GateAttemptResult(GateAttemptOutcome.FAILED)
             } else {
                 val postUrl = "$mainUrl/watch/download-source/${URLEncoder.encode(item.token, "UTF-8")}"
                 val postReq = Request.Builder()
@@ -1353,8 +1369,9 @@ object WitAnimeNetwork {
                     .build()
 
                 session.client.newCall(postReq).execute().use { resp ->
-                    if (resp.code == 429) return GateAttemptOutcome.RATE_LIMITED to null
-                    if (!resp.isSuccessful) return GateAttemptOutcome.FAILED to null
+                    val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                    if (resp.code == 429) return GateAttemptResult(GateAttemptOutcome.RATE_LIMITED, null, rem)
+                    if (!resp.isSuccessful) return GateAttemptResult(GateAttemptOutcome.FAILED)
                 }
 
                 val gateUrl = "$mainUrl/watch/download-gate/${URLEncoder.encode(item.token, "UTF-8")}"
@@ -1372,25 +1389,30 @@ object WitAnimeNetwork {
                     .build()
 
                 session.noRedirect.newCall(gateReq).execute().use { resp ->
-                    if (resp.code == 429) return GateAttemptOutcome.RATE_LIMITED to null
+                    val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                    if (resp.code == 429) return GateAttemptResult(GateAttemptOutcome.RATE_LIMITED, null, rem)
                     val loc = resp.header("Location")?.trim()
                     if (resp.code in 300..399 && !loc.isNullOrEmpty()) {
                         val resolved = resolveUrl(loc, gateUrl) ?: loc
-                        return GateAttemptOutcome.SUCCESS to ResolvedWitSource(
-                            kind = item.kind,
-                            serverName = item.serverName,
-                            qualityLabel = item.qualityLabel,
-                            version = item.version,
-                            lang = item.lang,
-                            resolvedUrl = resolved,
-                            referer = "$mainUrl/"
+                        return GateAttemptResult(
+                            GateAttemptOutcome.SUCCESS,
+                            ResolvedWitSource(
+                                kind = item.kind,
+                                serverName = item.serverName,
+                                qualityLabel = item.qualityLabel,
+                                version = item.version,
+                                lang = item.lang,
+                                resolvedUrl = resolved,
+                                referer = "$mainUrl/"
+                            ),
+                            rem
                         )
                     }
                 }
-                GateAttemptOutcome.FAILED to null
+                GateAttemptResult(GateAttemptOutcome.FAILED)
             }
         } catch (_: Exception) {
-            GateAttemptOutcome.FAILED to null
+            GateAttemptResult(GateAttemptOutcome.FAILED)
         }
     }
 
@@ -1471,7 +1493,7 @@ object WitAnimeNetwork {
         val seenUrls = HashSet<String>()
         var currentSession: ActiveWatchSession = primary
         var unlockedCount = 0
-        var gateAttempts = 0
+        var lastGateStartMs = 0L
 
         for (slotItem in primary.orderedTokens) {
             if (!shouldContinue(unlockedCount)) {
@@ -1485,46 +1507,55 @@ object WitAnimeNetwork {
             }
 
             var tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
-            if (gateAttempts > 0) {
-                delay(180L)
+            if (lastGateStartMs > 0L) {
+                // WitAnime enforces ~1.1s anti-rapid-click interval in addition to the 20/min quota
+                val sincePrev = System.currentTimeMillis() - lastGateStartMs
+                val waitMs = (1_150L - sincePrev).coerceAtLeast(180L)
+                delay(waitMs)
             }
-            gateAttempts++
+            lastGateStartMs = System.currentTimeMillis()
 
-            var (outcome, resolved) = unlockSingleGate(currentSession, tokenForCurrent)
+            var attempt = unlockSingleGate(currentSession, tokenForCurrent)
 
-            if (outcome == GateAttemptOutcome.RATE_LIMITED) {
-                if (unlockedCount > 0 && !allowOverflowProxies) {
-                    // Direct session ALREADY unlocked the highest-priority distinct servers!
-                    // Do NOT stall on public proxies — let extractors finish immediately.
-                    Log.i(TAG, "Hit HTTP 429 after unlocking $unlockedCount priority gates; finishing fast without proxy stall")
-                    break
+            if (attempt.outcome == GateAttemptOutcome.RATE_LIMITED) {
+                if (attempt.rateLimitRemaining > 1) {
+                    // Minute quota NOT exhausted — we only grazed the anti-rapid-click interval; 1.45s direct retry succeeds!
+                    delay(1_450L)
+                    lastGateStartMs = System.currentTimeMillis()
+                    attempt = unlockSingleGate(currentSession, tokenForCurrent)
                 }
 
-                if (unlockedCount == 0 && currentSession.proxySpec == null && !allowOverflowProxies) {
-                    // Rapid episode bingeing hit temporary 429 on Gate #1: short polite cooldown retry on direct first
-                    Log.i(TAG, "Hit HTTP 429 on first gate; retrying direct after 2.2s cooldown")
-                    delay(2_200L)
-                    val retryDirect = unlockSingleGate(currentSession, tokenForCurrent)
-                    outcome = retryDirect.first
-                    resolved = retryDirect.second
-                }
-
-                if (outcome == GateAttemptOutcome.RATE_LIMITED && (unlockedCount == 0 || allowOverflowProxies)) {
-                    val overflow = openNextProxyWatchSession()
-                    if (overflow != null) {
-                        currentSession = overflow
-                        tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
-                        delay(150L)
-                        val retryProxy = unlockSingleGate(currentSession, tokenForCurrent)
-                        outcome = retryProxy.first
-                        resolved = retryProxy.second
-                    } else {
+                if (attempt.outcome == GateAttemptOutcome.RATE_LIMITED) {
+                    if (unlockedCount > 0 && !allowOverflowProxies) {
+                        // Direct session ALREADY unlocked priority servers; finish fast without proxy stall!
+                        Log.i(TAG, "Minute quota exhausted after $unlockedCount unlocked gates; finishing fast")
                         break
+                    }
+
+                    if (unlockedCount == 0 && currentSession.proxySpec == null && !allowOverflowProxies) {
+                        Log.i(TAG, "Hit HTTP 429 on first gate; retrying direct after 2.2s cooldown")
+                        delay(2_200L)
+                        lastGateStartMs = System.currentTimeMillis()
+                        attempt = unlockSingleGate(currentSession, tokenForCurrent)
+                    }
+
+                    if (attempt.outcome == GateAttemptOutcome.RATE_LIMITED && (unlockedCount == 0 || allowOverflowProxies)) {
+                        val overflow = openNextProxyWatchSession()
+                        if (overflow != null) {
+                            currentSession = overflow
+                            tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
+                            delay(180L)
+                            lastGateStartMs = System.currentTimeMillis()
+                            attempt = unlockSingleGate(currentSession, tokenForCurrent)
+                        } else {
+                            break
+                        }
                     }
                 }
             }
 
-            if (outcome == GateAttemptOutcome.SUCCESS && resolved != null) {
+            val resolved = attempt.resolved
+            if (attempt.outcome == GateAttemptOutcome.SUCCESS && resolved != null) {
                 if (seenUrls.add("${resolved.version}|${resolved.qualityLabel}|${resolved.resolvedUrl}")) {
                     unlockedCount++
                     onSourceUnlocked(resolved)

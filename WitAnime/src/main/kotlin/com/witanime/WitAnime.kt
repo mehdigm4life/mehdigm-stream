@@ -585,8 +585,8 @@ class WitAnime : MainAPI() {
                     allowOverflowProxies = false,
                     shouldContinue = { unlockedCount ->
                         when {
-                            unlockedCount >= 11 -> false
-                            unlockedCount >= 8 && emittedCount.get() >= 4 -> false
+                            unlockedCount >= 9 -> false
+                            unlockedCount >= 6 && emittedCount.get() >= 5 -> false
                             else -> true
                         }
                     },
