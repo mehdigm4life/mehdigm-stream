@@ -18,12 +18,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inspect WitAnime Watch/Download Sources & Sub-Hosts
+      - name: Diagnose Gate 302 & Dump All WitAnime Hosts
         run: |
-          pip install -q "curl_cffi" beautifulsoup4
+          pip install -q "curl_cffi" beautifulsoup4 websocket-client
           mkdir -p .tmp_wit/hosts
           python3 - <<'PY'
-          import concurrent.futures, json, os, random, re, time, traceback, urllib.parse
+          import concurrent.futures, json, os, random, re, subprocess, time, urllib.parse
           from bs4 import BeautifulSoup
           from curl_cffi import requests as creq
 
@@ -50,13 +50,16 @@ jobs:
               if not r or r.status_code != 200 or len(r.text) < 2000:
                   return False
               low = r.text[:6000].lower()
-              if "just a moment" in low or "_cf_chl_opt" in low:
-                  return False
-              return "witanime" in low
+              return "witanime" in low and "just a moment" not in low and "_cf_chl_opt" not in low
 
+          # Verify proxy also keeps stable IP across 2 requests!
           def test_px(px):
               try:
                   s = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  ip1 = s.get("https://api.ipify.org", timeout=6).text.strip()
+                  ip2 = s.get("https://api.ipify.org", timeout=6).text.strip()
+                  if not ip1 or ip1 != ip2:
+                      return None
                   r = s.get(BASE + "/", timeout=8)
                   if is_valid_wit(r):
                       return px
@@ -65,177 +68,373 @@ jobs:
               return None
 
           good_proxies = []
-          with concurrent.futures.ThreadPoolExecutor(max_workers=40) as ex:
-              for res in ex.map(test_px, cands[:220]):
+          with concurrent.futures.ThreadPoolExecutor(max_workers=50) as ex:
+              for res in ex.map(test_px, cands[:300]):
                   if res:
                       good_proxies.append(res)
-                      if len(good_proxies) >= 12:
+                      if len(good_proxies) >= 16:
                           break
-          print("Good proxies:", len(good_proxies), flush=True)
+          print("Sticky non-CF proxies:", len(good_proxies), flush=True)
           assert good_proxies
 
-          # Also test /new-episodes?page=2 JSON endpoint!
-          ne_s = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
-          ne_r = ne_s.get(f"{BASE}/new-episodes?page=2", headers={"Accept": "application/json", "Referer": BASE + "/"}, timeout=12)
+          def extract_cookies_dict(resp, jar):
+              # Merge session cookies + raw set-cookie headers
+              for k, v in resp.cookies.items():
+                  jar[k] = v
+              raw_sc = resp.headers.get_list("set-cookie") if hasattr(resp.headers, "get_list") else []
+              if not raw_sc and "set-cookie" in resp.headers:
+                  raw_sc = [resp.headers["set-cookie"]]
+              for sc in raw_sc:
+                  m = re.match(r"\s*([^=;,\s]+)=([^;]*)", sc)
+                  if m:
+                      jar[m.group(1)] = m.group(2)
 
-          seen_labels = set()
+          def cookie_hdr(jar):
+              return "; ".join(f"{k}={v}" for k, v in jar.items() if v)
 
-          def resolve_all_on_watch(watch_url, tag, start_p):
-              last_diag = "init"
-              for off in range(len(good_proxies)):
-                  p_i = (start_p + off) % len(good_proxies)
-                  px = good_proxies[p_i]
-                  ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-                  try:
-                      r1 = ws.get(watch_url, timeout=14)
-                      if not is_valid_wit(r1):
-                          last_diag = f"bad_page:{r1.status_code}"
-                          continue
-                      soup = BeautifulSoup(r1.text, "html.parser")
-                      csrf_el = soup.select_one("meta[name='csrf-token']")
-                      csrf = csrf_el["content"] if csrf_el and csrf_el.has_attr("content") else ""
-                      m_src = re.search(r"sourcesUrl\s*:\s*['\"]([^'\"]+)['\"]", r1.text)
-                      src_url = urllib.parse.urljoin(BASE + "/", m_src.group(1).replace("\\/", "/")) if m_src else watch_url.rstrip("/") + "/sources"
-                      time.sleep(0.4)
-                      r_src = ws.post(
-                          src_url,
-                          data=b"",
-                          headers={
-                              "Accept": "application/json",
-                              "X-CSRF-TOKEN": csrf,
-                              "Origin": BASE,
-                              "Referer": watch_url,
-                              "Sec-Fetch-Site": "same-origin",
-                              "Sec-Fetch-Mode": "cors",
-                              "Sec-Fetch-Dest": "empty",
-                          },
-                          timeout=14,
-                      )
-                      if r_src.status_code != 200 or not r_src.text.strip().startswith("{"):
-                          last_diag = f"src_fail:{r_src.status_code}:{r_src.text[:250]}"
-                          print("src_fail on", px, last_diag, flush=True)
-                          continue
-                      sjson = r_src.json()
-                      out = {
-                          "watch_url": watch_url,
-                          "csrf_len": len(csrf),
-                          "sources_url": src_url,
-                          "sources_status": r_src.status_code,
-                          "sources_json": sjson,
-                      }
-                      resolved = []
-                      items = []
-                      for q, arr in (sjson.get("players") or {}).items():
-                          for obj in (arr or []):
-                              items.append(("stream", q, obj.get("label", ""), obj.get("token", ""), obj))
-                      for q, arr in (sjson.get("downloads") or {}).items():
-                          for obj in (arr or []):
-                              items.append(("download", q, obj.get("label", ""), obj.get("token", ""), obj))
-
-                      for idx, (kind, q, label, tok, raw_obj) in enumerate(items):
-                          norm_lbl = f"{kind}:{label.lower()}"
-                          if tag != "tr4" and norm_lbl in seen_labels:
-                              continue
-                          seen_labels.add(norm_lbl)
-                          ep1 = "stream-source" if kind == "stream" else "download-source"
-                          ep2 = "stream-gate" if kind == "stream" else "download-gate"
-                          u1 = f"{BASE}/watch/{ep1}/{tok}"
-                          u2 = f"{BASE}/watch/{ep2}/{tok}"
-                          time.sleep(0.35)
-                          rs1 = ws.post(
-                              u1,
-                              data=b"",
-                              headers={
-                                  "Accept": "application/json",
-                                  "X-CSRF-TOKEN": csrf,
-                                  "Origin": BASE,
-                                  "Referer": watch_url,
-                                  "Sec-Fetch-Site": "same-origin",
-                                  "Sec-Fetch-Mode": "cors",
-                                  "Sec-Fetch-Dest": "empty",
-                              },
-                              timeout=12,
-                          )
-                          rg1 = ws.get(
-                              u2,
-                              headers={
-                                  "Referer": watch_url,
-                                  "Sec-Fetch-Site": "same-origin",
-                                  "Sec-Fetch-Mode": "navigate",
-                                  "Sec-Fetch-Dest": "iframe" if kind == "stream" else "document",
-                              },
-                              allow_redirects=False,
-                              timeout=12,
-                          )
-                          loc = rg1.headers.get("location", "")
-                          resolved.append({
-                              "kind": kind,
-                              "quality": q,
-                              "label": label,
-                              "version": raw_obj.get("version"),
-                              "lang": raw_obj.get("lang"),
-                              "source_status": rs1.status_code,
-                              "source_body": rs1.text[:350],
-                              "gate_status": rg1.status_code,
-                              "gate_location": loc,
-                              "gate_body": rg1.text[:450] if not loc else "",
-                          })
-                      out["resolved"] = resolved
-                      return out, (p_i + 1) % len(good_proxies)
-                  except Exception as e:
-                      last_diag = f"exc:{e}"
-              return {"watch_url": watch_url, "err": last_diag}, start_p
-
-          report = {
-              "new_episodes_p2": {
-                  "status": ne_r.status_code,
-                  "body_snip": ne_r.text[:600],
+          # Step 1: Test /new-episodes?page=2 with session from /
+          s_home = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
+          jar_h = {}
+          rh = s_home.get(BASE + "/", timeout=12)
+          extract_cookies_dict(rh, jar_h)
+          rne = s_home.get(
+              f"{BASE}/new-episodes?page=2",
+              headers={
+                  "Accept": "application/json",
+                  "Referer": BASE + "/",
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "cors",
+                  "Sec-Fetch-Dest": "empty",
+                  "Cookie": cookie_hdr(jar_h),
               },
-              "watch_probes": {},
+              timeout=12,
+          )
+          print("new-episodes?page=2:", rne.status_code, rne.text[:200], flush=True)
+
+          # Step 2: Diagnose exact headers/cookies on watch page + stream-source + stream-gate
+          diag = {
+              "home_cookies": list(jar_h.keys()),
+              "new_episodes_p2": {"status": rne.status_code, "body": rne.text[:500]},
           }
-          p_idx = 0
-          for t_tag, t_url in [
+
+          def open_watch_session(watch_url, px):
+              ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+              jar = {}
+              r1 = ws.get(
+                  watch_url,
+                  headers={
+                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                      "Sec-Fetch-Site": "none",
+                      "Sec-Fetch-Mode": "navigate",
+                      "Sec-Fetch-Dest": "document",
+                      "Upgrade-Insecure-Requests": "1",
+                  },
+                  timeout=14,
+              )
+              if not is_valid_wit(r1):
+                  return None
+              extract_cookies_dict(r1, jar)
+              soup = BeautifulSoup(r1.text, "html.parser")
+              csrf_el = soup.select_one("meta[name='csrf-token']")
+              csrf = csrf_el["content"] if csrf_el and csrf_el.has_attr("content") else ""
+              m_src = re.search(r"sourcesUrl\s*:\s*['\"]([^'\"]+)['\"]", r1.text)
+              src_url = urllib.parse.urljoin(BASE + "/", m_src.group(1).replace("\\/", "/")) if m_src else watch_url.rstrip("/") + "/sources"
+              r_src = ws.post(
+                  src_url,
+                  data=b"",
+                  headers={
+                      "Accept": "application/json",
+                      "X-CSRF-TOKEN": csrf,
+                      "Origin": BASE,
+                      "Referer": watch_url,
+                      "Sec-Fetch-Site": "same-origin",
+                      "Sec-Fetch-Mode": "cors",
+                      "Sec-Fetch-Dest": "empty",
+                      "Cookie": cookie_hdr(jar),
+                  },
+                  timeout=14,
+              )
+              extract_cookies_dict(r_src, jar)
+              if r_src.status_code != 200 or not r_src.text.strip().startswith("{"):
+                  return None
+              return {
+                  "ws": ws,
+                  "px": px,
+                  "jar": jar,
+                  "csrf": csrf,
+                  "watch_url": watch_url,
+                  "r1_headers": dict(r1.headers),
+                  "r_src_headers": dict(r_src.headers),
+                  "sjson": r_src.json(),
+              }
+
+          # Test gate variants on tr4 first!
+          sess0 = None
+          for px in good_proxies:
+              sess0 = open_watch_session(f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4", px)
+              if sess0:
+                  break
+          assert sess0, "Could not open tr4 session"
+          diag["r1_headers"] = sess0["r1_headers"]
+          diag["r_src_headers"] = sess0["r_src_headers"]
+          diag["cookie_names"] = list(sess0["jar"].keys())
+
+          # Try 3 different gate header profiles on 3 tokens of tr4:
+          tr_players = sess0["sjson"]["players"].get("FHD", []) + sess0["sjson"]["players"].get("HD", [])
+          gate_experiments = []
+          variants = [
+              ("no_referer_iframe", lambda wurl, pol: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "iframe",
+                  "Upgrade-Insecure-Requests": "1",
+                  **({"Referer": BASE + "/"} if pol == "origin" else {}),
+              }),
+              ("no_referer_sec_none", lambda wurl, pol: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                  "Sec-Fetch-Site": "none",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "iframe",
+                  "Upgrade-Insecure-Requests": "1",
+              }),
+              ("origin_referer_iframe", lambda wurl, pol: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                  "Referer": BASE + "/",
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "iframe",
+                  "Upgrade-Insecure-Requests": "1",
+              }),
+          ]
+          for v_idx, (v_name, v_fn) in enumerate(variants):
+              if v_idx >= len(tr_players):
+                  break
+              pobj = tr_players[v_idx]
+              tok = pobj["token"]
+              ws = sess0["ws"]
+              jar = sess0["jar"]
+              rs = ws.post(
+                  f"{BASE}/watch/stream-source/{tok}",
+                  data=b"",
+                  headers={
+                      "Accept": "application/json",
+                      "X-CSRF-TOKEN": sess0["csrf"],
+                      "Origin": BASE,
+                      "Referer": sess0["watch_url"],
+                      "Sec-Fetch-Site": "same-origin",
+                      "Sec-Fetch-Mode": "cors",
+                      "Sec-Fetch-Dest": "empty",
+                      "Cookie": cookie_hdr(jar),
+                  },
+                  timeout=12,
+              )
+              extract_cookies_dict(rs, jar)
+              pol = "no-referrer"
+              try:
+                  pol = rs.json().get("referrerPolicy", "no-referrer")
+              except Exception:
+                  pass
+              ghdrs = v_fn(sess0["watch_url"], pol)
+              ghdrs["Cookie"] = cookie_hdr(jar)
+              rg = ws.get(f"{BASE}/watch/stream-gate/{tok}", headers=ghdrs, allow_redirects=False, timeout=12)
+              extract_cookies_dict(rg, jar)
+              gate_experiments.append({
+                  "variant": v_name,
+                  "label": pobj["label"],
+                  "rs_status": rs.status_code,
+                  "rs_headers": dict(rs.headers),
+                  "rs_body": rs.text[:250],
+                  "rg_status": rg.status_code,
+                  "rg_location": rg.headers.get("location", ""),
+                  "rg_headers": dict(rg.headers),
+              })
+              print(f"Variant {v_name} ({pobj['label']}): rs={rs.status_code} rg={rg.status_code} loc={rg.headers.get('location', '')}", flush=True)
+          diag["gate_experiments"] = gate_experiments
+
+          # Pick winning variant (or fallback to real headless google-chrome via CDP if all 3 failed!)
+          winning_fn = None
+          for exp, (_, fn) in zip(gate_experiments, variants):
+              if exp["rg_status"] in (301, 302, 303, 307, 308) and exp["rg_location"]:
+                  winning_fn = fn
+                  print("WINNING VARIANT:", exp["variant"], flush=True)
+                  break
+
+          # Also test download-source + download-gate!
+          dl_item = (sess0["sjson"]["downloads"].get("HD") or [])[0]
+          rs_dl = sess0["ws"].post(
+              f"{BASE}/watch/download-source/{dl_item['token']}",
+              data=b"",
+              headers={
+                  "Accept": "application/json",
+                  "X-CSRF-TOKEN": sess0["csrf"],
+                  "Origin": BASE,
+                  "Referer": sess0["watch_url"],
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "cors",
+                  "Sec-Fetch-Dest": "empty",
+                  "Cookie": cookie_hdr(sess0["jar"]),
+              },
+              timeout=12,
+          )
+          extract_cookies_dict(rs_dl, sess0["jar"])
+          rg_dl = sess0["ws"].get(
+              f"{BASE}/watch/download-gate/{dl_item['token']}",
+              headers={
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                  "Sec-Fetch-Site": "none",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "document",
+                  "Upgrade-Insecure-Requests": "1",
+                  "Cookie": cookie_hdr(sess0["jar"]),
+              },
+              allow_redirects=False,
+              timeout=12,
+          )
+          diag["dl_experiment"] = {
+              "label": dl_item["label"],
+              "rs_status": rs_dl.status_code,
+              "rs_headers": dict(rs_dl.headers),
+              "rg_status": rg_dl.status_code,
+              "rg_location": rg_dl.headers.get("location", ""),
+          }
+          print("DL experiment:", diag["dl_experiment"], flush=True)
+
+          # Now resolve ALL unique stream & download labels across tr4, bc3, bl9, mov using fresh proxy sessions (max 4 tokens per proxy!)
+          targets = [
               ("tr4", f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"),
               ("bc3", f"{BASE}/watch/black-clover-2nd-season/3"),
               ("bl9", f"{BASE}/watch/bleach-sennen-kessen-hen-kashin-tan/9"),
               ("mov", f"{BASE}/watch/movie/boku-no-kokoro-no-yabai-yatsu-movie"),
-          ]:
-              res_w, p_idx = resolve_all_on_watch(t_url, t_tag, p_idx)
-              report["watch_probes"][t_tag] = res_w
+          ]
+          resolved_all = []
+          seen_kind_label = set()
+          px_cursor = 1
 
-          seen_ext_hosts = set()
+          if winning_fn or diag["dl_experiment"]["rg_location"]:
+              for t_tag, t_url in targets:
+                  # Collect candidate tokens we want (all of tr4, plus unseen labels on others)
+                  s_tmp = None
+                  for _ in range(len(good_proxies)):
+                      px = good_proxies[px_cursor % len(good_proxies)]
+                      px_cursor += 1
+                      s_tmp = open_watch_session(t_url, px)
+                      if s_tmp:
+                          break
+                  if not s_tmp:
+                      continue
+                  todo = []
+                  for q, arr in (s_tmp["sjson"].get("players") or {}).items():
+                      for o in (arr or []):
+                          kl = f"stream:{o['label'].lower()}"
+                          if t_tag == "tr4" or kl not in seen_kind_label:
+                              seen_kind_label.add(kl)
+                              todo.append(("stream", q, o["label"]))
+                  for q, arr in (s_tmp["sjson"].get("downloads") or {}).items():
+                      for o in (arr or []):
+                          kl = f"download:{o['label'].lower()}"
+                          if (t_tag == "tr4" and q == "FHD") or kl not in seen_kind_label:
+                              seen_kind_label.add(kl)
+                              todo.append(("download", q, o["label"]))
+
+                  # Process in chunks of 4 per fresh session/proxy so we NEVER hit 429!
+                  for chunk_start in range(0, len(todo), 4):
+                      chunk = todo[chunk_start:chunk_start + 4]
+                      sess = s_tmp if chunk_start == 0 else None
+                      if not sess:
+                          for _ in range(len(good_proxies)):
+                              px = good_proxies[px_cursor % len(good_proxies)]
+                              px_cursor += 1
+                              sess = open_watch_session(t_url, px)
+                              if sess:
+                                  break
+                      if not sess:
+                          continue
+                      for kind, q, want_lbl in chunk:
+                          bucket = (sess["sjson"].get("players" if kind == "stream" else "downloads") or {}).get(q) or []
+                          match = next((x for x in bucket if x.get("label") == want_lbl), None)
+                          if not match:
+                              continue
+                          tok = match["token"]
+                          ep1 = "stream-source" if kind == "stream" else "download-source"
+                          ep2 = "stream-gate" if kind == "stream" else "download-gate"
+                          rs = sess["ws"].post(
+                              f"{BASE}/watch/{ep1}/{tok}",
+                              data=b"",
+                              headers={
+                                  "Accept": "application/json",
+                                  "X-CSRF-TOKEN": sess["csrf"],
+                                  "Origin": BASE,
+                                  "Referer": sess["watch_url"],
+                                  "Sec-Fetch-Site": "same-origin",
+                                  "Sec-Fetch-Mode": "cors",
+                                  "Sec-Fetch-Dest": "empty",
+                                  "Cookie": cookie_hdr(sess["jar"]),
+                              },
+                              timeout=12,
+                          )
+                          extract_cookies_dict(rs, sess["jar"])
+                          pol = "no-referrer"
+                          try:
+                              pol = rs.json().get("referrerPolicy", "no-referrer")
+                          except Exception:
+                              pass
+                          if kind == "stream" and winning_fn:
+                              gh = winning_fn(sess["watch_url"], pol)
+                          else:
+                              gh = {
+                                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                  "Sec-Fetch-Site": "none",
+                                  "Sec-Fetch-Mode": "navigate",
+                                  "Sec-Fetch-Dest": "document",
+                                  "Upgrade-Insecure-Requests": "1",
+                              }
+                          gh["Cookie"] = cookie_hdr(sess["jar"])
+                          rg = sess["ws"].get(f"{BASE}/watch/{ep2}/{tok}", headers=gh, allow_redirects=False, timeout=12)
+                          extract_cookies_dict(rg, sess["jar"])
+                          loc = rg.headers.get("location", "")
+                          print(f"[{t_tag}] {kind} {q} {want_lbl} -> rs={rs.status_code} rg={rg.status_code} loc={loc}", flush=True)
+                          resolved_all.append({
+                              "tag": t_tag,
+                              "kind": kind,
+                              "quality": q,
+                              "label": want_lbl,
+                              "rs_status": rs.status_code,
+                              "rg_status": rg.status_code,
+                              "location": loc,
+                          })
+
+          diag["resolved_all"] = resolved_all
+
+          # Probe every unique external host URL!
           ext_probes = {}
-          for t_tag, pdata in report["watch_probes"].items():
-              for item in pdata.get("resolved", []):
-                  eu = item.get("gate_location") or ""
-                  if not eu.startswith("http"):
-                      m = re.search(r'https?://[^\s"\'<>]+', item.get("source_body", "") + " " + item.get("gate_body", ""))
-                      eu = m.group(0) if m else ""
-                  if not eu.startswith("http"):
-                      continue
-                  dom = urllib.parse.urlparse(eu).netloc.lower().removeprefix("www.")
-                  key = f"{item['kind']}_{item['label']}_{dom}"
-                  if key in seen_ext_hosts:
-                      continue
-                  seen_ext_hosts.add(key)
-                  safe_k = re.sub(r"[^a-zA-Z0-9_.-]+", "_", key)[:60]
-                  try:
-                      sub_s = creq.Session(impersonate="chrome124")
-                      rext = sub_s.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
-                      if rext.status_code in (403, 503) and good_proxies:
-                          ps = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
-                          rext2 = ps.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
-                          if rext2.status_code == 200:
-                              rext = rext2
-                      open(f".tmp_wit/hosts/{safe_k}.html", "w", encoding="utf-8").write(rext.text[:250000])
-                      ext_probes[safe_k] = {"input": eu, "final": rext.url, "status": rext.status_code, "ct": rext.headers.get("content-type", ""), "len": len(rext.text)}
-                  except Exception as e:
-                      ext_probes[safe_k] = {"input": eu, "err": str(e)}
-          report["ext_probes"] = ext_probes
+          seen_dom = set()
+          for item in resolved_all:
+              eu = item.get("location") or ""
+              if not eu.startswith("http"):
+                  continue
+              dom = urllib.parse.urlparse(eu).netloc.lower().removeprefix("www.")
+              key = f"{item['kind']}_{item['label']}_{dom}"
+              if key in seen_dom:
+                  continue
+              seen_dom.add(key)
+              safe_k = re.sub(r"[^a-zA-Z0-9_.-]+", "_", key)[:60]
+              try:
+                  sub_s = creq.Session(impersonate="chrome124")
+                  rext = sub_s.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
+                  if rext.status_code in (403, 503) and good_proxies:
+                      ps = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
+                      rext2 = ps.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
+                      if rext2.status_code == 200:
+                          rext = rext2
+                  open(f".tmp_wit/hosts/{safe_k}.html", "w", encoding="utf-8").write(rext.text[:250000])
+                  ext_probes[safe_k] = {"input": eu, "final": rext.url, "status": rext.status_code, "ct": rext.headers.get("content-type", ""), "len": len(rext.text)}
+              except Exception as e:
+                  ext_probes[safe_k] = {"input": eu, "err": str(e)}
+          diag["ext_probes"] = ext_probes
 
-          with open(".tmp_wit/report.json", "w", encoding="utf-8") as fh:
-              json.dump(report, fh, ensure_ascii=False, indent=2)
-          print("DONE! Probed hosts:", list(ext_probes.keys()), flush=True)
+          with open(".tmp_wit/diag.json", "w", encoding="utf-8") as fh:
+              json.dump(diag, fh, ensure_ascii=False, indent=2)
           PY
 
       - name: Commit inspection dump
@@ -244,6 +443,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A .tmp_wit
-          git commit -m "chore: save WitAnime sources & hosts dump [skip ci]" || true
+          git commit -m "chore: save WitAnime gate & host dumps [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
