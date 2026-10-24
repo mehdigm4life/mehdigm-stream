@@ -177,71 +177,82 @@ async function fetchGatewayVault(shineUrl, itemUrl, proxies) {
 
 // Decode the `rm.freex2line.online/2020/02/blog-post.html/` vault HTML!
 function decodeVaultHtml(vaultHtml) {
-  const tailSample = vaultHtml.slice(-8000);
-  const headSample = vaultHtml.slice(0, 1200);
+  const headSample = vaultHtml.slice(0, 800);
 
   // Extract the big base64 string array `window["..."] = ["...", "...", ...];`
   const arrStart = vaultHtml.search(/window\["[^"]+"\]\s*=\s*\[/);
   const arrEnd = vaultHtml.indexOf("];", arrStart);
   const arrSlice = arrStart >= 0 && arrEnd > arrStart ? vaultHtml.slice(arrStart, arrEnd + 2) : "";
+  const afterArr = arrEnd > 0 ? vaultHtml.slice(arrEnd + 2) : "";
+
+  // Decode the `e=[...],k=...` stage-2 loader right after `];` so we have the exact author code!
+  let outerDecoderJs = "";
+  const eMatch = afterArr.match(/e\s*=\s*\[([\d,\s]+)\]\s*,\s*k\s*=\s*(\d+)/);
+  if (eMatch) {
+    const kVal = Number(eMatch[2]);
+    const nums = eMatch[1].split(",").map((x) => Number(x.trim()));
+    outerDecoderJs = nums.map((n) => String.fromCharCode(n ^ kVal)).join("");
+  }
+
   const b64Joined = [...arrSlice.matchAll(/"([A-Za-z0-9+/=]+)"/g)].map((m) => m[1]).join("");
   const raw = Buffer.from(b64Joined, "base64");
 
-  // Also check if the exact XOR key appears in `tailSample`, or recover cleanly via known prefix `<script>` / space-frequency!
-  // Notice: decoded HTML ALWAYS starts with `<script>` (`3c 73 63 72 69 70 74 3e`)!
   let decoded = "";
   let keyUsed = "";
 
-  // Check if keylen 1..32 matches `<script>` at offset 0 (after stripping UTF-8 BOM if any):
-  const expectedPrefix = Buffer.from("<script>");
-  for (let klen = 1; klen <= 32; klen++) {
+  // Known plaintext: `raw` always starts with `<script>` (8 bytes) followed by whitespace + `window.`!
+  const known = Buffer.from("<script>");
+  for (let klen = 1; klen <= 24; klen++) {
     const key = Buffer.alloc(klen);
+    // Derive key bytes from `<script>` for positions 0..min(7,klen-1), and space (0x20) frequency in first 1500 bytes for any remaining positions
     for (let pos = 0; pos < klen; pos++) {
-      const counts = new Map();
-      for (let i = pos; i < Math.min(raw.length, 60000); i += klen) {
-        counts.set(raw[i], (counts.get(raw[i]) || 0) + 1);
+      if (pos < known.length) {
+        key[pos] = raw[pos] ^ known[pos];
+      } else {
+        const counts = new Map();
+        for (let i = pos; i < Math.min(raw.length, 1500); i += klen) {
+          counts.set(raw[i], (counts.get(raw[i]) || 0) + 1);
+        }
+        key[pos] = [...counts.entries()].sort((a, c) => c[1] - a[1])[0][0] ^ 0x20;
       }
-      key[pos] = [...counts.entries()].sort((a, c) => c[1] - a[1])[0][0] ^ 0x20;
     }
-    const testPrefix = Buffer.from(raw.slice(0, 16).map((v, i) => v ^ key[i % klen])).toString("utf8");
-    if (testPrefix.startsWith("<script>") || testPrefix.includes("<script")) {
+    const probe = Buffer.from(raw.slice(0, 80).map((v, i) => v ^ key[i % klen])).toString("utf8");
+    if (probe.startsWith("<script>") && probe.includes("window.")) {
       keyUsed = key.toString("utf8");
       decoded = Buffer.from(raw.map((v, i) => v ^ key[i % klen])).toString("utf8");
       break;
     }
   }
 
-  return { headSample, tailSample, keyUsed, decodedLen: decoded.length, decoded };
+  return { headSample, outerDecoderJs, keyUsed, decodedLen: decoded.length, decoded };
 }
 
-// Deobfuscate / execute `nbm2oHaQcN60y6Ozwm.js` in a rich browser-like VM to get `_getCoreToken()` AND log its exact inputs/algorithm!
+// Deobfuscate / execute `nbm2oHaQcN60y6Ozwm.js` + watching inline scripts in a rich VM to get `_getCoreToken()` AND log its exact inputs/algorithm!
 function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
   const report = {};
 
-  // 1) Extract string table from `nbm2oHaQcN60y6Ozwm.js` by running only the string-table rotation + decoder!
   try {
-    // Find `(function(){` after the string rotation IIFE!
-    // Easier: run the whole `nbmJsCode` in a mocked DOM + window context with Watching's top `<script>` (`_0x_cfg`, `ctx_...`, `ptr_...`, `map_...`)!
-    const topScriptMatch = watchingHtml.match(/<script>([\s\S]*?)<\/script>/i);
-    const topInitJs = topScriptMatch ? topScriptMatch[1] : "";
-    report.topInitJs = topInitJs;
+    const allWatchScripts = [...watchingHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
+      idx,
+      attrs: m[1].trim(),
+      len: m[2].length,
+      preview: m[2].slice(0, 500),
+      code: m[2],
+    }));
+    report.watchingScriptsSummary = allWatchScripts.map(({ idx, attrs, len, preview }) => ({ idx, attrs, len, preview }));
 
-    const cryptoLogs = [];
-    const subtleMock = {
-      importKey: async (...args) => {
-        cryptoLogs.push({ op: "importKey", args: JSON.stringify(args) });
-        return crypto.webcrypto.subtle.importKey(...args);
-      },
-      sign: async (...args) => {
-        cryptoLogs.push({ op: "sign", argsLen: args.length });
-        return crypto.webcrypto.subtle.sign(...args);
-      },
-      digest: async (...args) => {
-        cryptoLogs.push({ op: "digest" });
-        return crypto.webcrypto.subtle.digest(...args);
-      },
-    };
+    // Save FULL code of all inline scripts under 80KB (excluding JSON-LD and known x19WCM90B19F if desired, actually include all under 40KB!)
+    report.watchingInlineScriptsFull = allWatchScripts
+      .filter((s) => !s.attrs.includes("src=") && !s.attrs.includes("ld+json") && s.len < 60000)
+      .map((s) => ({ idx: s.idx, attrs: s.attrs, len: s.len, code: s.code }));
 
+    // Check any external script `src` in `watchingHtml`!
+    report.watchingExternalSrcs = allWatchScripts
+      .map((s) => s.attrs.match(/src=["']([^"']+)["']/i)?.[1])
+      .filter(Boolean);
+
+    const domListeners = [];
+    const timers = [];
     const dummyEl = () => ({
       style: {},
       classList: { add() {}, remove() {}, contains: () => false },
@@ -250,7 +261,8 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
       hasAttribute: () => false,
       appendChild() {},
       removeChild() {},
-      addEventListener() {},
+      insertBefore() {},
+      addEventListener: (ev, fn) => { domListeners.push({ ev, fn }); },
       querySelectorAll: () => [],
       querySelector: () => null,
       children: [],
@@ -262,7 +274,10 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
     const locObj = new URL(watchUrl);
     const sb = {
       console: { log() {}, warn() {}, error() {} },
-      setTimeout: (fn) => 1,
+      setTimeout: (fn, ms) => {
+        if (typeof fn === "function" && (!ms || ms < 500)) timers.push(fn);
+        return timers.length;
+      },
       clearTimeout() {},
       setInterval: () => 1,
       clearInterval() {},
@@ -270,6 +285,8 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
         observe() {}
         disconnect() {}
       },
+      XMLHttpRequest: function () {},
+      fetch: async () => ({ ok: true, text: async () => "", json: async () => ({}) }),
       TextEncoder,
       TextDecoder,
       Uint8Array,
@@ -287,7 +304,7 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
       btoa: (b) => Buffer.from(b, "binary").toString("base64"),
       crypto: {
         getRandomValues: (arr) => crypto.webcrypto.getRandomValues(arr),
-        subtle: subtleMock,
+        subtle: crypto.webcrypto.subtle,
       },
       navigator: {
         userAgent: UA,
@@ -310,13 +327,15 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
         head: dummyEl(),
         body: dummyEl(),
         createElement: dummyEl,
+        createDocumentFragment: dummyEl,
         getElementById: () => null,
         querySelector: () => null,
         querySelectorAll: () => [],
         getElementsByTagName: () => [dummyEl()],
-        addEventListener: (ev, cb) => {},
+        addEventListener: (ev, fn) => { domListeners.push({ ev, fn }); },
       },
     };
+    sb.XMLHttpRequest.prototype = { open() {}, send() {}, setRequestHeader() {} };
     sb.window = sb;
     sb.self = sb;
     sb.globalThis = sb;
@@ -324,19 +343,36 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
     sb.parent = sb;
 
     vm.createContext(sb);
-    vm.runInContext(topInitJs, sb, { timeout: 3000 });
 
-    // Also run all inline scripts from `watchingHtml` BEFORE `nbmJsCode` (except jQuery/DOM ones) just in case!
-    const allWatchScripts = [...watchingHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
-      idx,
-      attrs: m[1].trim(),
-      len: m[2].length,
-      preview: m[2].slice(0, 400),
-      code: m[2],
-    }));
-    report.watchingScriptsSummary = allWatchScripts.map(({ idx, attrs, len, preview }) => ({ idx, attrs, len, preview }));
+    // Run inline scripts that set `window._0x_cfg`, `ctx_...`, `ptr_...`, `map_...` or `_getCoreToken`!
+    for (const s of allWatchScripts) {
+      if (!s.attrs.includes("src=") && !s.attrs.includes("ld+json") && !s.code.includes("jQuery") && !s.code.includes("$(")) {
+        try {
+          vm.runInContext(s.code, sb, { timeout: 2500 });
+        } catch (e) {
+          // ignore DOM errors in non-token inline scripts
+        }
+      }
+    }
 
-    vm.runInContext(nbmJsCode, sb, { timeout: 6000 });
+    report.hasGetCoreTokenBeforeNbm = typeof sb._getCoreToken === "function";
+
+    // Now run `nbmJsCode`!
+    try {
+      vm.runInContext(nbmJsCode, sb, { timeout: 6000 });
+    } catch (e) {
+      report.nbmRunErr = String(e.message || e);
+    }
+
+    // Fire any DOMContentLoaded listeners and short timers!
+    for (const l of domListeners.slice(0, 10)) {
+      if (l.ev === "DOMContentLoaded" || l.ev === "load") {
+        try { l.fn(); } catch {}
+      }
+    }
+    for (const tfn of timers.slice(0, 10)) {
+      try { tfn(); } catch {}
+    }
 
     report.hasGetCoreTokenAfterNbm = typeof sb._getCoreToken === "function";
     if (typeof sb._getCoreToken === "function") {
@@ -347,63 +383,28 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
       report.getCoreTokenFnSource = sb._getCoreToken.toString().slice(0, 4000);
     }
 
-    // Check what properties were added to `sb`!
-    report.addedWindowKeys = Object.keys(sb).filter(
-      (k) =>
-        ![
-          "console", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
-          "MutationObserver", "TextEncoder", "TextDecoder", "Uint8Array", "ArrayBuffer",
-          "DataView", "Promise", "Date", "Math", "JSON", "parseInt", "parseFloat",
-          "encodeURIComponent", "decodeURIComponent", "atob", "btoa", "crypto",
-          "navigator", "location", "document", "window", "self", "globalThis", "top", "parent",
-        ].includes(k)
-    );
-    report.cryptoLogs = cryptoLogs;
-
-    // Also dump decoded strings from `nbmJsCode` by grabbing `_0x39aa` in VM!
-    // Look at `nbmJsCode`: `function _0x39aa(...)` is top-level inside the file or outer scope? Wait: let's expose `_0x39aa` if top-level or regex-extract `function _0x39aa`!
-    const fnMatch = nbmJsCode.match(/function\s+(_0x[a-f0-9]+)\s*\([^)]*\)\s*\{\s*var\s+_0x[a-f0-9]+\s*=\s*_0x2426\(\)/);
-    if (fnMatch) {
-      report.decoderFnName = fnMatch[1];
+    // Dump strings from `sb._0x2426()` / `sb._0x39aa` if present!
+    if (typeof sb._0x2426 === "function") {
+      try {
+        const rawArr = sb._0x2426();
+        report.nbmRawTableLen = rawArr.length;
+      } catch {}
     }
+    if (typeof sb._0x39aa === "function") {
+      const interesting = [];
+      for (let i = 0; i < 3000; i++) {
+        try {
+          const v = sb._0x39aa(i);
+          if (typeof v === "string" && v.length >= 2 && interesting.length < 500 && !interesting.includes(v)) {
+            interesting.push(v);
+          }
+        } catch {}
+      }
+      report.nbmDecodedStrings = interesting;
+    }
+    report._mintFn = typeof sb._getCoreToken === "function" ? () => sb._getCoreToken() : null;
   } catch (e) {
     report.vmError = String(e.stack || e);
-  }
-
-  // Also dump unique readable strings decoded via `_0x39aa` from `nbmJsCode`!
-  try {
-    // Find where the second IIFE starts: `),(` after `_0x2426,0x...`
-    const splitMatch = nbmJsCode.match(/\}\(_0x[0-9a-f]+,[^)]+\)\),\(function\(\)\{/);
-    if (splitMatch) {
-      // Find `function _0x2426()` and `function _0x39aa(...)` at the bottom or top of `nbmJsCode`!
-      const bottomIdx = nbmJsCode.indexOf("function _0x2426(");
-      const rotPart = nbmJsCode.slice(0, splitMatch.index + splitMatch[0].indexOf("),(") + 1);
-      const helpersPart = bottomIdx >= 0 ? nbmJsCode.slice(bottomIdx) : "";
-      if (helpersPart) {
-        const strSb = {};
-        vm.createContext(strSb);
-        vm.runInContext(rotPart + ";\n" + helpersPart, strSb, { timeout: 4000 });
-        if (typeof strSb._0x39aa === "function") {
-          const decodedStrings = [];
-          for (let i = 0; i < 1500; i++) {
-            try {
-              const v = strSb._0x39aa(i);
-              if (typeof v === "string" && v.length > 0 && !decodedStrings.includes(v)) {
-                decodedStrings.push(v);
-              }
-            } catch {}
-          }
-          report.nbmDecodedStrings = decodedStrings.slice(0, 600);
-        }
-      }
-    } else {
-      // Look for `function _0x39aa` anywhere in `nbmJsCode`
-      const idx1 = nbmJsCode.indexOf("function _0x2426");
-      const idx2 = nbmJsCode.indexOf("function _0x39aa");
-      report.nbmFnOffsets = { idx2426: idx1, idx39aa: idx2, tail500: nbmJsCode.slice(-500) };
-    }
-  } catch (e) {
-    report.strExtractErr = String(e.message || e);
   }
 
   return report;
@@ -411,9 +412,10 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
 
 async function inspectDecodedWatching(watchingHtml, watchUrl, nbmJsCode, proxies) {
   const res = {};
-  const tokenAnalysis = analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl);
+  const tokenAnalysis = analyzeNbmAndToken(nbmJsCode, watchingHtml, "https://rm.freex2line.online/2020/02/blog-post.html/");
+  const mintFn = tokenAnalysis._mintFn;
+  delete tokenAnalysis._mintFn;
   res.tokenAnalysis = tokenAnalysis;
-  const token = tokenAnalysis.token1 || "";
 
   // Parse `<ul id="watch">`
   const watchUl = watchingHtml.match(/<ul[^>]*id=["']watch["'][^>]*>([\s\S]*?)<\/ul>/i)?.[0] || "";
@@ -440,23 +442,36 @@ async function inspectDecodedWatching(watchingHtml, watchUrl, nbmJsCode, proxies
       const rNo = await smartReq(
         `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`,
         proxies,
-        { referer: watchUrl, extraHeaders: ["X-Requested-With: XMLHttpRequest"] }
+        { referer: "https://rm.freex2line.online/", extraHeaders: ["Origin: https://rm.freex2line.online"] }
       );
       res.switchWithoutToken = { status: rNo.status, body: rNo.text.trim().slice(0, 500) };
     }
-    const freshTok = token; // or recompute
+    const freshTok = mintFn ? mintFn() : (tokenAnalysis.token1 || "");
     const url =
       `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
       (freshTok ? `?token=${encodeURIComponent(freshTok)}&` : `?`) +
       `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
-    const sr = await smartReq(url, proxies, {
-      referer: watchUrl,
-      extraHeaders: ["X-Requested-With: XMLHttpRequest"],
+    let sr = await smartReq(url, proxies, {
+      referer: "https://rm.freex2line.online/",
+      extraHeaders: ["Origin: https://rm.freex2line.online"],
     });
+    if (!sr.text.includes("<iframe") && i === 0) {
+      const tokAlt = mintFn ? mintFn() : freshTok;
+      const urlAlt =
+        `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
+        (tokAlt ? `?token=${encodeURIComponent(tokAlt)}&` : `?`) +
+        `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
+      const srAlt = await smartReq(urlAlt, proxies, {
+        referer: watchUrl,
+        extraHeaders: ["X-Requested-With: XMLHttpRequest"],
+      });
+      res.switchAltRefererTest = { status: srAlt.status, body: srAlt.text.trim().slice(0, 500) };
+    }
     res.switchCalls.push({
       name: t.text,
       index: t.dataIndex,
       id: t.dataId,
+      tokenSent: freshTok,
       status: sr.status,
       body: sr.text.trim().slice(0, 600),
     });
@@ -520,14 +535,12 @@ async function main() {
         shineUrl,
         vaultKeyUsed: dec.keyUsed,
         decodedLen: dec.decodedLen,
-        vaultHeadSample: idx === 0 ? dec.headSample : undefined,
-        vaultTailSample: idx === 0 ? dec.tailSample : undefined,
-        // Only keep full nbmDecodedStrings on first item to keep JSON concise!
+        outerDecoderJs: idx === 0 ? dec.outerDecoderJs : undefined,
         tokenAnalysis:
           idx === 0
             ? inspected.tokenAnalysis
             : {
-                topInitJs: inspected.tokenAnalysis.topInitJs,
+                hasGetCoreTokenBeforeNbm: inspected.tokenAnalysis.hasGetCoreTokenBeforeNbm,
                 hasGetCoreTokenAfterNbm: inspected.tokenAnalysis.hasGetCoreTokenAfterNbm,
                 token1: inspected.tokenAnalysis.token1,
                 token2: inspected.tokenAnalysis.token2,
