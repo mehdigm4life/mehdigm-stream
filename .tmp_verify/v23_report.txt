@@ -1,0 +1,2 @@
+  File "<stdin>", line 302
+SyntaxError: no binding for nonlocal 'first_link_ms' found
