@@ -23,7 +23,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import com.lagradost.cloudstream3.AcraApplication
+import com.lagradost.cloudstream3.CommonActivity
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -103,9 +103,34 @@ object CloudflareSolver {
         val cookies: Map<String, String>
     )
 
-    fun currentActivity(): Activity? = runCatching {
-        AcraApplication.context as? Activity
-    }.getOrNull()?.takeIf { !it.isFinishing && !it.isDestroyed }
+    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
+    fun currentActivity(): Activity? {
+        (EgyDeadPrefs.appContext as? Activity)?.let { act ->
+            if (!act.isFinishing && !act.isDestroyed) return act
+        }
+        runCatching { CommonActivity.activity }.getOrNull()?.let { act ->
+            if (!act.isFinishing && !act.isDestroyed) return act
+        }
+        return try {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val activityThread = activityThreadClass.getMethod("currentActivityThread").invoke(null)
+            val activitiesField = activityThreadClass.getDeclaredField("mActivities").apply { isAccessible = true }
+            val activities = activitiesField.get(activityThread) as? Map<*, *> ?: return null
+            for (record in activities.values) {
+                if (record == null) continue
+                val recordClass = record.javaClass
+                val pausedField = recordClass.getDeclaredField("paused").apply { isAccessible = true }
+                if (!pausedField.getBoolean(record)) {
+                    val activityField = recordClass.getDeclaredField("activity").apply { isAccessible = true }
+                    val act = activityField.get(record) as? Activity
+                    if (act != null && !act.isFinishing && !act.isDestroyed) return act
+                }
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     fun readCookiesFromWebView(url: String): Map<String, String> = runCatching {
         val raw = CookieManager.getInstance()?.getCookie(url).orEmpty()
@@ -665,7 +690,6 @@ object CloudflareSolver {
         wv.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true
             loadsImagesAutomatically = true
             javaScriptCanOpenWindowsAutomatically = false
             mediaPlaybackRequiresUserGesture = true
