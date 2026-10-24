@@ -1,6 +1,0 @@
-Good proxies: ['socks5h://45.74.31.46:5767', 'socks5h://140.207.114.166:10080', 'socks5h://212.115.59.74:1080', 'socks5h://103.100.158.115:10809', 'socks5h://72.255.38.180:1080', 'socks5h://107.174.30.92:1080', 'socks5h://45.74.31.42:9165', 'socks5h://45.74.31.41:10190', 'socks5h://45.74.31.47:5561', 'socks5h://45.74.31.42:12665']
-A (requests Sec-Fetch-Site=none): 200 POST: 404 {"message":"Not Found."}
-B (requests + sec-ch-ua): 200 POST: 200 {"players":{"HD":[{"token":"ed3c8018bee0f239108bc7676e1a76b01271afca342b4892c44c037bff1c5cd8","label":"mega","version":"sub","lang":"jp"},{"
-C (httpx HTTP/2 like OkHttp, no ch-ua): HTTP/2 200 POST: 404 {"message":"Not Found."}
-D (httpx HTTP/2 + sec-ch-ua): HTTP/2 200 POST: 200 {"players":{"HD":[{"token":"acb1037f29f78c7b408591653b9f5d2a0da8eaf9e95294ba583b585d3b1720a3","label":"mega","version":"sub","lang":"jp"},{"
-E (curl_cffi chrome124): 200 POST: 200 {"players":{"HD":[{"token":"9b9f7faded737a04588a10eb1f15a6f3901be967f564b65de20577d9a538991a","label":"mega","version":"sub","lang":"jp"},{"
