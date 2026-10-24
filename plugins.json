@@ -448,5 +448,29 @@
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaNow.cs3",
         "name": "سيما ناو (CimaNow)",
         "description": "سيما ناو — مشاهدة وتحميل أحدث الأفلام والمسلسلات العربية والأجنبية والتركية والآسيوية والأنمي والبرامج بجودات متعددة."
+    },
+    {
+        "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TimeMovies.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+        "fileSize": 100000,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AnimeMovie",
+            "AsianDrama",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "TimeMovies",
+        "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TimeMovies.cs3",
+        "name": "تايم موفيز (TimeMovies)",
+        "description": "تايم موفيز (TimeMovies) — التطبيق الرسمي (v4.7 + DoomPlayer): مشاهدة وتحميل الأفلام والمسلسلات والأنمي بجودات متعددة مع الترجمة العربية المدمجة."
     }
 ]
