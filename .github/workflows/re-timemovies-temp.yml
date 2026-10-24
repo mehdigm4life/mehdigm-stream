@@ -16,16 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Live TimeMovies v4.7 + DoomPlayer API Probe
+      - name: Run Live TimeMovies v4.7 + DoomPlayer API Probe R7
         run: |
-          pip install --quiet --break-system-packages requests cryptography
+          pip install --quiet --break-system-packages requests cryptography androguard loguru
           mkdir -p /tmp/probe_out
           curl -fsSL -o /tmp/TimeMovies_1092.apk \
             "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk"
 
           python3 - <<'PY' > /tmp/probe_out/probe_report.txt 2>&1
-          import base64, hashlib, json, os, random, string, subprocess, time, urllib.parse, uuid, zipfile
+          import base64, hashlib, json, os, random, re, string, subprocess, time, urllib.parse, uuid
           import requests
+          from loguru import logger
+          logger.disable("androguard")
+          from androguard.core.apk import APK
           from cryptography.hazmat.primitives import hashes, serialization
           from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -33,7 +36,6 @@ jobs:
           APP_ID = "60129f949ea4ea03d6598c06"
           AV = "6a3e1c72b864f954c0ef8d54"
           XB = "1092"
-          FIREBASE_KEY = "AIzaSyCckkiH8i2ZARwOs1LEzFKld15aOG8ozKo"
 
           EXEMPT_PATHS = {
               "d4f34a2a4f0249bbb3c92a7e45f3e1c2",
@@ -54,17 +56,17 @@ jobs:
           def b64url(b: bytes) -> str:
               return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
-          # Extract APK signing cert SHA1
-          cert_sha1 = ""
-          try:
-              out = subprocess.check_output(["keytool", "-printcert", "-jarfile", "/tmp/TimeMovies_1092.apk"], text=True)
-              for line in out.splitlines():
-                  if "SHA1:" in line:
-                      cert_sha1 = line.split("SHA1:", 1)[1].strip().replace(":", "")
-                      break
-          except Exception as e:
-              print("keytool err:", e)
-          print("APK CERT SHA1:", cert_sha1)
+          apk = APK("/tmp/TimeMovies_1092.apk")
+          certs = apk.get_certificates_der_v3() or apk.get_certificates_der_v2() or []
+          cert_sha1 = hashlib.sha1(certs[0]).hexdigest().upper() if certs else ""
+          res = apk.get_android_resources()
+          fb_cfg = {}
+          if res:
+              for pkg in res.packages:
+                  for k in ["google_api_key", "google_app_id", "project_id", "default_web_client_id"]:
+                      fb_cfg[k] = res.get_string(pkg, k)
+          print("APK CERT SHA1:", cert_sha1, "FB_CFG:", fb_cfg)
+          fb_key = (fb_cfg.get("google_api_key") or [None, "AIzaSyCckkiH8i2ZARwOs1LEzFKld15aOG8ozKo"])[1]
 
           def uuidv7() -> str:
               ms = int(time.time() * 1000)
@@ -83,12 +85,13 @@ jobs:
                   self.usp_id = None
                   self.maturity = None
                   self.dk = None
+                  self.rasplab_id = uuid.uuid4().hex
+                  self.sid = uuidv7()
                   self.priv = ec.generate_private_key(ec.SECP256R1())
                   self.pub_b64 = b64url(self.priv.public_key().public_bytes(
                       serialization.Encoding.DER,
                       serialization.PublicFormat.SubjectPublicKeyInfo
                   ))
-                  self.time_offset_ms = 0
 
               def req(self, method: str, path_or_url: str, params=None, json_body=None, extra_headers=None, sign=True):
                   url = path_or_url if path_or_url.startswith("http") else BASE + path_or_url
@@ -97,7 +100,7 @@ jobs:
                       if qs:
                           url = url + ("&" if "?" in url else "?") + qs
                   parsed = urllib.parse.urlsplit(url)
-                  t_str = str(int(time.time() * 1000) + self.time_offset_ms)
+                  t_str = str(int(time.time() * 1000))
                   n_str = str(uuid.uuid4())
                   headers = {
                       "x-b": XB,
@@ -147,14 +150,12 @@ jobs:
 
                   if extra_headers:
                       headers.update(extra_headers)
-                  r = self.s.request(method, url, data=data_bytes, headers=headers, timeout=25)
-                  return r
+                  return self.s.request(method, url, data=data_bytes, headers=headers, timeout=25)
 
               def enroll_device_key(self):
                   r1 = self.req("GET", "c81d2e64a4d64d8faea7e1abf4cb8c13", sign=False)
                   print("Challenge:", r1.status_code, r1.text[:500])
-                  j1 = r1.json()
-                  d1 = j1.get("data") or j1
+                  d1 = r1.json().get("result") or r1.json()
                   cid, ch = d1["cid"], d1["ch"]
                   payload = f"{cid}\n{ch}\n{self.pub_b64}\nECDSA_SHA256_DER"
                   sig = b64url(self.priv.sign(payload.encode("utf-8"), ec.ECDSA(hashes.SHA256())))
@@ -165,52 +166,11 @@ jobs:
                       "alg": "ECDSA_SHA256_DER",
                   }, sign=False)
                   print("Enroll:", r2.status_code, r2.text[:500])
-                  j2 = r2.json()
-                  d2 = j2.get("data") or j2
+                  d2 = r2.json().get("result") or r2.json()
                   self.dk = d2.get("dk")
                   return self.dk
 
           c = TMClient()
-
-          print("\n=== 1. AST (AppSettings) ===")
-          r_ast = c.req("GET", "b05a119684b640ea8589ec4134dadefa")
-          print("AST status:", r_ast.status_code, "headers:", dict(r_ast.headers))
-          print("AST body:", r_ast.text[:3000])
-
-          print("\n=== 2. Unauth Home & RefreshToken test ===")
-          r_home0 = c.req("GET", "6ec4ebc493d342fba913e1fb7c3b1b2a")
-          print("Unauth Home:", r_home0.status_code, r_home0.text[:600])
-          sid = uuidv7()
-          r_ref0 = c.req("POST", "d4f34a2a4f0249bbb3c92a7e45f3e1c2", json_body={"sid": sid})
-          print("Unauth Refresh:", r_ref0.status_code, r_ref0.text[:600])
-
-          print("\n=== 3. Firebase Auth + SocialData / SignUp test ===")
-          fb_headers = {
-              "X-Android-Package": "com.extremeqr.proapps",
-              "X-Android-Cert": cert_sha1,
-              "Content-Type": "application/json",
-          }
-          # 3a. Anonymous Firebase signUp
-          r_fb_anon = requests.post(
-              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_KEY}",
-              headers=fb_headers,
-              json={"returnSecureToken": True},
-              timeout=20,
-          )
-          print("FB anon signUp:", r_fb_anon.status_code, r_fb_anon.text[:500])
-
-          # 3b. Email/Password Firebase signUp
-          rand_slug = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
-          rand_email = f"tmuser_{rand_slug}@gmail.com"
-          rand_pass = f"TmPass#{rand_slug}9A"
-          r_fb_email = requests.post(
-              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_KEY}",
-              headers=fb_headers,
-              json={"email": rand_email, "password": rand_pass, "returnSecureToken": True},
-              timeout=20,
-          )
-          print("FB email signUp:", r_fb_email.status_code, r_fb_email.text[:500])
-
           dev_uid = uuid.uuid4().hex[:16]
           user_device = {
               "name": "Pixel 8 Pro",
@@ -229,76 +189,177 @@ jobs:
               "device_manufacturer": "Google",
               "build_number": "1092",
               "installer_package": "com.android.vending",
+              "install_referrer": "utm_source=google-play&utm_medium=organic",
               "device_lang": "ar",
               "device_board": "husky",
               "device_product": "husky",
+              "device_host": "abfarm-release-rbe-64-00045",
+              "device_fingerprint": "google/husky/husky:14/UQ1A.240205.004/11269751:user/release-keys",
+              "device_bootloader": "ripcurrent-14.0-11177083",
               "device_hardware": "husky",
+              "device_tags": "release-keys",
               "device_abis": "arm64-v8a,armeabi-v7a,armeabi",
+              "device_sku": "G1MNW",
+              "device_odm_sku": "husky",
+              "device_soc_manufacturer": "Google",
+              "device_soc_model": "Tensor G3",
               "device_package": "com.extremeqr.proapps",
+              "rasplab_install_id": c.rasplab_id,
           }
 
-          # Try SocialData with Firebase user if either FB call succeeded
-          for label, r_fb in [("anon", r_fb_anon), ("email", r_fb_email)]:
-              if r_fb.status_code == 200:
-                  fbj = r_fb.json()
-                  now_ms = int(time.time() * 1000)
-                  social_payload = {
-                      "appUser": {
-                          "email": fbj.get("email") or rand_email,
-                          "uid": fbj["localId"],
-                          "displayName": f"User {rand_slug[:6]}",
-                          "isEmailVerified": True,
-                          "phoneNumber": None,
-                          "photoUrl": None,
-                          "lastSignInTime": now_ms,
-                          "creationTime": now_ms,
-                          "appName": "[DEFAULT]",
-                          "device": dev_uid,
-                          "idToken": fbj["idToken"],
-                      },
-                      "device": user_device,
-                  }
-                  for ep in ["f9e1a68e9d0c4f8ab4be63f0ed3aa1a4", "c205267f10be4a52a21ed4e7fa890263", "983fd0915e2841ec914088970dc6f059"]:
-                      rs = c.req("POST", ep, json_body=social_payload)
-                      print(f"SocialData({label}) -> {ep}:", rs.status_code, rs.text[:500])
-                      if rs.status_code == 200:
-                          jr = rs.json()
-                          cand = jr.get("data")
-                          if isinstance(cand, str) and cand.count(".") == 2:
-                              c.tk = cand
-                              print("GOT JWT FROM SocialData!!", ep)
-                              break
-              if c.tk:
-                  break
+          print("=== A. Test Firebase with real APK SHA1 ===")
+          fb_headers = {
+              "X-Android-Package": "com.extremeqr.proapps",
+              "X-Android-Cert": cert_sha1,
+              "Content-Type": "application/json",
+          }
+          rand_slug = "".join(random.choices(string.ascii_lowercase + string.digits, k=9))
+          r_fb_anon = requests.post(
+              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={fb_key}",
+              headers=fb_headers,
+              json={"returnSecureToken": True},
+              timeout=15,
+          )
+          print("FB anon:", r_fb_anon.status_code, r_fb_anon.text[:350])
+          r_fb_em = requests.post(
+              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={fb_key}",
+              headers=fb_headers,
+              json={"email": f"ahmed.{rand_slug}@gmail.com", "password": f"Tm#{rand_slug}9A", "returnSecureToken": True},
+              timeout=15,
+          )
+          print("FB email:", r_fb_em.status_code, r_fb_em.text[:350])
 
-          # Also test UserEmailSignUp against the 3 endpoints if c.tk not yet obtained
+          print("\n=== B. Test SocialData directly ===")
+          now_ms = int(time.time() * 1000)
+          fb_tok = r_fb_em.json().get("idToken") if r_fb_em.status_code == 200 else (
+              r_fb_anon.json().get("idToken") if r_fb_anon.status_code == 200 else "eyJhbGciOiJSUzI1NiJ9.e30.x"
+          )
+          fb_uid = r_fb_em.json().get("localId") if r_fb_em.status_code == 200 else uuid.uuid4().hex[:28]
+          rs_soc = c.req("POST", "f9e1a68e9d0c4f8ab4be63f0ed3aa1a4", json_body={
+              "appUser": {
+                  "email": f"ahmed.{rand_slug}@gmail.com",
+                  "uid": fb_uid,
+                  "displayName": f"Ahmed {rand_slug[:5]}",
+                  "isEmailVerified": True,
+                  "phoneNumber": None,
+                  "photoUrl": None,
+                  "lastSignInTime": now_ms,
+                  "creationTime": now_ms,
+                  "appName": "[DEFAULT]",
+                  "device": dev_uid,
+                  "idToken": fb_tok,
+              },
+              "device": user_device,
+          })
+          print("SocialData resp:", rs_soc.status_code, rs_soc.text[:600])
+          if rs_soc.status_code == 200 and isinstance(rs_soc.json().get("result"), str):
+              c.tk = rs_soc.json()["result"]
+              print("GOT JWT VIA SocialData!!")
+
+          print("\n=== C. Test Live Email SignUp + OTP Auto-Activation ===")
           if not c.tk:
-              signup_payload = {
-                  "email": rand_email,
-                  "isEmailError": False,
-                  "emailError": "",
-                  "name": f"Ahmed {rand_slug[:6]}",
-                  "isNameError": False,
-                  "nameError": "",
-                  "pass": rand_pass,
-                  "isPassError": False,
-                  "passError": "",
-                  "confirmPass": rand_pass,
-                  "isConfirmPassError": False,
-                  "confirmPassError": "",
-                  "device": user_device,
-                  "recheckEmail": False,
-              }
-              for ep in ["f9e1a68e9d0c4f8ab4be63f0ed3aa1a4", "c205267f10be4a52a21ed4e7fa890263", "983fd0915e2841ec914088970dc6f059"]:
-                  rs = c.req("POST", ep, json_body=signup_payload)
-                  print(f"UserEmailSignUp -> {ep}:", rs.status_code, rs.text[:500])
-                  if rs.status_code == 200:
-                      jr = rs.json()
-                      cand = jr.get("data")
-                      if isinstance(cand, str) and cand.count(".") == 2:
-                          c.tk = cand
-                          print("GOT JWT FROM UserEmailSignUp!!", ep)
-                          break
+              inboxes = []
+              # Provider 1: mail.tm
+              try:
+                  doms = requests.get("https://api.mail.tm/domains", timeout=10).json().get("hydra:member") or []
+                  for d in doms[:2]:
+                      addr = f"ahmed{rand_slug}@{d['domain']}"
+                      pw = f"Tm#{rand_slug}9A"
+                      rc = requests.post("https://api.mail.tm/accounts", json={"address": addr, "password": pw}, timeout=10)
+                      if rc.status_code in (200, 201):
+                          rt = requests.post("https://api.mail.tm/token", json={"address": addr, "password": pw}, timeout=10).json()["token"]
+                          inboxes.append(("mail.tm", addr, pw, rt))
+              except Exception as e:
+                  print("mail.tm err:", e)
+              # Provider 2: mail.gw
+              try:
+                  doms = requests.get("https://api.mail.gw/domains", timeout=10).json().get("hydra:member") or []
+                  for d in doms[:2]:
+                      addr = f"karim{rand_slug}@{d['domain']}"
+                      pw = f"Tm#{rand_slug}9A"
+                      rc = requests.post("https://api.mail.gw/accounts", json={"address": addr, "password": pw}, timeout=10)
+                      if rc.status_code in (200, 201):
+                          rt = requests.post("https://api.mail.gw/token", json={"address": addr, "password": pw}, timeout=10).json()["token"]
+                          inboxes.append(("mail.gw", addr, pw, rt))
+              except Exception as e:
+                  print("mail.gw err:", e)
+              # Provider 3: guerrillamail
+              try:
+                  gm = requests.get("https://api.guerrillamail.com/ajax.php?f=get_email_address", timeout=10).json()
+                  if gm.get("email_addr"):
+                      inboxes.append(("guerrilla", gm["email_addr"], f"Tm#{rand_slug}9A", gm["sid_token"]))
+              except Exception as e:
+                  print("guerrilla err:", e)
+              # Provider 4: dropmail / 1secmail / gmail fallback check with rasplab_install_id
+              inboxes.append(("gmail_test", f"ahmed.benali.{rand_slug}@outlook.com", f"Tm#{rand_slug}9A", None))
+
+              for prov, email_addr, pw, mtok in inboxes:
+                  print(f"Trying SignUp with {prov}: {email_addr}")
+                  rs_up = c.req("POST", "983fd0915e2841ec914088970dc6f059", json_body={
+                      "email": email_addr,
+                      "isEmailError": False,
+                      "emailError": "",
+                      "name": f"Ahmed Benali",
+                      "isNameError": False,
+                      "nameError": "",
+                      "pass": pw,
+                      "isPassError": False,
+                      "passError": "",
+                      "confirmPass": pw,
+                      "isConfirmPassError": False,
+                      "confirmPassError": "",
+                      "device": user_device,
+                      "recheckEmail": False,
+                  })
+                  print(f"  SignUp({prov}):", rs_up.status_code, rs_up.text[:600])
+                  j_up = rs_up.json() if rs_up.status_code == 200 else {}
+                  res_tok = j_up.get("result")
+                  if isinstance(res_tok, str) and res_tok.count(".") == 2:
+                      c.tk = res_tok
+                      print("  GOT SignUp JWT! Polling for OTP...")
+                      c.enroll_device_key()
+                      otp_code = None
+                      if prov in ("mail.tm", "mail.gw") and mtok:
+                          api_base = f"https://api.{prov}"
+                          for _ in range(12):
+                              time.sleep(3)
+                              msgs = requests.get(f"{api_base}/messages", headers={"Authorization": f"Bearer {mtok}"}, timeout=10).json().get("hydra:member") or []
+                              if msgs:
+                                  mid = msgs[0]["id"]
+                                  mfull = requests.get(f"{api_base}/messages/{mid}", headers={"Authorization": f"Bearer {mtok}"}, timeout=10).json()
+                                  txt = str(mfull.get("text") or "") + " " + str(mfull.get("html") or "") + " " + str(mfull.get("subject") or "")
+                                  print("  Received email:", txt[:500])
+                                  m = re.search(r"\b(\d{6})\b", txt)
+                                  if m:
+                                      otp_code = m.group(1)
+                                      break
+                      elif prov == "guerrilla" and mtok:
+                          for _ in range(12):
+                              time.sleep(3)
+                              ml = requests.get(f"https://api.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token={mtok}", timeout=10).json().get("list") or []
+                              for item in ml:
+                                  if "guerrillamail" not in str(item.get("mail_from", "")).lower():
+                                      mf = requests.get(f"https://api.guerrillamail.com/ajax.php?f=fetch_email&email_id={item['mail_id']}&sid_token={mtok}", timeout=10).json()
+                                      txt = str(mf.get("mail_body") or "") + " " + str(mf.get("mail_subject") or "")
+                                      print("  Received guerrilla email:", txt[:500])
+                                      m = re.search(r"\b(\d{6})\b", txt)
+                                      if m:
+                                          otp_code = m.group(1)
+                                          break
+                              if otp_code:
+                                  break
+                      if otp_code:
+                          print("  Activating OTP:", otp_code)
+                          ra = c.req("POST", "ddcc39a604b14148b9a00112e2e1095f", json_body={
+                              "otp": otp_code,
+                              "isOtpError": False,
+                              "otpError": None,
+                          })
+                          print("  Activate resp:", ra.status_code, ra.text[:600])
+                          if ra.status_code == 200 and isinstance(ra.json().get("result"), str):
+                              c.tk = ra.json()["result"]
+                              print("  ACTIVATED JWT ACQUIRED!! Email:", email_addr, "Pass:", pw)
+                      break
 
           if c.tk:
               parts = c.tk.split(".")
@@ -307,13 +368,14 @@ jobs:
               print("\n=== 4. Decoded JWT (AU) ===")
               print(json.dumps(au, indent=2, ensure_ascii=False))
 
-              print("\n=== 5. Enroll Device Key (ECDSA P-256) ===")
-              c.enroll_device_key()
+              if not c.dk:
+                  print("\n=== 5. Enroll Device Key (ECDSA P-256) ===")
+                  c.enroll_device_key()
 
               print("\n=== 6. User Profiles (USP) ===")
               r_usp = c.req("GET", "2468218428cc4065b0e37dc68c950505")
               print("USP GET:", r_usp.status_code, r_usp.text[:1000])
-              usp_list = (r_usp.json().get("data") if r_usp.status_code == 200 else None) or []
+              usp_list = (r_usp.json().get("result") if r_usp.status_code == 200 else None) or []
               if not usp_list:
                   r_create_usp = c.req("POST", "83fd64bbed2640be9a849fbe975bad53", json_body={
                       "_id": None,
@@ -352,7 +414,7 @@ jobs:
                   })
                   print("Create USP:", r_create_usp.status_code, r_create_usp.text[:800])
                   r_usp = c.req("GET", "2468218428cc4065b0e37dc68c950505")
-                  usp_list = (r_usp.json().get("data") if r_usp.status_code == 200 else None) or []
+                  usp_list = (r_usp.json().get("result") if r_usp.status_code == 200 else None) or []
               if usp_list:
                   c.usp_id = usp_list[0]["_id"]
                   c.maturity = usp_list[0].get("maturity", 18)
@@ -361,12 +423,12 @@ jobs:
               print("\n=== 7. Home, Genres, CategoryPage, PageFilter, Search ===")
               r_home = c.req("GET", "6ec4ebc493d342fba913e1fb7c3b1b2a")
               print("Home:", r_home.status_code, "len=", len(r_home.text))
-              print("Home sample:", r_home.text[:2500])
+              print("Home sample:", r_home.text[:3000])
 
               r_genres = c.req("GET", "da8f8e755b58479f8e0385d6ea37261a")
               print("Genres:", r_genres.status_code, r_genres.text[:1500])
 
-              hm_data = r_home.json().get("data") or {}
+              hm_data = r_home.json().get("result") or {}
               hm_lists = hm_data.get("list") or []
               if hm_lists:
                   cat0 = hm_lists[0].get("cat") or {}
@@ -384,29 +446,32 @@ jobs:
               r_srch_s = c.req("GET", "3571075248fa4bb78355e487c9730be7", params={"search": "Breaking Bad", "page": 1})
               print("Search('Breaking Bad'):", r_srch_s.status_code, r_srch_s.text[:2000])
 
-              # Pick 1 movie and 1 series
               movie_id = None
               series_id = None
               try:
-                  sd1 = r_srch.json().get("data") or {}
-                  mvs = sd1.get("movies") or sd1.get("mvs") or sd1.get("works") or []
-                  if isinstance(mvs, dict):
-                      mvs = mvs.get("works") or mvs.get("list") or []
-                  if mvs:
-                      movie_id = mvs[0]["_id"]
+                  sd1 = r_srch.json().get("result") or {}
+                  print("Search keys:", list(sd1.keys()) if isinstance(sd1, dict) else type(sd1))
+                  for k in ["movies", "mvs", "works", "movie"]:
+                      v = sd1.get(k) if isinstance(sd1, dict) else None
+                      if isinstance(v, dict):
+                          v = v.get("works") or v.get("list") or v.get("items") or []
+                      if isinstance(v, list) and v:
+                          movie_id = v[0]["_id"]
+                          break
               except Exception as e:
                   print("parse movie err:", e)
               try:
-                  sd2 = r_srch_s.json().get("data") or {}
-                  srs = sd2.get("series") or sd2.get("srs") or sd2.get("tv") or []
-                  if isinstance(srs, dict):
-                      srs = srs.get("works") or srs.get("list") or []
-                  if srs:
-                      series_id = srs[0]["_id"]
+                  sd2 = r_srch_s.json().get("result") or {}
+                  for k in ["series", "srs", "tv", "shows"]:
+                      v = sd2.get(k) if isinstance(sd2, dict) else None
+                      if isinstance(v, dict):
+                          v = v.get("works") or v.get("list") or v.get("items") or []
+                      if isinstance(v, list) and v:
+                          series_id = v[0]["_id"]
+                          break
               except Exception as e:
                   print("parse series err:", e)
 
-              # Fallback from home
               if not movie_id and hm_lists:
                   for hl in hm_lists:
                       for w in (hl.get("works") or []):
@@ -421,8 +486,8 @@ jobs:
                   print(f"\n=== 8. Work Detail ({kind}: {wid}) ===")
                   rw = c.req("GET", "30df69a88f6e4ac2a7ea8b9797890911", params={"wk": wid})
                   print(f"Work({kind}):", rw.status_code, "len=", len(rw.text))
-                  print(rw.text[:3000])
-                  wj = rw.json().get("data") or rw.json().get("work") or rw.json()
+                  print(rw.text[:3500])
+                  wj = rw.json().get("result") or rw.json()
                   if isinstance(wj, dict) and "work" in wj:
                       wj = wj["work"]
 
@@ -439,7 +504,7 @@ jobs:
                       if eps:
                           ep_id = eps[0].get("_id")
                           fc = eps[0].get("fc") or fc
-                          print(f"First episode: ep_id={ep_id}, fc={fc}, ss_id={ss_id}, sample={json.dumps(eps[0], ensure_ascii=False)[:600]}")
+                          print(f"First episode: ep_id={ep_id}, fc={fc}, ss_id={ss_id}, sample={json.dumps(eps[0], ensure_ascii=False)[:700]}")
 
                   rq = c.req("POST", "media/qualities", json_body={
                       "work_id": wid,
@@ -464,9 +529,11 @@ jobs:
                           print(f"media/grant({kind}, {action}, {target}):", rg.status_code, rg.text[:1500])
                           if rg.status_code == 200:
                               gj = rg.json()
-                              gd = gj.get("data") or gj
+                              gd = gj.get("result") or gj
+                              if not isinstance(gd, dict):
+                                  continue
                               ext = gd.get("external") or {}
-                              ticket = ext.get("ticket")
+                              ticket = ext.get("ticket") if isinstance(ext, dict) else None
                               grant = gd.get("grant")
                               if ticket:
                                   dp_ep = "resolve-download" if action == "download" else "resolve-play"
@@ -483,7 +550,7 @@ jobs:
                                   )
                                   print(f"  DoomPlayer {dp_ep}:", rdp.status_code, rdp.text[:1500])
                                   if rdp.status_code == 200:
-                                      dpd = (rdp.json().get("data") or rdp.json())
+                                      dpd = (rdp.json().get("result") or rdp.json().get("data") or rdp.json())
                                       murl = dpd.get("url") if isinstance(dpd, dict) else None
                                       if murl and ".m3u8" in murl:
                                           rm3u = requests.get(murl, timeout=15)
@@ -497,7 +564,6 @@ jobs:
                                   )
                                   print(f"  v2/media/{v2_ep}:", rv2.status_code, rv2.text[:1500])
           PY
-          head -n 250 /tmp/probe_out/probe_report.txt
 
       - name: Publish Probe Report via Check Runs
         if: always()
@@ -523,7 +589,7 @@ jobs:
                       "Accept": "application/vnd.github+json",
                   },
                   json={
-                      "name": f"probe-r6-part-{idx:02d}",
+                      "name": f"probe-r7-part-{idx:02d}",
                       "head_sha": sha,
                       "status": "completed",
                       "conclusion": "success",
