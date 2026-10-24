@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Python deps
-        run: pip install requests beautifulsoup4 pycryptodome
+        run: pip install requests[socks] beautifulsoup4 pycryptodome
 
       - name: Verify WitAnime.cs3 DEX classes & Live Streaming Pipeline Timing
         run: |
@@ -316,20 +316,19 @@ jobs:
 
               print("First 8 ordered tokens:", [(x[0], x[1], x[2]) for x in ordered[:8]])
 
-              first_link_ms = None
+              first_link_ms = [None]
               emitted = []
               lock = threading.Lock()
               pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
               futs = []
 
               def on_unlocked(kind, nm, ql, rurl):
-                  nonlocal first_link_ms
                   links = extract_fast(kind, nm, ql, rurl)
                   with lock:
                       for lbl, lurl in links:
                           elapsed = (time.monotonic() - t0) * 1000
-                          if first_link_ms is None:
-                              first_link_ms = elapsed
+                          if first_link_ms[0] is None:
+                              first_link_ms[0] = elapsed
                           emitted.append((lbl, lurl, elapsed))
                           print(f"  [+{elapsed:.0f}ms] EMITTED: {lbl} -> {lurl[:75]}...")
 
@@ -363,7 +362,7 @@ jobs:
               concurrent.futures.wait(futs, timeout=6.0)
               total_ms = (time.monotonic() - t0) * 1000
               pool.shutdown(wait=False)
-              print(f"SUMMARY {watch_url}: unlocked={unlocked_cnt}, playable_links={len(emitted)}, first_link={first_link_ms:.0f}ms, total_loadLinks={total_ms:.0f}ms")
+              print(f"SUMMARY {watch_url}: unlocked={unlocked_cnt}, playable_links={len(emitted)}, first_link={first_link_ms[0] or -1:.0f}ms, total_loadLinks={total_ms:.0f}ms")
               assert len(emitted) >= 5, f"Expected >=5 links, got {len(emitted)}"
               assert total_ms < 15000, f"Expected <15s total, got {total_ms}ms"
           print("\nALL v23 STREAMING BENCHMARKS PASSED 100%!")
