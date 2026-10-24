@@ -86,6 +86,7 @@ jobs:
           with Camoufox(
               headless=False,
               humanize=True,
+              geoip=True,
               proxy={"server": "socks5://127.0.0.1:40000"}
           ) as browser:
               page = browser.new_page()

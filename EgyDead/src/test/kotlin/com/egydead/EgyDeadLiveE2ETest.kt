@@ -217,21 +217,21 @@ class EgyDeadLiveE2ETest {
         // 4. Live Movie Load + Live `POST View=1` Watch-Gate Unlock + Stream Extraction (`loadLinks`)
         val liveMovieItem = p1.first()
         val movieLoad = api.load(liveMovieItem.url) as? MovieLoadResponse
-        println("[LIVE-CF-BYPASS] loadMovie(${liveMovieItem.url}) -> name=${movieLoad?.name}, year=${movieLoad?.year}, tags=${movieLoad?.tags?.size}, recs=${movieLoad?.recommendations?.size}, data=${movieLoad?.data}")
+        println("[LIVE-CF-BYPASS] loadMovie(${liveMovieItem.url}) -> name=${movieLoad?.name}, year=${movieLoad?.year}, tags=${movieLoad?.tags?.size}, recs=${movieLoad?.recommendations?.size}, dataUrl=${movieLoad?.dataUrl}")
         assertNotNull("Loading live movie must return MovieLoadResponse", movieLoad)
 
         val liveMovieLinks = Collections.synchronizedList(mutableListOf<ExtractorLink>())
         val liveMovieSubs = Collections.synchronizedList(mutableListOf<SubtitleFile>())
         val unlockedOk = api.loadLinks(
-            data = movieLoad!!.data,
+            data = movieLoad!!.dataUrl,
             isCasting = false,
             subtitleCallback = { liveMovieSubs.add(it) },
             callback = { liveMovieLinks.add(it) }
         )
-        println("[LIVE-CF-BYPASS] loadLinks(${movieLoad.data}) -> unlockedOk=$unlockedOk, extractedLinks=${liveMovieLinks.size}, subs=${liveMovieSubs.size}")
+        println("[LIVE-CF-BYPASS] loadLinks(${movieLoad.dataUrl}) -> unlockedOk=$unlockedOk, extractedLinks=${liveMovieLinks.size}, subs=${liveMovieSubs.size}")
         liveMovieLinks.forEach { println("  -> [${it.name}] q=${it.quality} type=${it.type} url=${it.url.take(100)}") }
         assertTrue(
-            "Expected live POST View=1 + loadLinks() on ${movieLoad.data} to extract >= 1 playable video stream!",
+            "Expected live POST View=1 + loadLinks() on ${movieLoad.dataUrl} to extract >= 1 playable video stream!",
             unlockedOk && liveMovieLinks.isNotEmpty()
         )
 
