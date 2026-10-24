@@ -109,7 +109,6 @@ object WitAnimeNetwork {
 
     private val PROXY_FEEDS = listOf(
         "socks5" to "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-        "socks4" to "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt",
         "http" to "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
         "socks5" to "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
         "http" to "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
@@ -310,13 +309,21 @@ object WitAnimeNetwork {
         .hostnameVerifier { _, _ -> true }
         .followRedirects(true)
         .followSslRedirects(true)
-        .connectTimeout(18, TimeUnit.SECONDS)
-        .readTimeout(22, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
         .build()
 
     val noRedirectClient: OkHttpClient = directClient.newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
+        .callTimeout(12, TimeUnit.SECONDS)
+        .build()
+
+    val subHostFastClient: OkHttpClient = directClient.newBuilder()
+        .connectTimeout(7, TimeUnit.SECONDS)
+        .readTimeout(9, TimeUnit.SECONDS)
+        .callTimeout(11, TimeUnit.SECONDS)
         .build()
 
     private val cfKiller by lazy { CloudflareKiller() }
@@ -324,13 +331,15 @@ object WitAnimeNetwork {
     private val cfKillerClient: OkHttpClient by lazy {
         directClient.newBuilder()
             .addInterceptor(cfKiller)
+            .callTimeout(14, TimeUnit.SECONDS)
             .build()
     }
 
     private val feedClient = OkHttpClient.Builder()
         .dns(hybridDns)
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
         .build()
 
     // ── Persistence ──────────────────────────────────────────────────────────
@@ -632,13 +641,15 @@ object WitAnimeNetwork {
             .hostnameVerifier { _, _ -> true }
             .followRedirects(true)
             .followSslRedirects(true)
-            .connectTimeout(9, TimeUnit.SECONDS)
-            .readTimeout(14, TimeUnit.SECONDS)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(6, TimeUnit.SECONDS)
             .build()
 
         val noRedirectClient: OkHttpClient = client.newBuilder()
             .followRedirects(false)
             .followSslRedirects(false)
+            .callTimeout(6, TimeUnit.SECONDS)
             .build()
     }
 
@@ -646,6 +657,7 @@ object WitAnimeNetwork {
         val parts = spec.split("://", limit = 2)
         if (parts.size != 2) return null
         val scheme = parts[0].lowercase()
+        if (scheme == "socks4") return null // Android SocksSocketImpl hangs on SOCKS4 servers
         val hostPort = parts[1].trim()
         val colonIdx = hostPort.lastIndexOf(':')
         if (colonIdx <= 0) return null
@@ -653,11 +665,13 @@ object WitAnimeNetwork {
         val port = hostPort.substring(colonIdx + 1).toIntOrNull() ?: return null
         if (port !in 1..65535) return null
         val type = when {
-            scheme.startsWith("socks") -> Proxy.Type.SOCKS
+            scheme == "socks5" || scheme == "socks" -> Proxy.Type.SOCKS
             scheme == "http" || scheme == "https" -> Proxy.Type.HTTP
             else -> return null
         }
-        return Proxy(type, InetSocketAddress.createUnresolved(host, port))
+        val resolvedAddr = runCatching { InetSocketAddress(InetAddress.getByName(host), port) }.getOrNull()
+            ?: return null
+        return Proxy(type, resolvedAddr)
     }
 
     private fun getOrCreateProxySession(spec: String): ProxySessionClient? {
@@ -685,69 +699,84 @@ object WitAnimeNetwork {
         }
     }
 
-    private suspend fun ensureWorkingProxies(probeUrl: String = "$mainUrl/", minRequired: Int = 2) {
+    private suspend fun ensureWorkingProxies(
+        probeUrl: String = "$mainUrl/",
+        minRequired: Int = 1,
+        maxBudgetMs: Long = 7_500L
+    ) {
         if (workingProxies.size >= minRequired) return
         proxyMutex.withLock {
             if (workingProxies.size >= minRequired) return
-            withContext(Dispatchers.IO) {
-                val candidates = LinkedHashSet<String>()
-                coroutineScope {
-                    PROXY_FEEDS.map { (scheme, feedUrl) ->
-                        async<List<String>> {
-                            try {
-                                val req = Request.Builder().url(feedUrl).header("User-Agent", DEFAULT_UA).build()
-                                feedClient.newCall(req).execute().use { resp ->
-                                    if (!resp.isSuccessful) return@use emptyList()
-                                    val lines = resp.body?.string()?.lineSequence()?.take(250)?.toList().orEmpty()
-                                    lines.mapNotNull { line ->
-                                        val clean = line.trim()
-                                        if (clean.contains(':') && !clean.startsWith('#')) "$scheme://$clean" else null
-                                    }
-                                }
-                            } catch (_: Exception) {
-                                emptyList()
-                            }
-                        }
-                    }.awaitAll().flatten().shuffled().forEach { spec ->
-                        if (!deadProxies.contains(spec)) candidates.add(spec)
-                    }
-                }
-
-                val batch = candidates.take(80)
-                val sem = Semaphore(20)
-                coroutineScope {
-                    batch.map { spec ->
-                        async {
-                            if (workingProxies.size >= 4) return@async
-                            sem.withPermit {
-                                if (workingProxies.size >= 4) return@withPermit
-                                val pClient = getOrCreateProxySession(spec) ?: return@withPermit
-                                try {
-                                    val req = Request.Builder()
-                                        .url(encodeUrlIfNeeded(probeUrl))
-                                        .header("User-Agent", userAgent)
-                                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                                        .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-                                        .build()
-                                    pClient.client.newCall(req).execute().use { resp ->
-                                        val body = resp.body?.string().orEmpty()
-                                        if (resp.code == 200 &&
-                                            body.length > 500 &&
-                                            !isCloudflareChallenge(resp.code, body, resp.header("Server"))
-                                        ) {
-                                            markProxySuccess(spec)
-                                        } else {
-                                            deadProxies.add(spec)
-                                            proxyClients.remove(spec)
+            withTimeoutOrNull(maxBudgetMs) {
+                withContext(Dispatchers.IO) {
+                    val candidates = LinkedHashSet<String>()
+                    withTimeoutOrNull(2_800L) {
+                        coroutineScope {
+                            PROXY_FEEDS.map { (scheme, feedUrl) ->
+                                async<List<String>> {
+                                    try {
+                                        val req = Request.Builder().url(feedUrl).header("User-Agent", DEFAULT_UA).build()
+                                        feedClient.newCall(req).execute().use { resp ->
+                                            if (!resp.isSuccessful) return@use emptyList()
+                                            val stream = resp.body?.byteStream() ?: return@use emptyList()
+                                            val picked = ArrayList<String>(60)
+                                            stream.bufferedReader(Charsets.UTF_8).use { reader ->
+                                                while (picked.size < 60) {
+                                                    val line = reader.readLine() ?: break
+                                                    val clean = line.trim()
+                                                    if (clean.contains(':') && !clean.startsWith('#')) {
+                                                        picked.add("$scheme://$clean")
+                                                    }
+                                                }
+                                            }
+                                            picked
                                         }
+                                    } catch (_: Exception) {
+                                        emptyList()
                                     }
-                                } catch (_: Exception) {
-                                    deadProxies.add(spec)
-                                    proxyClients.remove(spec)
                                 }
+                            }.awaitAll().flatten().shuffled().forEach { spec ->
+                                if (!deadProxies.contains(spec)) candidates.add(spec)
                             }
                         }
-                    }.awaitAll()
+                    }
+
+                    val batch = candidates.take(24)
+                    val sem = Semaphore(12)
+                    coroutineScope {
+                        batch.map { spec ->
+                            async {
+                                if (workingProxies.size >= minRequired + 1) return@async
+                                sem.withPermit {
+                                    if (workingProxies.size >= minRequired + 1) return@withPermit
+                                    val pClient = getOrCreateProxySession(spec) ?: return@withPermit
+                                    try {
+                                        val req = Request.Builder()
+                                            .url(encodeUrlIfNeeded(probeUrl))
+                                            .header("User-Agent", userAgent)
+                                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                                            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                                            .build()
+                                        pClient.client.newCall(req).execute().use { resp ->
+                                            val body = resp.body?.string().orEmpty()
+                                            if (resp.code == 200 &&
+                                                body.length > 500 &&
+                                                !isCloudflareChallenge(resp.code, body, resp.header("Server"))
+                                            ) {
+                                                markProxySuccess(spec)
+                                            } else {
+                                                deadProxies.add(spec)
+                                                proxyClients.remove(spec)
+                                            }
+                                        }
+                                    } catch (_: Exception) {
+                                        deadProxies.add(spec)
+                                        proxyClients.remove(spec)
+                                    }
+                                }
+                            }
+                        }.awaitAll()
+                    }
                 }
             }
         }
@@ -996,27 +1025,45 @@ object WitAnimeNetwork {
         else -> 50
     }
 
-    private fun serverPriority(kind: String, name: String): Int {
+    private fun hostFamily(name: String): String {
         val n = name.lowercase().trim()
+        return when {
+            n.contains("videas") || n == "svidea" -> "videas"
+            n == "videa" -> "videa"
+            n == "ok" || n.contains("okru") -> "ok"
+            n.contains("mp4upload") -> "mp4upload"
+            n.contains("hgcloud") || n.contains("streamhg") -> "hgcloud"
+            n.contains("mega") -> "mega"
+            n.contains("4shared") -> "4shared"
+            n.contains("yonaplay") -> "yonaplay"
+            n.contains("gofile") -> "gofile"
+            n.contains("workupload") -> "workupload"
+            n.contains("mediafire") -> "mediafire"
+            else -> n
+        }
+    }
+
+    private fun serverPriority(kind: String, name: String): Int {
+        val fam = hostFamily(name)
         return if (kind == "stream") {
-            when {
-                n.contains("videas") || n == "svidea" -> 100
-                n == "videa" -> 95
-                n.contains("mp4upload") -> 90
-                n == "ok" || n.contains("okru") -> 88
-                n.contains("hgcloud") || n.contains("streamhg") -> 85
-                n.contains("mega") -> 82
-                n.contains("yonaplay") -> 80
-                n.contains("4shared") -> 75
+            when (fam) {
+                "videas" -> 100
+                "videa" -> 96
+                "ok" -> 92
+                "mp4upload" -> 90
+                "hgcloud" -> 88
+                "mega" -> 84
+                "4shared" -> 80
+                "yonaplay" -> 74
                 else -> 60
             }
         } else {
-            when {
-                n.contains("mp4upload") -> 70
-                n.contains("gofile") -> 68
-                n.contains("workupload") -> 65
-                n.contains("mediafire") -> 60
-                n.contains("mega") -> 58
+            when (fam) {
+                "gofile" -> 72
+                "mp4upload" -> 70
+                "mega" -> 66
+                "workupload" -> 62
+                "mediafire" -> 30
                 else -> 40
             }
         }
@@ -1093,16 +1140,42 @@ object WitAnimeNetwork {
             }
         }
 
-        val sortedStreams = streamTokens.sortedWith(
+        // Interleave best quality per distinct server host FIRST so the initial 5-8 gate unlocks
+        // guarantee maximum server & CDN diversity within WitAnime's per-minute rate limit!
+        val streamsBestPerHost = mutableListOf<RawGateToken>()
+        val streamsSecondary = mutableListOf<RawGateToken>()
+        val seenStreamFamilies = HashSet<String>()
+
+        val streamByQualityThenPriority = streamTokens.sortedWith(
+            compareByDescending<RawGateToken> { serverPriority(it.kind, it.serverName) }
+                .thenByDescending { qualityRank(it.qualityLabel) }
+        )
+        for (tok in streamByQualityThenPriority) {
+            val famKey = "${tok.version}|${hostFamily(tok.serverName)}"
+            if (seenStreamFamilies.add(famKey)) {
+                streamsBestPerHost.add(tok)
+            } else {
+                streamsSecondary.add(tok)
+            }
+        }
+        streamsSecondary.sortWith(
             compareByDescending<RawGateToken> { qualityRank(it.qualityLabel) }
                 .thenByDescending { serverPriority(it.kind, it.serverName) }
         )
+
         val sortedDownloads = downloadTokens.sortedWith(
             compareByDescending<RawGateToken> { serverPriority(it.kind, it.serverName) }
                 .thenByDescending { qualityRank(it.qualityLabel) }
         )
+        val topGoFile = sortedDownloads.firstOrNull { hostFamily(it.serverName) == "gofile" }
+        val otherDownloads = if (topGoFile != null) sortedDownloads.filter { it !== topGoFile } else sortedDownloads
 
-        return sortedStreams + sortedDownloads
+        return buildList {
+            addAll(streamsBestPerHost)
+            if (topGoFile != null) add(topGoFile)
+            addAll(streamsSecondary)
+            addAll(otherDownloads)
+        }
     }
 
     private val SOURCES_URL_REGEX = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
@@ -1322,88 +1395,130 @@ object WitAnimeNetwork {
     }
 
     /**
-     * Resolves all watch & download server URLs for a WitAnime `/watch/...` page,
-     * automatically handling Cloudflare challenges AND `witanime.site` per-IP gate rate-limits
-     * via multi-session overflow when needed.
+     * Streams unlocked watch & download server URLs for a WitAnime `/watch/...` page as soon as
+     * each gate unlocks, allowing concurrent extractor invocation (`1.5–4s` time-to-first-link)
+     * without ever stalling on dead public proxies or triggering CloudStream's 120s timeout.
      */
-    suspend fun resolveWatchPageSources(rawWatchUrl: String): List<ResolvedWitSource> = withContext(Dispatchers.IO) {
+    suspend fun streamWatchPageSources(
+        rawWatchUrl: String,
+        allowOverflowProxies: Boolean = false,
+        shouldContinue: (unlockedCount: Int) -> Boolean = { true },
+        onSourceUnlocked: suspend (ResolvedWitSource) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
         ensurePrefsLoaded()
-        val watchUrl = resolveUrl(rawWatchUrl) ?: return@withContext emptyList()
+        val watchUrl = resolveUrl(rawWatchUrl) ?: return@withContext 0
+        val startMs = System.currentTimeMillis()
 
         val sessions = mutableListOf<ActiveWatchSession>()
 
-        // 1. Try direct OkHttp session
+        // 1. Direct OkHttp session (fast path on residential mobile/home networks: ~0.4-0.8s)
         if (!preferWebViewTransport) {
-            openWatchSessionWithClient("direct", directClient, noRedirectClient, watchUrl)?.let(sessions::add)
+            withTimeoutOrNull(12_000L) {
+                openWatchSessionWithClient("direct", directClient, noRedirectClient, watchUrl)
+            }?.let(sessions::add)
         }
 
-        // 2. If direct blocked by Cloudflare, solve in WebView and retry direct
+        // 2. If direct was challenged by Cloudflare, solve in WebView (bounded 12s) and retry direct
         if (sessions.isEmpty()) {
-            solveCloudflareInWebView(watchUrl)
-            openWatchSessionWithClient("direct-after-wv", directClient, noRedirectClient, watchUrl)?.let(sessions::add)
+            solveCloudflareInWebView(watchUrl, timeoutMs = 12_000L)
+            withTimeoutOrNull(10_000L) {
+                openWatchSessionWithClient("direct-after-wv", directClient, noRedirectClient, watchUrl)
+            }?.let(sessions::add)
         }
 
-        // 3. Try CloudflareKiller
+        // 3. Try CloudflareKiller (bounded 10s)
         if (sessions.isEmpty()) {
             val cfNoRedirect = cfKillerClient.newBuilder()
                 .followRedirects(false)
                 .followSslRedirects(false)
+                .callTimeout(10, TimeUnit.SECONDS)
                 .build()
-            openWatchSessionWithClient("cfkiller", cfKillerClient, cfNoRedirect, watchUrl)?.let(sessions::add)
+            withTimeoutOrNull(10_000L) {
+                openWatchSessionWithClient("cfkiller", cfKillerClient, cfNoRedirect, watchUrl)
+            }?.let(sessions::add)
         }
 
-        // 4. Fallback / overflow via sticky proxy pool
+        // 4. Strictly-bounded proxy fallback ONLY when direct/WebView/CFKiller could not open session at all
         val usedProxySpecs = HashSet<String>()
-        suspend fun openNextProxyWatchSession(): ActiveWatchSession? {
-            ensureWorkingProxies(watchUrl, minRequired = 2)
+        suspend fun openNextProxyWatchSession(): ActiveWatchSession? = withTimeoutOrNull(8_500L) {
+            ensureWorkingProxies(watchUrl, minRequired = 1, maxBudgetMs = 6_500L)
             for (spec in workingProxies.toList()) {
                 if (!usedProxySpecs.add(spec)) continue
                 val pClient = getOrCreateProxySession(spec) ?: continue
                 val opened = openWatchSessionWithClient("proxy:$spec", pClient.client, pClient.noRedirectClient, watchUrl, spec)
                 if (opened != null) {
                     markProxySuccess(spec)
-                    return opened
+                    return@withTimeoutOrNull opened
                 } else {
                     markProxyFailure(spec)
                 }
             }
-            return null
+            null
         }
 
         if (sessions.isEmpty()) {
             openNextProxyWatchSession()?.let(sessions::add)
         }
 
-        val primary = sessions.firstOrNull() ?: return@withContext emptyList()
+        val primary = sessions.firstOrNull()
+        if (primary == null) {
+            Log.w(TAG, "streamWatchPageSources: unable to open session for $watchUrl (${System.currentTimeMillis() - startMs}ms)")
+            return@withContext 0
+        }
+        Log.i(TAG, "Opened watch session via ${primary.label} with ${primary.orderedTokens.size} tokens in ${System.currentTimeMillis() - startMs}ms")
         saveSessionToPrefs()
 
-        val resolvedList = mutableListOf<ResolvedWitSource>()
         val seenUrls = HashSet<String>()
         var currentSession: ActiveWatchSession = primary
+        var unlockedCount = 0
+        var gateAttempts = 0
 
         for (slotItem in primary.orderedTokens) {
+            if (!shouldContinue(unlockedCount)) {
+                Log.i(TAG, "Stopping gate unlock early after $unlockedCount unlocked sources (sufficient links ready)")
+                break
+            }
+
+            // Never spend precious rate-limit quota on MediaFire `.zip` archives once we unlocked real stream gates
+            if (unlockedCount > 0 && slotItem.kind == "download" && hostFamily(slotItem.serverName) == "mediafire") {
+                continue
+            }
+
             var tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
-            delay(210L)
+            if (gateAttempts > 0) {
+                delay(180L)
+            }
+            gateAttempts++
+
             var (outcome, resolved) = unlockSingleGate(currentSession, tokenForCurrent)
 
             if (outcome == GateAttemptOutcome.RATE_LIMITED) {
-                // Switch to an overflow proxy session so remaining servers unlock without 429 loss!
-                val overflow = openNextProxyWatchSession()
-                if (overflow != null) {
-                    currentSession = overflow
-                    tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
-                    delay(180L)
-                    val retryRes = unlockSingleGate(currentSession, tokenForCurrent)
-                    outcome = retryRes.first
-                    resolved = retryRes.second
-                } else {
-                    // Polite single cooldown retry on primary
-                    delay(3500L)
-                    val retryRes = unlockSingleGate(currentSession, tokenForCurrent)
-                    outcome = retryRes.first
-                    resolved = retryRes.second
-                    if (outcome == GateAttemptOutcome.RATE_LIMITED) {
-                        // Stop hammering if rate limit remains active and no overflow proxy is available
+                if (unlockedCount > 0 && !allowOverflowProxies) {
+                    // Direct session ALREADY unlocked the highest-priority distinct servers!
+                    // Do NOT stall on public proxies — let extractors finish immediately.
+                    Log.i(TAG, "Hit HTTP 429 after unlocking $unlockedCount priority gates; finishing fast without proxy stall")
+                    break
+                }
+
+                if (unlockedCount == 0 && currentSession.proxySpec == null && !allowOverflowProxies) {
+                    // Rapid episode bingeing hit temporary 429 on Gate #1: short polite cooldown retry on direct first
+                    Log.i(TAG, "Hit HTTP 429 on first gate; retrying direct after 2.2s cooldown")
+                    delay(2_200L)
+                    val retryDirect = unlockSingleGate(currentSession, tokenForCurrent)
+                    outcome = retryDirect.first
+                    resolved = retryDirect.second
+                }
+
+                if (outcome == GateAttemptOutcome.RATE_LIMITED && (unlockedCount == 0 || allowOverflowProxies)) {
+                    val overflow = openNextProxyWatchSession()
+                    if (overflow != null) {
+                        currentSession = overflow
+                        tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
+                        delay(150L)
+                        val retryProxy = unlockSingleGate(currentSession, tokenForCurrent)
+                        outcome = retryProxy.first
+                        resolved = retryProxy.second
+                    } else {
                         break
                     }
                 }
@@ -1411,12 +1526,30 @@ object WitAnimeNetwork {
 
             if (outcome == GateAttemptOutcome.SUCCESS && resolved != null) {
                 if (seenUrls.add("${resolved.version}|${resolved.qualityLabel}|${resolved.resolvedUrl}")) {
-                    resolvedList.add(resolved)
+                    unlockedCount++
+                    onSourceUnlocked(resolved)
                 }
             }
         }
 
-        resolvedList
+        Log.i(TAG, "streamWatchPageSources finished: $unlockedCount unlocked in ${System.currentTimeMillis() - startMs}ms")
+        unlockedCount
+    }
+
+    /**
+     * Batch helper delegating to [streamWatchPageSources].
+     */
+    suspend fun resolveWatchPageSources(
+        rawWatchUrl: String,
+        allowOverflowProxies: Boolean = false
+    ): List<ResolvedWitSource> {
+        val out = CopyOnWriteArrayList<ResolvedWitSource>()
+        streamWatchPageSources(
+            rawWatchUrl = rawWatchUrl,
+            allowOverflowProxies = allowOverflowProxies,
+            onSourceUnlocked = { out.add(it) }
+        )
+        return out
     }
 
     // ── Protected Sub-Host Session Helper (YonaPlay / DotPlay / CF sub-hosts) ──
@@ -1464,59 +1597,53 @@ object WitAnimeNetwork {
     }
 
     /**
-     * Opens a sticky HTTP session capable of reaching a Cloudflare-protected sub-host
-     * (`mid.yonaplay.net`, `dotplay.net`, etc.), returning both the session and initial probe HTML.
+     * Opens a fast, strictly time-boxed HTTP session (`<= 9s`) for sub-hosts (`mid.yonaplay.net`,
+     * `dotplay.net`, etc.), never blocking player startup on long WebView or proxy crawls.
      */
     suspend fun openProtectedSubHost(
         url: String,
         referer: String? = null
-    ): Pair<ProtectedHttpSession, String>? = withContext(Dispatchers.IO) {
-        val baseHeaders = buildMap {
-            put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            put("Upgrade-Insecure-Requests", "1")
-            if (!referer.isNullOrBlank()) put("Referer", referer)
-        }
-
-        // 1. Direct session with isolated sticky CookieJar
-        val localJar = SessionCookieJar()
-        val localClient = directClient.newBuilder().cookieJar(localJar).build()
-        val directSess = ProtectedHttpSession(localClient, localJar)
-        directSess.get(url, baseHeaders)?.let { (code, html) ->
-            if (code == 200 && html.isNotBlank() && !isCloudflareChallenge(code, html) && !html.contains("/error.php")) {
-                return@withContext directSess to html
+    ): Pair<ProtectedHttpSession, String>? = withTimeoutOrNull(9_000L) {
+        withContext(Dispatchers.IO) {
+            val baseHeaders = buildMap {
+                put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                put("Upgrade-Insecure-Requests", "1")
+                if (!referer.isNullOrBlank()) put("Referer", referer)
             }
-        }
 
-        // 2. WebView cookie solve -> retry localJar
-        val wvSolved = solveCloudflareInWebView(url, timeoutMs = 15_000L)
-        if (!wvSolved.isNullOrBlank() && !isCloudflareChallenge(200, wvSolved)) {
-            for ((k, v) in cookieJar.getCookieMap(url)) {
-                localJar.setRawCookie(url, k, v)
-            }
+            // 1. Direct fast session with isolated sticky CookieJar (~0.4s on residential IPs)
+            val localJar = SessionCookieJar()
+            val localClient = subHostFastClient.newBuilder()
+                .cookieJar(localJar)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(6, TimeUnit.SECONDS)
+                .callTimeout(7, TimeUnit.SECONDS)
+                .build()
+            val directSess = ProtectedHttpSession(localClient, localJar)
             directSess.get(url, baseHeaders)?.let { (code, html) ->
-                if (code == 200 && html.isNotBlank() && !isCloudflareChallenge(code, html)) {
+                if (code == 200 && html.isNotBlank() && !isCloudflareChallenge(code, html) && !html.contains("/error.php")) {
                     return@withContext directSess to html
                 }
             }
-        }
 
-        // 3. Sticky Proxy pool
-        ensureWorkingProxies(mainUrl, minRequired = 2)
-        for (spec in workingProxies.toList()) {
-            val pClient = getOrCreateProxySession(spec) ?: continue
-            val proxySess = ProtectedHttpSession(pClient.client, pClient.jar)
-            proxySess.get(url, baseHeaders)?.let { (code, html) ->
-                if (code == 200 && html.isNotBlank() && !isCloudflareChallenge(code, html)) {
-                    markProxySuccess(spec)
-                    return@withContext proxySess to html
+            // 2. Fast bounded sticky proxy fallback (<= 5s) when sub-host challenges direct IP
+            ensureWorkingProxies(mainUrl, minRequired = 1, maxBudgetMs = 4_500L)
+            for (spec in workingProxies.take(3)) {
+                val pClient = getOrCreateProxySession(spec) ?: continue
+                val proxySess = ProtectedHttpSession(pClient.client, pClient.jar)
+                proxySess.get(url, baseHeaders)?.let { (code, html) ->
+                    if (code == 200 && html.isNotBlank() && !isCloudflareChallenge(code, html) && !html.contains("/error.php")) {
+                        markProxySuccess(spec)
+                        return@withContext proxySess to html
+                    }
                 }
             }
-        }
 
-        null
+            null
+        }
     }
 
-    // ── General Sub-Host HTTP Helpers ────────────────────────────────────────
+    // ── General Sub-Host HTTP Helpers (Fast Time-Boxed) ──────────────────────
 
     suspend fun httpGet(
         url: String,
@@ -1536,7 +1663,7 @@ object WitAnimeNetwork {
             for ((k, v) in extraHeaders) {
                 reqBuilder.header(k, v)
             }
-            (clientOverride ?: directClient).newCall(reqBuilder.build()).execute().use { resp ->
+            (clientOverride ?: subHostFastClient).newCall(reqBuilder.build()).execute().use { resp ->
                 resp.code to resp.body?.string().orEmpty()
             }
         } catch (_: Exception) {
@@ -1561,7 +1688,7 @@ object WitAnimeNetwork {
             for ((k, v) in extraHeaders) {
                 reqBuilder.header(k, v)
             }
-            directClient.newCall(reqBuilder.build()).execute().use { resp ->
+            subHostFastClient.newCall(reqBuilder.build()).execute().use { resp ->
                 Triple(resp.code, resp.headers, resp.body?.string().orEmpty())
             }
         } catch (_: Exception) {
@@ -1589,7 +1716,7 @@ object WitAnimeNetwork {
             for ((k, v) in extraHeaders) {
                 reqBuilder.header(k, v)
             }
-            directClient.newCall(reqBuilder.build()).execute().use { resp ->
+            subHostFastClient.newCall(reqBuilder.build()).execute().use { resp ->
                 resp.code to resp.body?.string().orEmpty()
             }
         } catch (_: Exception) {
@@ -1618,7 +1745,7 @@ object WitAnimeNetwork {
             for ((k, v) in extraHeaders) {
                 reqBuilder.header(k, v)
             }
-            (clientOverride ?: directClient).newCall(reqBuilder.build()).execute().use { resp ->
+            (clientOverride ?: subHostFastClient).newCall(reqBuilder.build()).execute().use { resp ->
                 resp.code to resp.body?.string().orEmpty()
             }
         } catch (_: Exception) {
@@ -1654,7 +1781,7 @@ object WitAnimeNetwork {
             if (!referer.isNullOrBlank()) reqBuilder.header("Referer", encodeUrlIfNeeded(referer))
             if (!cookie.isNullOrBlank()) reqBuilder.header("Cookie", cookie)
 
-            directClient.newCall(reqBuilder.build()).execute().use { resp ->
+            subHostFastClient.newCall(reqBuilder.build()).execute().use { resp ->
                 if (resp.code !in 200..299) return@withContext false
                 val cDisp = resp.header("Content-Disposition").orEmpty().lowercase()
                 if (cDisp.contains(".zip") || cDisp.contains(".rar") || cDisp.contains(".7z")) {

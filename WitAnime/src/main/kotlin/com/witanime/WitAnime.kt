@@ -1,5 +1,6 @@
 package com.witanime
 
+import android.util.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageList
@@ -22,11 +23,14 @@ import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.nodes.Document
@@ -35,6 +39,8 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 class WitAnime : MainAPI() {
     override var mainUrl: String
@@ -533,7 +539,7 @@ class WitAnime : MainAPI() {
         }
     }
 
-    // ── Load Video Links (All Stream & Download Servers + Multi-Quality) ─────
+    // ── Load Video Links (Streaming Pipelined Gate Unlock + Parallel Extractors) ──
 
     override suspend fun loadLinks(
         data: String,
@@ -541,14 +547,17 @@ class WitAnime : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        val startMs = System.currentTimeMillis()
         val watchUrl = WitAnimeNetwork.resolveUrl(data, mainUrl) ?: return false
-        val resolvedSources = WitAnimeNetwork.resolveWatchPageSources(watchUrl)
-        if (resolvedSources.isEmpty()) return false
+        Log.i("WitAnime", "loadLinks start: $watchUrl")
 
         val emittedUrls = ConcurrentHashMap.newKeySet<String>()
+        val emittedCount = AtomicInteger(0)
         val cbLock = Any()
         val dedupCallback: (ExtractorLink) -> Unit = { link ->
             if (emittedUrls.add(link.url)) {
+                val idx = emittedCount.incrementAndGet()
+                Log.i("WitAnime", "Link #$idx ready in ${System.currentTimeMillis() - startMs}ms: ${link.name} (${link.quality}p)")
                 synchronized(cbLock) {
                     callback(link)
                 }
@@ -565,21 +574,50 @@ class WitAnime : MainAPI() {
             }
         }
 
-        val sem = Semaphore(5)
-        coroutineScope {
-            resolvedSources.map { src ->
-                async {
-                    sem.withPermit {
-                        WitAnimeExtractors.extractWitSource(
-                            src = src,
-                            subtitleCallback = dedupSubtitleCallback,
-                            callback = dedupCallback
-                        )
+        // Hard 34s cap ensures we NEVER approach CloudStream's 120,000ms TimeoutCancellationException
+        withTimeoutOrNull(34_000L) {
+            supervisorScope {
+                val sem = Semaphore(6)
+                val extractorJobs = CopyOnWriteArrayList<Deferred<Unit>>()
+
+                WitAnimeNetwork.streamWatchPageSources(
+                    rawWatchUrl = watchUrl,
+                    allowOverflowProxies = false,
+                    shouldContinue = { unlockedCount ->
+                        when {
+                            unlockedCount >= 11 -> false
+                            unlockedCount >= 8 && emittedCount.get() >= 4 -> false
+                            else -> true
+                        }
+                    },
+                    onSourceUnlocked = { src ->
+                        val job = async(Dispatchers.IO) {
+                            sem.withPermit {
+                                withTimeoutOrNull(11_000L) {
+                                    WitAnimeExtractors.extractWitSource(
+                                        src = src,
+                                        subtitleCallback = dedupSubtitleCallback,
+                                        callback = dedupCallback
+                                    )
+                                }
+                                Unit
+                            }
+                        }
+                        extractorJobs.add(job)
                     }
+                )
+
+                val waitBudgetMs = if (emittedCount.get() >= 4) 4_500L else 11_500L
+                withTimeoutOrNull(waitBudgetMs) {
+                    extractorJobs.awaitAll()
                 }
-            }.awaitAll()
+                for (job in extractorJobs) {
+                    if (job.isActive) job.cancel()
+                }
+            }
         }
 
+        Log.i("WitAnime", "loadLinks completed in ${System.currentTimeMillis() - startMs}ms with ${emittedUrls.size} playable links")
         return emittedUrls.isNotEmpty()
     }
 }

@@ -13,6 +13,7 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -1153,10 +1154,11 @@ object WitAnimeExtractors {
             .find(url)?.groupValues?.get(1) ?: return@withContext
 
         val wuJar = WitAnimeNetwork.SessionCookieJar()
-        val wuClient: OkHttpClient = WitAnimeNetwork.directClient.newBuilder()
+        val wuClient: OkHttpClient = WitAnimeNetwork.subHostFastClient.newBuilder()
             .cookieJar(wuJar)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(7, TimeUnit.SECONDS)
+            .readTimeout(9, TimeUnit.SECONDS)
+            .callTimeout(10, TimeUnit.SECONDS)
             .build()
 
         val pageUrl = "https://workupload.com/file/$fileId"
@@ -1176,7 +1178,7 @@ object WitAnimeExtractors {
 
             val puzData = runCatching { JSONObject(puzRaw).optJSONObject("data") }.getOrNull() ?: return@withContext
             val puzzle = puzData.optString("puzzle")
-            val range = puzData.optInt("range", 50_000).coerceAtMost(250_000)
+            val range = puzData.optInt("range", 50_000).coerceAtMost(200_000)
             val findArr = puzData.optJSONArray("find")
 
             if (puzzle.isNotEmpty() && findArr != null && findArr.length() > 0) {
@@ -1185,11 +1187,22 @@ object WitAnimeExtractors {
                     val target = findArr.optString(i).lowercase().trim()
                     if (target.isNotEmpty()) findSet.add(target)
                 }
+                val hexTable = "0123456789abcdef".toCharArray()
+                val hexBuf = CharArray(64)
                 val md = MessageDigest.getInstance("SHA-256")
+                val puzzleBytes = puzzle.toByteArray(StandardCharsets.UTF_8)
                 val solutions = ArrayList<String>(findSet.size)
                 for (i in 0 until range) {
-                    val digest = md.digest((puzzle + i.toString()).toByteArray(StandardCharsets.UTF_8))
-                    val hex = digest.joinToString("") { "%02x".format(it) }
+                    if ((i and 0xFFF) == 0) ensureActive()
+                    md.reset()
+                    md.update(puzzleBytes)
+                    val digest = md.digest(i.toString().toByteArray(StandardCharsets.UTF_8))
+                    for (bIdx in 0 until 32) {
+                        val v = digest[bIdx].toInt() and 0xFF
+                        hexBuf[bIdx * 2] = hexTable[v ushr 4]
+                        hexBuf[bIdx * 2 + 1] = hexTable[v and 0x0F]
+                    }
+                    val hex = String(hexBuf)
                     if (hex in findSet) {
                         solutions.add(i.toString())
                         if (solutions.size >= findSet.size) break
