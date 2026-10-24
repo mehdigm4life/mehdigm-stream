@@ -62,27 +62,31 @@ jobs:
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=20000)
               print(f"[PATCHRIGHT] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
 
-              # Poll & auto-tap re-evaluating DOM every iteration!
-              for attempt in range(1, 9):
-                  time.sleep(2.5)
+              # Poll & auto-tap using exact dir-aware coordinate!
+              for attempt in range(1, 14):
+                  time.sleep(2.2)
                   cards = page.locator("li.movieItem").count()
+                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in ctx.cookies()]
                   if cards > 0:
-                      print(f">>> SOLVED AT ATTEMPT #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r} <<<")
+                      print(f">>> SOLVED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
                       break
+                  if any(c[0] == "cf_clearance" for c in cookies_now):
+                      probe_h3 = page.evaluate("""async () => {
+                          const r = await fetch('/h3/', {credentials: 'include'});
+                          const txt = await r.text();
+                          return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem'), title: (txt.match(/<title>([^<]+)<\/title>/) || ['',''])[1]};
+                      }""")
+                      print(f"[CF_CLEARANCE PRESENT AT POLL #{attempt}!] fetch('/h3/') -> {probe_h3}")
+                      if probe_h3.get("movieItem"):
+                          page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=15000)
+                          break
                   info = page.evaluate("""() => {
-                      const allRects = [];
-                      for (const el of document.querySelectorAll('div, iframe, input')) {
-                          const r = el.getBoundingClientRect();
-                          if (r.width >= 40 && r.height >= 20) {
-                              allRects.push({tag: el.tagName, id: el.id, name: el.getAttribute('name'), cls: (el.className||'').toString().slice(0,30), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), ch: el.children.length});
-                          }
-                      }
                       const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
                       let target = null;
                       if (inp && inp.parentElement) {
                           const r = inp.parentElement.getBoundingClientRect();
                           if (r.width >= 180 && r.height >= 40) {
-                              target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height};
+                              target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: (inp.value || '').length};
                           }
                       }
                       if (!target) {
@@ -92,27 +96,19 @@ jobs:
                               if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
                               const r = d.getBoundingClientRect();
                               if (d.children.length === 0 && r.width >= 180 && r.width <= 420 && r.height >= 45 && r.height <= 95 && r.top > 0) {
-                                  target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height};
+                                  target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, valLen: 0};
                                   break;
                               }
                           }
                       }
-                      return {title: document.title, dir: document.documentElement.dir, bodyText: (document.body ? document.body.innerText.slice(0, 180).replace(/\\n+/g, ' | ') : ''), target, rects: allRects.slice(0, 15)};
+                      return {title: document.title, dir: document.documentElement.dir, target};
                   }""")
-                  print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] info={json.dumps(info, ensure_ascii=False)}")
+                  print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] cookies={cookies_now} info={json.dumps(info, ensure_ascii=False)}")
                   t = info["target"]
-                  if t:
-                      if attempt == 2:
-                          page.screenshot(path="/tmp/turnstile.png")
-                          im = Image.open("/tmp/turnstile.png").convert("RGB")
-                          cy_px = int(t["top"] + t["height"] / 2.0)
-                          xs = [x for x in range(int(t["left"]), int(t["right"])) if im.getpixel((x, cy_px)) not in ((255,255,255),(250,250,250),(249,249,249),(34,34,34),(35,35,35))]
-                          print(f"[PIXEL SCAN y={cy_px}] w={im.size}, non-bg xs first8={xs[:8]}, last8={xs[-8:]}")
+                  if t and t.get("valLen", 0) == 0:
                       is_rtl = (info.get("dir") or "").lower() == "rtl"
-                      x1 = (t["right"] - 28) if is_rtl else (t["left"] + 28)
-                      x2 = (t["left"] + 28) if is_rtl else (t["right"] - 28)
+                      click_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
                       cy = t["top"] + t["height"] / 2.0
-                      click_x = x1 if attempt % 2 == 0 else x2
                       print(f"[TAP #{attempt}] clicking ({click_x}, {cy}) (is_rtl={is_rtl})")
                       page.mouse.click(click_x, cy)
 
