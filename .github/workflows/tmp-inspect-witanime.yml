@@ -18,18 +18,49 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Diagnose Gate 302 & Dump All WitAnime Hosts
+      - name: Inspect Videas API + Download Gate + YonaPlay + WorkUpload + Mega
         run: |
-          pip install -q "curl_cffi" beautifulsoup4
+          pip install -q "curl_cffi" beautifulsoup4 pycryptodome
           mkdir -p .tmp_wit/hosts
-          python3 -u - <<'PY' > .tmp_wit/run.log 2>&1
-          import concurrent.futures, json, os, random, re, time, traceback, urllib.parse
+          python3 -u - <<'PY' > .tmp_wit/probe2.log 2>&1
+          import base64, concurrent.futures, json, random, re, struct, urllib.parse
           from bs4 import BeautifulSoup
           from curl_cffi import requests as creq
+          from Crypto.Cipher import AES
+          from Crypto.Util import Counter
 
           BASE = "https://witanime.site"
+          out = {}
 
-          direct = creq.Session(impersonate="chrome124")
+          # 1. Videas reverse engineering!
+          vs = creq.Session(impersonate="chrome124")
+          vjs = vs.get("https://app.videas.com/static/embeds/videas-embed-player-0UWZU2eI.umd.js", timeout=15).text
+          hits = []
+          for kw in ["apiBaseUrl", "visitor/embed", "opening", "VideasEmbed", "mount("]:
+              for m in re.finditer(re.escape(kw), vjs):
+                  s = m.start()
+                  hits.append((kw, s, vjs[max(0, s-250):s+650]))
+          out["videas_js_hits"] = hits[:15]
+          for k, pos, snip in hits[:8]:
+              print(f"=== VIDEAS {k} @ {pos} ===\n{snip}\n")
+
+          # Also test MEGA API + AES-128-CTR on BIdHzJhT#tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ!
+          fid = "BIdHzJhT"
+          key_b64 = "tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ"
+          key_raw = base64.urlsafe_b64decode(key_b64 + "=" * ((4 - len(key_b64) % 4) % 4))
+          k32 = struct.unpack(">8I", key_raw)
+          aes_key = struct.pack(">4I", k32[0] ^ k32[4], k32[1] ^ k32[5], k32[2] ^ k32[6], k32[3] ^ k32[7])
+          nonce64 = struct.pack(">2I", k32[4], k32[5])
+          rmega = vs.post("https://g.api.mega.co.nz/cs?id=1", json=[{"a": "g", "g": 1, "p": fid}], timeout=12).json()
+          print("MEGA API:", rmega)
+          g_url = rmega[0]["g"]
+          enc_chunk = vs.get(g_url, headers={"Range": "bytes=0-127"}, timeout=12).content
+          ctr = Counter.new(64, prefix=nonce64, initial_value=0)
+          dec_chunk = AES.new(aes_key, AES.MODE_CTR, counter=ctr).decrypt(enc_chunk)
+          print("MEGA decrypted first 32 bytes:", dec_chunk[:32])
+          out["mega_test"] = {"api": rmega, "decrypted_hex": dec_chunk[:32].hex(), "ftyp_in_head": b"ftyp" in dec_chunk[:32]}
+
+          # 2. Find 8 working proxies for WitAnime download-gate + yonaplay
           feeds = [
               ("socks5h", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
               ("socks5h", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"),
@@ -38,7 +69,7 @@ jobs:
           cands = []
           for sch, fu in feeds:
               try:
-                  for ln in direct.get(fu, timeout=8).text.splitlines():
+                  for ln in vs.get(fu, timeout=8).text.splitlines():
                       ln = ln.strip()
                       if re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", ln):
                           cands.append(f"{sch}://{ln}")
@@ -46,353 +77,108 @@ jobs:
                   pass
           random.shuffle(cands)
 
-          def is_valid_wit(r):
-              if not r or r.status_code != 200 or len(r.text) < 2000:
-                  return False
-              low = r.text[:6000].lower()
-              return "witanime" in low and "just a moment" not in low and "_cf_chl_opt" not in low
+          def is_wit(r):
+              return r and r.status_code == 200 and len(r.text) > 2000 and "witanime" in r.text[:6000].lower() and "just a moment" not in r.text[:6000].lower()
 
-          def test_px(px):
+          def tpx(px):
               try:
                   s = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-                  r = s.get(BASE + "/", timeout=8)
-                  if is_valid_wit(r):
+                  if is_wit(s.get(BASE + "/", timeout=8)):
                       return px
               except Exception:
                   pass
               return None
 
-          good_proxies = []
-          with concurrent.futures.ThreadPoolExecutor(max_workers=45) as ex:
-              for res in ex.map(test_px, cands[:260]):
+          pxs = []
+          with concurrent.futures.ThreadPoolExecutor(max_workers=40) as ex:
+              for res in ex.map(tpx, cands[:220]):
                   if res:
-                      good_proxies.append(res)
-                      if len(good_proxies) >= 18:
+                      pxs.append(res)
+                      if len(pxs) >= 10:
                           break
-          print("Good proxies:", len(good_proxies))
+          print("Good proxies:", len(pxs))
 
-          diag = {"good_proxies_count": len(good_proxies)}
-
-          def open_watch_session(watch_url, px):
+          # Test download-gate header variants on tr4!
+          for px in pxs[:4]:
               ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-              r1 = ws.get(
-                  watch_url,
-                  headers={
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                      "Sec-Fetch-Site": "none",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "document",
-                      "Upgrade-Insecure-Requests": "1",
-                  },
-                  timeout=14,
-              )
-              if not is_valid_wit(r1):
-                  return None
+              wurl = f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"
+              r1 = ws.get(wurl, timeout=14)
+              if not is_wit(r1):
+                  continue
               soup = BeautifulSoup(r1.text, "html.parser")
-              csrf_el = soup.select_one("meta[name='csrf-token']")
-              csrf = csrf_el["content"] if csrf_el and csrf_el.has_attr("content") else ""
-              m_src = re.search(r"sourcesUrl\s*:\s*['\"]([^'\"]+)['\"]", r1.text)
-              src_url = urllib.parse.urljoin(BASE + "/", m_src.group(1).replace("\\/", "/")) if m_src else watch_url.rstrip("/") + "/sources"
-              r_src = ws.post(
-                  src_url,
-                  data=b"",
-                  headers={
-                      "Accept": "application/json",
-                      "X-CSRF-TOKEN": csrf,
-                      "Origin": BASE,
-                      "Referer": watch_url,
+              csrf = soup.select_one("meta[name='csrf-token']")["content"]
+              rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
+              if rsrc.status_code != 200:
+                  continue
+              dls = rsrc.json()["downloads"]["FHD"] + rsrc.json()["downloads"]["HD"]
+              dl_variants = [
+                  ("same_origin_with_referer", {
+                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                      "Referer": wurl,
                       "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "cors",
-                      "Sec-Fetch-Dest": "empty",
-                  },
-                  timeout=14,
-              )
-              if r_src.status_code != 200 or not r_src.text.strip().startswith("{"):
-                  return None
-              return {
-                  "ws": ws,
-                  "px": px,
-                  "csrf": csrf,
-                  "watch_url": watch_url,
-                  "r1_headers": {k: v for k, v in r1.headers.items()},
-                  "r1_cookies": dict(ws.cookies),
-                  "r_src_headers": {k: v for k, v in r_src.headers.items()},
-                  "r_src_cookies": dict(ws.cookies),
-                  "sjson": r_src.json(),
-              }
-
-          try:
-              # Test /new-episodes?page=2 with session from /
-              for px in good_proxies[:4]:
-                  sh = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-                  rh = sh.get(BASE + "/", timeout=12)
-                  if is_valid_wit(rh):
-                      rne = sh.get(
-                          f"{BASE}/new-episodes?page=2",
-                          headers={
-                              "Accept": "application/json",
-                              "Referer": BASE + "/",
-                              "Sec-Fetch-Site": "same-origin",
-                              "Sec-Fetch-Mode": "cors",
-                              "Sec-Fetch-Dest": "empty",
-                          },
-                          timeout=12,
-                      )
-                      diag["new_episodes_p2"] = {"status": rne.status_code, "body": rne.text[:600]}
-                      print("new-episodes?page=2:", rne.status_code, rne.text[:150])
-                      break
-
-              sess0 = None
-              for px in good_proxies:
-                  try:
-                      sess0 = open_watch_session(f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4", px)
-                      if sess0:
-                          break
-                  except Exception as e:
-                      print("sess0 err:", e)
-              assert sess0, "No tr4 session"
-              diag["r1_headers"] = sess0["r1_headers"]
-              diag["r1_cookie_keys"] = list(sess0["r1_cookies"].keys())
-              diag["r_src_headers"] = sess0["r_src_headers"]
-
-              # Test 3 stream-gate header variants!
-              tr_players = sess0["sjson"]["players"].get("FHD", []) + sess0["sjson"]["players"].get("HD", [])
-              variants = [
-                  ("no_referer_iframe", lambda wurl, pol: {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "iframe",
-                      "Upgrade-Insecure-Requests": "1",
-                      **({"Referer": BASE + "/"} if pol == "origin" else {}),
-                  }),
-                  ("no_referer_sec_none", lambda wurl, pol: {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                      "Sec-Fetch-Site": "none",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "iframe",
-                      "Upgrade-Insecure-Requests": "1",
-                  }),
-                  ("origin_referer_iframe", lambda wurl, pol: {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                      "Referer": BASE + "/",
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "iframe",
-                      "Upgrade-Insecure-Requests": "1",
-                  }),
-              ]
-              gate_exps = []
-              winning_fn = None
-              for idx_v, (v_name, v_fn) in enumerate(variants):
-                  pobj = tr_players[idx_v]
-                  tok = pobj["token"]
-                  ws = sess0["ws"]
-                  rs = ws.post(
-                      f"{BASE}/watch/stream-source/{tok}",
-                      data=b"",
-                      headers={
-                          "Accept": "application/json",
-                          "X-CSRF-TOKEN": sess0["csrf"],
-                          "Origin": BASE,
-                          "Referer": sess0["watch_url"],
-                          "Sec-Fetch-Site": "same-origin",
-                          "Sec-Fetch-Mode": "cors",
-                          "Sec-Fetch-Dest": "empty",
-                      },
-                      timeout=12,
-                  )
-                  pol = "no-referrer"
-                  try:
-                      pol = rs.json().get("referrerPolicy", "no-referrer")
-                  except Exception:
-                      pass
-                  rg = ws.get(f"{BASE}/watch/stream-gate/{tok}", headers=v_fn(sess0["watch_url"], pol), allow_redirects=False, timeout=12)
-                  loc = rg.headers.get("location", "")
-                  print(f"Variant {v_name} ({pobj['label']}): rs={rs.status_code} rg={rg.status_code} loc={loc}")
-                  gate_exps.append({
-                      "variant": v_name,
-                      "label": pobj["label"],
-                      "rs_status": rs.status_code,
-                      "rs_headers": {k: v for k, v in rs.headers.items()},
-                      "rs_body": rs.text[:250],
-                      "rg_status": rg.status_code,
-                      "rg_headers": {k: v for k, v in rg.headers.items()},
-                      "rg_location": loc,
-                  })
-                  if loc and not winning_fn:
-                      winning_fn = v_fn
-              diag["gate_exps"] = gate_exps
-
-              # Test download-source + download-gate WITHOUT Referer!
-              dl_obj = sess0["sjson"]["downloads"]["HD"][0]
-              rs_dl = sess0["ws"].post(
-                  f"{BASE}/watch/download-source/{dl_obj['token']}",
-                  data=b"",
-                  headers={
-                      "Accept": "application/json",
-                      "X-CSRF-TOKEN": sess0["csrf"],
-                      "Origin": BASE,
-                      "Referer": sess0["watch_url"],
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "cors",
-                      "Sec-Fetch-Dest": "empty",
-                  },
-                  timeout=12,
-              )
-              rg_dl = sess0["ws"].get(
-                  f"{BASE}/watch/download-gate/{dl_obj['token']}",
-                  headers={
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                      "Sec-Fetch-Site": "none",
                       "Sec-Fetch-Mode": "navigate",
                       "Sec-Fetch-Dest": "document",
                       "Upgrade-Insecure-Requests": "1",
-                  },
-                  allow_redirects=False,
-                  timeout=12,
-              )
-              dl_loc = rg_dl.headers.get("location", "")
-              print("DL no-referer:", rs_dl.status_code, rg_dl.status_code, dl_loc)
-              diag["dl_exp"] = {
-                  "rs_status": rs_dl.status_code,
-                  "rs_headers": {k: v for k, v in rs_dl.headers.items()},
-                  "rg_status": rg_dl.status_code,
-                  "rg_headers": {k: v for k, v in rg_dl.headers.items()},
-                  "rg_location": dl_loc,
-              }
-
-              # Resolve ALL unique stream & download hosts across tr4, bc3, bl9, mov (4 tokens per fresh proxy!)
-              targets = [
-                  ("tr4", f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"),
-                  ("bc3", f"{BASE}/watch/black-clover-2nd-season/3"),
-                  ("bl9", f"{BASE}/watch/bleach-sennen-kessen-hen-kashin-tan/9"),
-                  ("mov", f"{BASE}/watch/movie/boku-no-kokoro-no-yabai-yatsu-movie"),
+                  }),
+                  ("same_origin_no_referer", {
+                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                      "Sec-Fetch-Site": "same-origin",
+                      "Sec-Fetch-Mode": "navigate",
+                      "Sec-Fetch-Dest": "document",
+                      "Upgrade-Insecure-Requests": "1",
+                  }),
+                  ("same_origin_user_1", {
+                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                      "Sec-Fetch-Site": "same-origin",
+                      "Sec-Fetch-Mode": "navigate",
+                      "Sec-Fetch-User": "?1",
+                      "Sec-Fetch-Dest": "document",
+                      "Upgrade-Insecure-Requests": "1",
+                  }),
               ]
-              resolved_all = []
-              seen_kl = set()
-              px_c = 1
+              dl_res = []
+              for idx_d, (vn, vh) in enumerate(dl_variants):
+                  do = dls[idx_d]
+                  tok = do["token"]
+                  rs = ws.post(f"{BASE}/watch/download-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                  rg = ws.get(f"{BASE}/watch/download-gate/{tok}", headers=vh, allow_redirects=False, timeout=12)
+                  loc = rg.headers.get("location", "")
+                  print(f"DL variant {vn} ({do['label']}): rs={rs.status_code} rs_body={rs.text[:150]} rg={rg.status_code} loc={loc}")
+                  dl_res.append({"variant": vn, "label": do["label"], "rs_status": rs.status_code, "rs_body": rs.text[:200], "rg_status": rg.status_code, "loc": loc})
+                  if loc.startswith("http"):
+                      rwu = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
+                      open(f".tmp_wit/hosts/dl_{do['label']}.html", "w", encoding="utf-8").write(rwu.text[:200000])
+                      print(f"  Fetched {do['label']} ({loc}) -> {rwu.status_code} len={len(rwu.text)}")
+              out["dl_variants"] = dl_res
+              break
 
-              if winning_fn or dl_loc:
-                  for t_tag, t_url in targets:
-                      s_base = None
-                      for _ in range(len(good_proxies)):
-                          px = good_proxies[px_c % len(good_proxies)]
-                          px_c += 1
-                          try:
-                              s_base = open_watch_session(t_url, px)
-                              if s_base:
-                                  break
-                          except Exception:
-                              pass
-                      if not s_base:
-                          continue
-                      todo = []
-                      for q, arr in (s_base["sjson"].get("players") or {}).items():
-                          for o in (arr or []):
-                              kl = f"stream:{o['label'].lower()}"
-                              if t_tag == "tr4" or kl not in seen_kl:
-                                  seen_kl.add(kl)
-                                  todo.append(("stream", q, o["label"]))
-                      for q, arr in (s_base["sjson"].get("downloads") or {}).items():
-                          for o in (arr or []):
-                              kl = f"download:{o['label'].lower()}"
-                              if (t_tag == "tr4" and q in ("FHD", "HD")) or kl not in seen_kl:
-                                  seen_kl.add(kl)
-                                  todo.append(("download", q, o["label"]))
+          # Also resolve yonaplay on bc3 with a fresh proxy!
+          for px in pxs[4:]:
+              ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+              wurl = f"{BASE}/watch/black-clover-2nd-season/3"
+              r1 = ws.get(wurl, timeout=14)
+              if not is_wit(r1):
+                  continue
+              soup = BeautifulSoup(r1.text, "html.parser")
+              csrf = soup.select_one("meta[name='csrf-token']")["content"]
+              rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
+              if rsrc.status_code != 200:
+                  continue
+              yp = next((x for x in rsrc.json()["players"].get("FHD", []) if x["label"] == "yonaplay"), None)
+              if yp:
+                  tok = yp["token"]
+                  rs = ws.post(f"{BASE}/watch/stream-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                  rg = ws.get(f"{BASE}/watch/stream-gate/{tok}", headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": BASE + "/", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe", "Upgrade-Insecure-Requests": "1"}, allow_redirects=False, timeout=12)
+                  loc = rg.headers.get("location", "")
+                  print("yonaplay:", rs.status_code, rg.status_code, loc)
+                  out["yonaplay"] = {"rs": rs.status_code, "rs_body": rs.text[:200], "rg": rg.status_code, "loc": loc}
+                  if loc.startswith("http"):
+                      ryp = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
+                      open(".tmp_wit/hosts/stream_yonaplay.html", "w", encoding="utf-8").write(ryp.text[:200000])
+                      print("  yonaplay page:", ryp.status_code, len(ryp.text))
+              break
 
-                      for cs in range(0, len(todo), 4):
-                          chunk = todo[cs:cs + 4]
-                          sess = s_base if cs == 0 else None
-                          if not sess:
-                              for _ in range(len(good_proxies)):
-                                  px = good_proxies[px_c % len(good_proxies)]
-                                  px_c += 1
-                                  try:
-                                      sess = open_watch_session(t_url, px)
-                                      if sess:
-                                          break
-                                  except Exception:
-                                      pass
-                          if not sess:
-                              continue
-                          for kind, q, want_lbl in chunk:
-                              try:
-                                  bucket = (sess["sjson"].get("players" if kind == "stream" else "downloads") or {}).get(q) or []
-                                  m = next((x for x in bucket if x.get("label") == want_lbl), None)
-                                  if not m:
-                                      continue
-                                  tok = m["token"]
-                                  ep1 = "stream-source" if kind == "stream" else "download-source"
-                                  ep2 = "stream-gate" if kind == "stream" else "download-gate"
-                                  rs = sess["ws"].post(
-                                      f"{BASE}/watch/{ep1}/{tok}",
-                                      data=b"",
-                                      headers={
-                                          "Accept": "application/json",
-                                          "X-CSRF-TOKEN": sess["csrf"],
-                                          "Origin": BASE,
-                                          "Referer": sess["watch_url"],
-                                          "Sec-Fetch-Site": "same-origin",
-                                          "Sec-Fetch-Mode": "cors",
-                                          "Sec-Fetch-Dest": "empty",
-                                      },
-                                      timeout=12,
-                                  )
-                                  pol = "no-referrer"
-                                  try:
-                                      pol = rs.json().get("referrerPolicy", "no-referrer")
-                                  except Exception:
-                                      pass
-                                  gh = winning_fn(sess["watch_url"], pol) if (kind == "stream" and winning_fn) else {
-                                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                                      "Sec-Fetch-Site": "none",
-                                      "Sec-Fetch-Mode": "navigate",
-                                      "Sec-Fetch-Dest": "document",
-                                      "Upgrade-Insecure-Requests": "1",
-                                  }
-                                  rg = sess["ws"].get(f"{BASE}/watch/{ep2}/{tok}", headers=gh, allow_redirects=False, timeout=12)
-                                  loc = rg.headers.get("location", "")
-                                  print(f"[{t_tag}] {kind} {q} {want_lbl} -> rs={rs.status_code} rg={rg.status_code} loc={loc}")
-                                  resolved_all.append({
-                                      "tag": t_tag, "kind": kind, "quality": q, "label": want_lbl,
-                                      "rs_status": rs.status_code, "rg_status": rg.status_code, "location": loc,
-                                  })
-                              except Exception as e:
-                                  print("item err:", e)
-              diag["resolved_all"] = resolved_all
-
-              ext_probes = {}
-              seen_d = set()
-              for it in resolved_all:
-                  eu = it.get("location") or ""
-                  if not eu.startswith("http"):
-                      continue
-                  dom = urllib.parse.urlparse(eu).netloc.lower().removeprefix("www.")
-                  key = f"{it['kind']}_{it['label']}_{dom}"
-                  if key in seen_d:
-                      continue
-                  seen_d.add(key)
-                  sk = re.sub(r"[^a-zA-Z0-9_.-]+", "_", key)[:60]
-                  try:
-                      ss = creq.Session(impersonate="chrome124")
-                      rext = ss.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
-                      if rext.status_code in (403, 503) and good_proxies:
-                          ps = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
-                          rext2 = ps.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
-                          if rext2.status_code == 200:
-                              rext = rext2
-                      open(f".tmp_wit/hosts/{sk}.html", "w", encoding="utf-8").write(rext.text[:250000])
-                      ext_probes[sk] = {"input": eu, "final": rext.url, "status": rext.status_code, "ct": rext.headers.get("content-type", ""), "len": len(rext.text)}
-                  except Exception as e:
-                      ext_probes[sk] = {"input": eu, "err": str(e)}
-              diag["ext_probes"] = ext_probes
-          except Exception:
-              diag["fatal"] = traceback.format_exc()
-              print(diag["fatal"])
-
-          with open(".tmp_wit/diag.json", "w", encoding="utf-8") as fh:
-              json.dump(diag, fh, ensure_ascii=False, indent=2)
+          open(".tmp_wit/probe2.json", "w", encoding="utf-8").write(json.dumps(out, ensure_ascii=False, indent=2))
           PY
 
       - name: Commit inspection dump
@@ -401,6 +187,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A .tmp_wit
-          git commit -m "chore: save WitAnime gate & host dumps [skip ci]" || true
+          git commit -m "chore: save probe2 [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
