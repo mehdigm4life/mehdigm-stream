@@ -1,788 +1,1090 @@
 package com.egydead
 
-import android.util.Log
-import android.webkit.CookieManager
-import com.lagradost.cloudstream3.CommonActivity
+import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
+import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainPageRequest
+import com.lagradost.cloudstream3.Score
+import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.SearchResponseList
+import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.addDubStatus
+import com.lagradost.cloudstream3.addEpisodes
 import com.lagradost.cloudstream3.mainPageOf
+import com.lagradost.cloudstream3.newAnimeLoadResponse
+import com.lagradost.cloudstream3.newAnimeSearchResponse
 import com.lagradost.cloudstream3.newEpisode
 import com.lagradost.cloudstream3.newHomePageResponse
 import com.lagradost.cloudstream3.newMovieLoadResponse
 import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newSearchResponseList
 import com.lagradost.cloudstream3.newTvSeriesLoadResponse
-import com.lagradost.cloudstream3.utils.ExtractorApi
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.net.URL
 import java.net.URLEncoder
-import com.egydead.EgyDeadPrefsEncoder
-import com.egydead.EgyDeadPrefs
+import java.util.Collections
 
-/**
- * EgyDead (إيجي ديد) provider.
- *
- * WordPress site that renders movies at the root slug and series/seasons/episodes
- * under `/serie/`, `/season/`, `/episode/`. Detail pages hide the players behind a
- * `POST View=1` form. The single "MegaMax" server is a rotating file-host domain
- * (`https://<random>.top/iframe/<hash>`) whose real sources are exposed through an
- * Inertia partial reload (`X-Inertia-Partial-Data: streams`); `<random>.top/download/<hash>`
- * exposes the download mirrors through `props.attachments` + `props.download`. Those
- * sources are embeds of well-known hosts (uqload, vidmoly, streamwish/hgcloud, mixdrop,
- * doodstream, vidara, byse, vidhide/earnvids, voe, streamruby) resolved by CloudStream's
- * [loadExtractor] and the extractors in this plugin ([EgyDeadPackerExtractor] family,
- * [EgyDeadUqload], [EgyDeadByse]).
- */
 class EgyDead : MainAPI() {
-    companion object {
-        private const val TAG = "EgyDead"
-        private const val IFRAME_HOST = "files/mirror/video"
-        private const val DOWNLOAD_COMPONENT = "files/mirror/download"
-
-        /** Hosts handled by CloudStream built-ins (or our own extractor). */
-        private val EXTRACTOR_HOSTS = listOf(
-            "uqload", "vidmoly", "streamwish", "streamhg", "mixdrop", "dood",
-            "vidara", "byse", "vidhide", "earnvids", "voe", "streamruby", "stmruby",
-            "vibuxer", "rubyvidhub", "morencius", "callistanise", "byseraguci", "ok.ru"
-        )
-
-        private val SEASON_WORDS = listOf(
-            "الثاني عشر" to 12, "الحادي عشر" to 11,
-            "الاول" to 1, "الثاني" to 2, "الثالث" to 3, "الرابع" to 4,
-            "الخامس" to 5, "السادس" to 6, "السابع" to 7, "الثامن" to 8,
-            "التاسع" to 9, "العاشر" to 10
-        )
-
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
-
-        private val PAGE_HEADERS = mapOf("User-Agent" to USER_AGENT)
-    }
-
-    private var savedCookies: String? = null
-    private val cfMutex = Mutex()
-
-    private fun buildHeaders(referer: String?): MutableMap<String, String> {
-        val headers = mutableMapOf("User-Agent" to USER_AGENT, "Referer" to (referer ?: mainUrl), "Accept-Language" to "ar,en-US;q=0.9")
-        savedCookies?.let { headers["Cookie"] = it }
-            ?: EgyDeadPrefs.loadCookies()?.let { headers["Cookie"] = it }
-        return headers
-    }
-
-    private suspend fun cfGet(url: String, referer: String? = null): Document {
-        var currentUrl = url
-        var headers = buildHeaders(referer)
-        var res = app.get(currentUrl, headers = headers, timeout = 30)
-        if (res.code in listOf(403, 503, 429) || res.text.contains("Just a moment", true) || res.text.contains("Attention Required", true)) {
-            cfMutex.withLock {
-                val cm = CookieManager.getInstance()
-                val current = cm.getCookie(currentUrl)
-                if (current != null && current != savedCookies && current.contains("cf_clearance")) {
-                    savedCookies = current
-                } else {
-                    val activity = CommonActivity.activity
-                    if (activity != null) {
-                        val solver = CloudflareSolver.solve(activity, currentUrl, USER_AGENT)
-                        if (solver != null) {
-                            if (!solver.cookies.isNullOrEmpty()) { savedCookies = solver.cookies; EgyDeadPrefs.saveCookies(solver.cookies) }
-                            if (solver.finalUrl != currentUrl) {
-                                try {
-                                    val nh = URL(solver.finalUrl).host
-                                    mainUrl = "https://$nh"
-                                } catch (_: Exception) {}
-                                currentUrl = solver.finalUrl
-                            }
-                        }
-                    }
-                }
-            }
-            headers = buildHeaders(referer)
-            res = app.get(currentUrl, headers = headers, timeout = 30)
-        }
-        return res.document
-    }
-
-    private suspend fun cfPost(url: String, data: Map<String, String>, referer: String? = null): Document {
-        var currentUrl = url
-        var headers = buildHeaders(referer).apply { put("X-Requested-With", "XMLHttpRequest") }
-        var res = app.post(currentUrl, data = data, headers = headers, timeout = 30)
-        if (res.code in listOf(403, 503, 429) || res.text.contains("Just a moment", true)) {
-            cfMutex.withLock {
-                val cm = CookieManager.getInstance()
-                val current = cm.getCookie(currentUrl)
-                if (current != null && current != savedCookies && current.contains("cf_clearance")) {
-                    savedCookies = current
-                } else {
-                    val activity = CommonActivity.activity
-                    if (activity != null) {
-                        val solver = CloudflareSolver.solve(activity, currentUrl, USER_AGENT)
-                        if (solver != null) {
-                            if (!solver.cookies.isNullOrEmpty()) { savedCookies = solver.cookies; EgyDeadPrefs.saveCookies(solver.cookies) }
-                            if (solver.finalUrl != currentUrl) {
-                                try {
-                                    val nh = URL(solver.finalUrl).host
-                                    mainUrl = "https://$nh"
-                                } catch (_: Exception) {}
-                                currentUrl = solver.finalUrl
-                            }
-                        }
-                    }
-                }
-            }
-            headers = buildHeaders(referer).apply { put("X-Requested-With", "XMLHttpRequest") }
-            res = app.post(currentUrl, data = data, headers = headers, timeout = 30)
-        }
-        return res.document
-    }
-
+    override var mainUrl = EgyDeadNetwork.DEFAULT_BASE_URL
     override var name = "إيجي ديد (EgyDead)"
-    override var mainUrl = "https://tv10.egydead.live"
-    override var lang = "ar"
-
     override val hasMainPage = true
-    override val hasQuickSearch = true
-    override val hasDownloadSupport = true
-
+    override var lang = "ar"
     override val supportedTypes = setOf(
-        TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon, TvType.AnimeMovie
+        TvType.Movie,
+        TvType.TvSeries,
+        TvType.Anime,
+        TvType.Cartoon,
+        TvType.AnimeMovie
     )
 
     override val mainPage = mainPageOf(
-        "/page/movies/" to "أحدث الأفلام",
-        "/episode/" to "أحدث الحلقات",
-        "/season/" to "أحدث المواسم",
-        "/category/english-movies/" to "أفلام أجنبي",
-        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/" to "أفلام عربي",
+        "/movies/" to "أحدث الأفلام",
+        "/episodes/" to "أحدث الحلقات",
+        "/seasons/" to "أحدث المواسم",
+        "/Series/" to "المسلسلات الكاملة",
+        "/category/english-movies/" to "أفلام أجنبية",
+        "/category/english-movies/english-movies-dubbed/" to "أفلام أجنبية مدبلجة",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/" to "أفلام عربية",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/" to "أفلام تركية",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/" to "أفلام تركية مدبلجة",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/" to "أفلام آسيوية",
+        "/category/hindi-movies/" to "أفلام هندية",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/" to "أفلام أنمي",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/" to "أفلام أنمي مدبلجة",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/" to "أفلام كرتون",
-        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/" to "أفلام انمي",
-        "/series-category/english-series/" to "مسلسلات أجنبي",
-        "/series-category/arabic-series/" to "مسلسلات عربي",
+        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86-%d8%af%d9%8a%d8%b2%d9%86%d9%8a-%d8%a8%d8%a7%d9%84%d9%84%d9%87%d8%ac%d8%a9-%d8%a7%d9%84%d9%85%d8%b5%d8%b1%d9%8a%d8%a9/" to "أفلام ديزني بالمصري",
+        "/film-series/" to "سلاسل الأفلام",
+        "/series-category/english-series/" to "مسلسلات أجنبية",
+        "/series-category/english-series-dubbed/" to "مسلسلات أجنبية مدبلجة",
+        "/series-category/arabic-series/" to "مسلسلات عربية",
         "/series-category/turkish-series/" to "مسلسلات تركية",
-        "/series-category/asian-series/" to "مسلسلات اسيوية",
+        "/series-category/turkish-series-dubbed/" to "مسلسلات تركية مدبلجة",
+        "/series-category/asian-series/" to "مسلسلات آسيوية وكورية",
+        "/series-category/anime-series/" to "مسلسلات أنمي",
+        "/series-category/anime-series-dubbed/" to "مسلسلات أنمي مدبلجة",
         "/series-category/cartoon-series/" to "مسلسلات كرتون",
-        "/series-category/anime-series/" to "مسلسلات انمي",
-        "/series-category/anime-series-dubbed/" to "انمي مدبلج",
-        "/series-category/anime-movies/" to "أفلام انمي"
+        "/series-category/cartoon-series-dubbed/" to "مسلسلات كرتون مدبلجة",
+        "/series-category/latino-series/" to "مسلسلات لاتينية وإسبانية",
+        "/series-category/indian-series/" to "مسلسلات هندية",
+        "/series-category/documentary-series/" to "مسلسلات وثائقية",
+        "/series-category/tv-shows/" to "برامج تلفزيونية",
+        "/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%88%d8%ad%d9%81%d9%84%d8%a7%d8%aa/" to "عروض وحفلات ومصارعة"
     )
 
-    // ------------------------------------------------------------------ main
+    // =========================================================================
+    // Helper Utilities (Title Cleaning, Season/Episode Parsing, Card Parsing)
+    // =========================================================================
+
+    companion object {
+        private val ARABIC_ORDINALS = listOf(
+            "الحادي والعشرون" to 21,
+            "العشرون" to 20, "العشرين" to 20,
+            "التاسع عشر" to 19,
+            "الثامن عشر" to 18,
+            "السابع عشر" to 17,
+            "السادس عشر" to 16,
+            "الخامس عشر" to 15,
+            "الرابع عشر" to 14,
+            "الثالث عشر" to 13,
+            "الثاني عشر" to 12, "الثانى عشر" to 12,
+            "الحادي عشر" to 11, "الحادى عشر" to 11,
+            "العاشر" to 10,
+            "التاسع" to 9,
+            "الثامن" to 8,
+            "السابع" to 7,
+            "السادس" to 6,
+            "الخامس" to 5,
+            "الرابع" to 4,
+            "الثالث" to 3,
+            "الثاني" to 2, "الثانى" to 2,
+            "الأول" to 1, "الاول" to 1, "الأولى" to 1, "الاولى" to 1
+        )
+
+        fun cleanTitle(raw: String, keepDubTag: Boolean = true): String {
+            val wasDubbed = isDubbedText(raw)
+            var s = raw
+                .replace(Regex("""^\s*(?:تحميل\s+و\s*مشاهدة|مشاهدة\s+و\s*تحميل|مشاهدة|تحميل)\s+"""), "")
+                .replace(Regex("""^\s*(?:فيلم|مسلسل|انمي|أنمي|كرتون|برنامج|عرض)\s+"""), "")
+                .replace(Regex("""\s*\|\s*ايجي\s*ديد.*$"""), "")
+                .replace(Regex("""\s+(?:اون\s*لاين|أون\s*لاين|اونلاين|بجودة\s+عالية)\b.*$"""), "")
+                .replace(Regex("""\s+(?:مترجم[ةه]?|مدبلج[ةه]?)\s*(?:كامل[ةه]?)?\s*$"""), "")
+                .replace(Regex("""\s+(?:مترجم[ةه]?|مدبلج[ةه]?)\s+كامل[ةه]?\b"""), "")
+                .replace(Regex("""\s+كامل[ةه]?\s*$"""), "")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+
+            if (s.isBlank()) s = raw.trim()
+            if (keepDubTag && wasDubbed && !s.contains("مدبلج") && !s.contains("بالمصري")) {
+                s = "$s (مدبلج)"
+            }
+            return s
+        }
+
+        fun cleanSeriesRootTitle(raw: String): String {
+            return cleanTitle(raw, keepDubTag = false)
+                .replace(
+                    Regex("""\s*(?:الموسم|الجزء)\s+(?:الحادي\s+عشر|الحادى\s+عشر|الثاني\s+عشر|الثانى\s+عشر|الثالث\s+عشر|الرابع\s+عشر|الخامس\s+عشر|السادس\s+عشر|السابع\s+عشر|الثامن\s+عشر|التاسع\s+عشر|العشرون|العشرين|الأول|الاول|الثاني|الثانى|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|\d+).*$"""),
+                    ""
+                )
+                .replace(Regex("""\s*(?:الحلقة|الحلقه|حلقة|حلقه)\s*\d+.*$"""), "")
+                .replace(Regex("""\s+[Ss]\d{1,2}(?:[Ee]\d{1,3})?.*$"""), "")
+                .replace(Regex("""\s+(?:مترجم[ةه]?|مدبلج[ةه]?)\b.*$"""), "")
+                .trim()
+                .ifBlank { cleanTitle(raw, keepDubTag = false) }
+        }
+
+        fun isDubbedText(text: String, url: String = ""): Boolean {
+            if (text.contains("مدبلج") || text.contains("بالمصري") || text.contains("باللهجة المصرية")) return true
+            val u = url.lowercase()
+            return u.contains("-dubbed") || u.endsWith("-ar/") || u.endsWith("-ar") || u.contains("-ar-s0")
+        }
+
+        fun parseSeasonNumber(text: String, url: String = ""): Int? {
+            // 1. Slug patterns like -s04, /s04, season-4
+            Regex("""(?:^|[-_/])[sS](\d{1,2})(?:[eE]\d+|[-_/]|$)""").find(url)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            Regex("""season[-_]?(\d{1,2})""", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            // 2. Numeric in text: الموسم 4 / الجزء 4 / Season 4 / S04 / Part 4
+            Regex("""(?:الموسم|الجزء|موسم|جزء|[Ss]eason|[Pp]art)\s*(\d{1,2})""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            Regex("""\b[Ss](\d{1,2})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            // 3. Arabic ordinals (check longer phrases like الحادي عشر before الأول/العاشر)
+            for ((word, num) in ARABIC_ORDINALS) {
+                if (text.contains(word)) return num
+            }
+            return null
+        }
+
+        fun parseEpisodeNumber(text: String, url: String = ""): Int? {
+            // 1. Arabic الحلقة 12 / حلقه 00
+            Regex("""(?:الحلقة|الحلقه|حلقة|حلقه)\s*(\d{1,4})""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            // 2. OVA / Special
+            Regex("""(?:اوفا|أوفا|OVA)\s*(\d{1,3})""", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return 1000 + it
+            }
+            // 3. URL s04e01 or episode-12 or -12/
+            Regex("""[sS]\d{1,2}[eE](\d{1,4})""").find(url)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            Regex("""(?:episode|ep)[-_]?(\d{1,4})""", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.toIntOrNull()?.let {
+                return it
+            }
+            // 4. Bare number if text is just "12"
+            text.trim().toIntOrNull()?.let { return it }
+            return null
+        }
+
+        fun mapQualityBadge(badge: String?): SearchQuality? {
+            if (badge.isNullOrBlank()) return null
+            val b = badge.uppercase()
+            return when {
+                b.contains("2160") || b.contains("4K") || b.contains("UHD") -> SearchQuality.UHD
+                b.contains("BLURAY") || b.contains("BLU-RAY") -> SearchQuality.BlueRay
+                b.contains("WEB") -> SearchQuality.WebRip
+                b.contains("1080") || b.contains("FHD") -> SearchQuality.HD
+                b.contains("720") || b.contains("HDTV") || b.contains("HDRIP") -> SearchQuality.HD
+                b.contains("HDCAM") || b.contains("HDTS") || b.contains("TS") -> SearchQuality.Telesync
+                b.contains("CAM") -> SearchQuality.Cam
+                b.contains("DVD") -> SearchQuality.DVD
+                else -> null
+            }
+        }
+
+        fun stripWatchSuffix(url: String): String {
+            val clean = url.trim()
+            return clean.replace(Regex("""/watch/?$""", RegexOption.IGNORE_CASE), "/")
+        }
+
+        fun extractPoster(root: Element?): String? {
+            if (root == null) return null
+            val imgs = root.select("img")
+            for (img in imgs) {
+                val alt = img.attr("alt").trim().lowercase()
+                if (alt == "logo" || alt == "لوجو") continue
+                val candidates = listOf(
+                    img.attr("data-src"),
+                    img.attr("data-lazy-src"),
+                    img.attr("data-original"),
+                    img.attr("srcset").substringBefore(" ").trim(),
+                    img.attr("src")
+                )
+                for (raw in candidates) {
+                    val u = raw.trim()
+                    if (u.startsWith("http") && !u.startsWith("data:") &&
+                        !u.contains("-logo", ignoreCase = true) && !u.contains("لوجو")
+                    ) {
+                        return EgyDeadNetwork.encodeUrl(u)
+                    }
+                }
+            }
+            return null
+        }
+    }
+
+    private fun classifyTvType(href: String, rawTitle: String, categoryText: String = ""): TvType {
+        val u = href.lowercase()
+        val combined = "$rawTitle $categoryText"
+        val isAnime = combined.contains("انمي") || combined.contains("أنمي") ||
+            u.contains("anime")
+        val isCartoon = combined.contains("كرتون") || combined.contains("انيميشن") ||
+            u.contains("cartoon")
+        val isEpisodic = u.contains("/episodes/") || u.contains("/episode/") ||
+            u.contains("/seasons/") || u.contains("/season/") ||
+            u.contains("/series/") || u.contains("/serie/") ||
+            u.contains("/film-series/") || u.contains("/assembly/") ||
+            combined.contains("مسلسل") || combined.contains("الموسم") || combined.contains("الحلقة")
+
+        return when {
+            isEpisodic && isAnime -> TvType.Anime
+            isEpisodic && isCartoon -> TvType.Cartoon
+            isEpisodic -> TvType.TvSeries
+            isAnime -> TvType.AnimeMovie
+            isCartoon -> TvType.Cartoon
+            else -> TvType.Movie
+        }
+    }
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val linkEl = selectFirst("a[href]") ?: if (tagName() == "a") this else return null
+        val rawHref = linkEl.attr("abs:href").ifBlank { linkEl.attr("href") }.trim()
+        if (rawHref.isBlank()) return null
+
+        val lowerHref = rawHref.lowercase()
+        if (lowerHref.contains("/category/") ||
+            lowerHref.contains("/series-category/") ||
+            lowerHref.contains("/type/") ||
+            lowerHref.contains("/tag/") ||
+            lowerHref.contains("/actor/") ||
+            lowerHref.endsWith("/h3/")
+        ) return null
+
+        val canonicalHref = stripWatchSuffix(EgyDeadNetwork.encodeUrl(rawHref))
+
+        val rawTitle = selectFirst("h1.BottomTitle, h2.BottomTitle, h3.BottomTitle, .BottomTitle")?.text()?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: linkEl.attr("title").trim().takeIf { it.isNotBlank() }
+            ?: selectFirst("img")?.attr("alt")?.trim()?.takeIf { it.isNotBlank() }
+            ?: linkEl.text().trim()
+        if (rawTitle.isBlank()) return null
+
+        val catText = selectFirst("span.cat_name, .cat_name")?.text().orEmpty()
+        val ribbonText = select("span.ribbon, .ribbon, span.label, .label").joinToString(" ") { it.text() }
+        val qualityBadge = selectFirst("span.label, .label")?.text()?.trim()
+        val poster = extractPoster(this)
+        val tvType = classifyTvType(canonicalHref, rawTitle, "$catText $ribbonText")
+        val isDub = isDubbedText("$rawTitle $catText $ribbonText", canonicalHref)
+        val isSub = rawTitle.contains("مترجم") || (!isDub && !catText.contains("عربي"))
+        val epNum = selectFirst("span.number em, .number em, i.number em")?.text()?.trim()?.toIntOrNull()
+            ?: if (canonicalHref.lowercase().contains("/episode")) parseEpisodeNumber(rawTitle, canonicalHref) else null
+
+        val title = cleanTitle(rawTitle, keepDubTag = true)
+        val yearMatch = Regex("""\b(19\d{2}|20\d{2})\b""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
+        val sq = mapQualityBadge(qualityBadge)
+
+        return when (tvType) {
+            TvType.Anime, TvType.Cartoon, TvType.TvSeries -> {
+                if (isDub || epNum != null || tvType == TvType.Anime) {
+                    newAnimeSearchResponse(title, canonicalHref, tvType) {
+                        this.posterUrl = poster
+                        this.year = yearMatch
+                        if (sq != null) this.quality = sq
+                        addDubStatus(isDub, isSub, epNum, epNum)
+                    }
+                } else {
+                    newTvSeriesSearchResponse(title, canonicalHref, tvType) {
+                        this.posterUrl = poster
+                        this.year = yearMatch
+                        if (sq != null) this.quality = sq
+                    }
+                }
+            }
+            TvType.AnimeMovie, TvType.Movie -> {
+                newMovieSearchResponse(title, canonicalHref, tvType) {
+                    this.posterUrl = poster
+                    this.year = yearMatch
+                    if (sq != null) this.quality = sq
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun parseCardList(doc: Document): List<SearchResponse> {
+        val seen = HashSet<String>()
+        val out = mutableListOf<SearchResponse>()
+        for (card in doc.select("div.movies-list li.movieItem, div.catHolder li.movieItem, ul.posts-list li.movieItem, li.movieItem")) {
+            // Avoid sidebar / header widgets if main list exists
+            val item = card.toSearchResult() ?: continue
+            if (seen.add(item.url)) {
+                out.add(item)
+            }
+        }
+        return out
+    }
+
+    // =========================================================================
+    // Main Page & Infinite-Scroll Search
+    // =========================================================================
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = "$mainUrl${request.data}?page=$page"
-        val doc = try {
-            cfGet(url)
-        } catch (e: Throwable) {
-            Log.i(TAG, "getMainPage failed $url -> $e")
-            return newHomePageResponse(request.name, emptyList())
-        }
-        val items = parseCards(doc)
-        val hasNext = doc.selectFirst(".pagination .next, .page-numbers .next, a.next") != null
-        return newHomePageResponse(request.name, items, hasNext)
-    }
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=${URLEncoder.encode(query, "UTF-8")}"
-        val doc = try {
-            cfGet(url)
-        } catch (e: Throwable) {
-            Log.i(TAG, "search failed -> $e")
-            return emptyList()
-        }
-        return parseCards(doc)
-    }
-
-    private fun parseCards(doc: Document): List<SearchResponse> =
-        doc.select("ul.posts-list li.movieItem, div.EpsList li").mapNotNull { parseCard(it) }
-
-    private fun parseCard(el: Element): SearchResponse? {
-        val a = el.selectFirst("a[href]") ?: return null
-        val href = a.attr("href").trim().takeIf { it.isNotBlank() } ?: return null
-        val title = el.selectFirst("h1.BottomTitle, .BottomTitle")?.text()?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: a.attr("title").trim().takeIf { it.isNotBlank() }
-            ?: a.text().trim()
-        val poster = el.selectFirst("img")?.attr("src")?.takeIf { it.isNotBlank() }
-        return newMovieSearchResponse(title, href, typeForUrl(href)) {
-            this.posterUrl = poster
-        }
-    }
-
-    private fun typeForUrl(url: String): TvType =
-        if (url.contains("/serie/") || url.contains("/season/") || url.contains("/episode/")) {
-            TvType.TvSeries
+        val base = EgyDeadNetwork.getBaseUrl()
+        mainUrl = base
+        val sectionPath = request.data.trim()
+        val targetUrl = if (page <= 1) {
+            "$base$sectionPath"
         } else {
-            TvType.Movie
+            "$base${sectionPath.trimEnd('/')}/page/$page/"
         }
 
-    // ------------------------------------------------------------------ load
+        val doc = EgyDeadNetwork.fetchDocument(targetUrl, referer = "$base/")
+            ?: return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
 
-    override suspend fun load(url: String): com.lagradost.cloudstream3.LoadResponse {
-        val doc = try {
-            cfGet(url)
-        } catch (e: Throwable) {
-            Log.i(TAG, "load failed $url -> $e")
-            return newMovieLoadResponse(url, url, TvType.Movie, "") { this.plot = "تعذّر تحميل الصفحة." }
-        }
+        val items = parseCardList(doc)
+        val hasNextPagination = doc.selectFirst(
+            ".pagination a.next, .pagination .next, a.next.page-numbers, .pagination a[href*=\"/page/${page + 1}/\"]"
+        ) != null
+        val hasNext = items.isNotEmpty() && (hasNextPagination || items.size >= 18)
 
-        if (!isSeriesUrl(url)) return movieResponse(url, doc)
-
-        val anchor = anchorSeasonUrl(url, doc)
-        val poster = posterOf(doc)
-        val title = seriesDisplayName(url, doc, anchor)
-        val plot = plotOf(doc)
-        val year = Regex("(19|20)\\d{2}").find(title)?.value?.toIntOrNull()
-        val tags = doc.select(".breadcrumbs-single a").map { it.text().trim() }
-            .filter { it.isNotBlank() && it != "الرئيسيه" }
-
-        val episodes = resolveSeriesEpisodes(url, doc, anchor, title, poster)
-
-        if (episodes.isEmpty() && url.contains("/episode/")) {
-            // No season structure found — expose just the single episode.
-            val episode = newEpisode(url) {
-                this.name = titleOf(doc)
-                this.episode = numAfterHalka(titleOf(doc))
-                this.posterUrl = poster
-                this.description = plot
-            }
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, listOf(episode)) {
-                this.posterUrl = poster
-                this.plot = plot
-                this.year = year
-                this.tags = tags
-            }
-        }
-
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-            this.posterUrl = poster
-            this.plot = plot
-            this.year = year
-            this.tags = tags
-        }
+        return newHomePageResponse(HomePageList(request.name, items), hasNext = hasNext)
     }
 
-    private fun isSeriesUrl(url: String): Boolean =
-        url.contains("/serie/") || url.contains("/season/") || url.contains("/episode/")
-
-    private suspend fun movieResponse(url: String, doc: Document): com.lagradost.cloudstream3.LoadResponse {
-        val title = titleOf(doc)
-        val year = Regex("(19|20)\\d{2}").find(title)?.value?.toIntOrNull()
-        val tags = doc.select(".breadcrumbs-single a").map { it.text().trim() }
-            .filter { it.isNotBlank() && it != "الرئيسيه" }
-        return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            this.posterUrl = posterOf(doc)
-            this.plot = plotOf(doc)
-            this.year = year
-            this.tags = tags
-        }
+    override suspend fun search(query: String): List<SearchResponse> = coroutineScope {
+        val q = query.trim()
+        if (q.isEmpty()) return@coroutineScope emptyList()
+        val pages = (1..2).map { p ->
+            async(Dispatchers.IO) { search(q, p)?.items.orEmpty() }
+        }.awaitAll().flatten()
+        pages.distinctBy { it.url }
     }
 
-    /**
-     * Resolves every season of the series the given detail page belongs to.
-     *
-     * All three page types expose the available seasons through a `.seasons-list`
-     * block, but that list mixes the real seasons with unrelated "related series"
-     * links. The season URLs of the current show are filtered by the series name
-     * taken from the `/serie/` breadcrumb.
-     */
-    private suspend fun resolveSeriesEpisodes(
-        detailUrl: String,
-        doc: Document,
-        anchor: String?,
-        seriesName: String,
-        poster: String?
-    ): List<Episode> {
-        val anchorDoc = if (anchor != null && anchor != detailUrl) safeGet(anchor) ?: doc else doc
+    override suspend fun search(query: String, page: Int): SearchResponseList? {
+        val q = query.trim()
+        if (q.isEmpty()) return null
+        val base = EgyDeadNetwork.getBaseUrl()
+        mainUrl = base
+        val encoded = URLEncoder.encode(q, "UTF-8")
+        val searchUrl = if (page <= 1) {
+            "$base/?s=$encoded"
+        } else {
+            "$base/page/$page/?s=$encoded"
+        }
 
-        val seasons = LinkedHashSet<String>()
-        if (anchor != null) seasons += anchor
-        val candidateText = mutableMapOf<String, String>()
-        for (d in listOf(anchorDoc, doc)) {
-            d.select(".seasons-list li.movieItem a[href], .seasons-list li a[href]").forEach { a ->
-                val href = a.attr("href").trim()
-                if (href.isNotBlank() && href.contains("/season/")) {
-                    seasons += href
-                    candidateText.putIfAbsent(href, a.attr("title").ifBlank { a.text() }.trim())
+        val doc = EgyDeadNetwork.fetchDocument(searchUrl, referer = "$base/") ?: return null
+        val items = parseCardList(doc)
+        val hasNext = items.isNotEmpty() && (
+            doc.selectFirst(".pagination a.next, a.next.page-numbers, .pagination a[href*=\"/page/${page + 1}/\"]") != null ||
+                items.size >= 18
+            )
+        return newSearchResponseList(items, hasNext)
+    }
+
+    // =========================================================================
+    // Detail Page Metadata & Multi-Season / Sub+Dub / Franchise Load
+    // =========================================================================
+
+    private data class PageMetadata(
+        val rawTitle: String,
+        val poster: String?,
+        val plot: String?,
+        val year: Int?,
+        val durationMinutes: Int?,
+        val score: Score?,
+        val tags: List<String>,
+        val trailerUrl: String?,
+        val showStatus: ShowStatus?,
+        val isDubbed: Boolean,
+        val categoryText: String,
+        val recommendations: List<SearchResponse>
+    )
+
+    private fun extractPageMetadata(doc: Document, selfUrl: String): PageMetadata {
+        val rawTitle = doc.selectFirst("div.infoBox div.singleTitle h1, .singleTitle h1, h1.entry-title, h1")
+            ?.text()?.trim()?.takeIf { it.isNotBlank() }
+            ?: doc.title().replace(Regex("""\s*\|\s*ايجي\s*ديد.*$"""), "").trim()
+
+        val poster = extractPoster(doc.selectFirst("div.singleThumbnail, .single-thumbnail, .Poster"))
+            ?: doc.selectFirst("meta[property=og:image]")?.attr("content")?.trim()
+                ?.takeIf { it.startsWith("http") }?.let { EgyDeadNetwork.encodeUrl(it) }
+
+        val plot = doc.selectFirst("div.infoBox div.extra-content p, div.extra-content, .singleStory p, .story p")
+            ?.text()?.trim()?.takeIf { it.isNotBlank() }
+            ?: doc.select("h2, h3, span").firstOrNull { it.text().contains("القصه") || it.text().contains("القصة") }
+                ?.nextElementSibling()?.text()?.trim()?.takeIf { it.isNotBlank() }
+            ?: doc.selectFirst("meta[property=og:description], meta[name=description]")?.attr("content")?.trim()
+                ?.takeIf { it.isNotBlank() }
+
+        val tags = LinkedHashSet<String>()
+        var year: Int? = null
+        var durationMinutes: Int? = null
+        var score: Score? = null
+        var categoryText = ""
+        var showStatus: ShowStatus? = null
+
+        for (li in doc.select("div.LeftBox ul li, .RightTaxContent li, .singleInfo li, ul li:has(span)")) {
+            val label = li.selectFirst("span")?.text()?.trim().orEmpty()
+            val fullText = li.text().trim()
+            val valueText = if (label.isNotEmpty()) fullText.removePrefix(label).trim(' ', ':', '：') else fullText
+            val linksText = li.select("a").map { it.text().trim() }.filter { it.isNotBlank() }
+
+            when {
+                label.contains("القسم") -> {
+                    categoryText = linksText.joinToString(" ").ifBlank { valueText }
+                    linksText.forEach { tags.add(it) }
+                }
+                label.contains("النوع") || label.contains("التصنيف") -> {
+                    linksText.forEach { tags.add(it) }
+                }
+                label.contains("الجوده") || label.contains("الجودة") -> {
+                    linksText.forEach { tags.add(it) }
+                    if (linksText.isEmpty() && valueText.isNotBlank()) tags.add(valueText)
+                }
+                label.contains("اللغه") || label.contains("اللغة") -> {
+                    linksText.forEach { tags.add(it) }
+                }
+                label.contains("البلد") || label.contains("الدولة") -> {
+                    linksText.forEach { tags.add(it) }
+                }
+                label.contains("السنه") || label.contains("السنة") -> {
+                    year = Regex("""\b(19\d{2}|20\d{2})\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+                }
+                label.contains("مده") || label.contains("مدة") -> {
+                    durationMinutes = parseDurationMinutes(valueText)
+                }
+                label.contains("التقييم") || fullText.contains("IMDB", ignoreCase = true) -> {
+                    val r = Regex("""(\d+(?:\.\d+)?)\s*(?:/\s*10)?""").find(valueText)?.groupValues?.get(1)?.toDoubleOrNull()
+                    if (r != null && r in 0.1..10.0) {
+                        score = Score.from10(r)
+                    }
+                }
+                label.contains("الحاله") || label.contains("الحالة") -> {
+                    showStatus = when {
+                        valueText.contains("مكتمل") || valueText.contains("منتهي") -> ShowStatus.Completed
+                        valueText.contains("مستمر") || valueText.contains("يعرض") -> ShowStatus.Ongoing
+                        else -> null
+                    }
                 }
             }
         }
 
-        val anchorOrUrl = anchor ?: detailUrl
-        val baseName = slugBaseName(anchorOrUrl)
-        val keys = listOf(normKey(seriesName), normKey(seriesNameFromUrl(anchorOrUrl)), baseName)
-            .filter { it.isNotBlank() }
-            .distinct()
-
-        val sameSeries = seasons.filter { href ->
-            val byText = keys.any { key -> normKey(decode(candidateText[href].orEmpty())).contains(key) }
-            val bySlug = baseName.isNotBlank() && slugBaseName(href) == baseName
-            byText || bySlug
-        }
-        val finalSeasons = sameSeries.ifEmpty {
-            if (anchor != null) listOf(anchor) else seasons.toList()
+        if (year == null) {
+            year = Regex("""\b(19\d{2}|20\d{2})\b""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
         }
 
-        val episodes = mutableListOf<Episode>()
-        finalSeasons.forEachIndexed { index, seasonUrl ->
-            val sdoc = if (seasonUrl == detailUrl) doc else safeGet(seasonUrl) ?: return@forEachIndexed
-            val seasonNumber = arabicSeason(seasonTitleOf(sdoc, seasonUrl)) ?: (index + 1)
-            episodes += parseEpisodeLinks(sdoc, seasonNumber, poster)
+        val rawTrailer = doc.selectFirst(
+            "div.popupContent iframe[src], iframe[src*=\"youtube.com\"], iframe[src*=\"youtu.be\"], a[href*=\"youtube.com/watch\"], a[href*=\"youtu.be/\"]"
+        )?.let { el ->
+            el.attr("src").ifBlank { el.attr("href") }.trim()
         }
+        val trailerUrl = normalizeYoutubeUrl(rawTrailer)
 
-        return episodes
-            .distinctBy { it.data }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
-    }
-
-    private suspend fun safeGet(target: String): Document? = try {
-        cfGet(target)
-    } catch (e: Throwable) {
-        Log.i(TAG, "season fetch failed $target -> $e")
-        null
-    }
-
-    private fun anchorSeasonUrl(detailUrl: String, doc: Document): String? = when {
-        detailUrl.contains("/season/") -> detailUrl
-        detailUrl.contains("/episode/") ->
-            doc.selectFirst(".breadcrumbs-single a[href*='/season/']")
-                ?.attr("href")?.trim()?.takeIf { it.isNotBlank() }
-        else -> null
-    }
-
-    /**
-     * The site slugs encode the series name, e.g.
-     * `/season/مسلسل-into-the-badlands-الموسم-الثالث-مترجم-كامل/`. Stripping the known
-     * decorations yields a clean, stable series name that is also used to tell the
-     * current series' seasons apart from the unrelated "related series" cards.
-     */
-    private fun seriesNameFromUrl(rawUrl: String): String {
-        var s = decode(rawUrl).substringBefore("?")
-        s = when {
-            s.contains("/serie/") -> s.substringAfterLast("/serie/")
-            s.contains("/season/") -> s.substringAfterLast("/season/")
-            s.contains("/episode/") -> s.substringAfterLast("/episode/")
-            else -> s
-        }
-        s = s.trim('/')
-        s = s.replace("جميع-مواسم", " ").replace("جميع مواسم", " ").trim()
-        s = s.substringAfter("مسلسل", s).trim('-')
-        s = s.substringBefore("الموسم").substringBefore("موسم")
-            .substringBefore("مترجم").substringBefore("مدبلج")
-            .substringBefore("الحلقه").substringBefore("الحلقة")
-            .trim('-')
-        return s.replace('-', ' ').replace(Regex("\\s+"), " ").trim()
-    }
-
-    private fun seasonTitleOf(doc: Document, seasonUrl: String): String =
-        "${titleOf(doc)} ${decode(seasonUrl)}".trim()
-
-    /**
-     * Stable key that identifies the series a season/episode URL belongs to, regardless of
-     * how the site names it. Handles both style of slugs used by the site:
-     *   `/season/mobland-s02/`                                  -> `mobland`
-     *   `/serie/mobland-2025/`                                  -> `mobland`
-     *   `/season/مسلسل-badlands-الموسم-الثالث-مترجم-كامل/`      -> `badlands`
-     */
-    private fun slugBaseName(rawUrl: String): String {
-        var s = decode(rawUrl).substringBefore("?")
-        s = when {
-            s.contains("/serie/") -> s.substringAfterLast("/serie/")
-            s.contains("/season/") -> s.substringAfterLast("/season/")
-            s.contains("/episode/") -> s.substringAfterLast("/episode/")
-            else -> s
-        }
-        s = s.trim('/')
-        listOf("الموسم", "موسم", "مترجم", "مدبلج", "الحلقة", "الحلقه").forEach { s = s.substringBefore(it) }
-        s = s.replace("جميع-مواسم", " ").replace("جميع مواسم", " ").replace("مسلسل", " ")
-        s = s.replace(Regex("(?i)[-_ ]?e\\d+$"), "")
-        s = s.replace(Regex("(?i)[-_ ]?season[-_ ]?\\d+$"), "")
-        s = s.replace(Regex("(?i)[-_ ]?s\\d+$"), "")
-        s = s.replace(Regex("[-_ ]?(19|20)\\d{2}$"), "")
-        return normKey(s)
-    }
-
-    private fun seriesDisplayName(detailUrl: String, doc: Document, anchor: String?): String {
-        if (detailUrl.contains("/episode/")) {
-            return seriesNameFromUrl(anchor ?: detailUrl).ifBlank { cleanSeriesName(titleOf(doc)) }
-        }
-        // The season/series breadcrumb holds the real series crumb, but a bare `/serie/`
-        // entry is just the listing ("المسلسلات") and must be ignored.
-        val crumb = doc.selectFirst(".breadcrumbs-single a[href*='/serie/']")
-            ?.takeIf { it.attr("href").trimEnd('/').substringAfter(mainUrl).trimEnd('/') != "/serie" }
-            ?.text()?.trim()
-        val raw = crumb?.takeIf { it.isNotBlank() } ?: doc.title().substringBefore("|").trim()
-        return cleanSeriesName(raw).ifBlank { seriesNameFromUrl(anchor ?: detailUrl) }
-    }
-
-    private fun cleanSeriesName(raw: String): String {
-        var t = raw.substringBefore("|").trim()
-        listOf(
-            "جميع مواسم", "جميع المواسم", "مشاهدة", "مسلسل", "انمي", "أنمي",
-            "مترجمة", "مترجم", "مدبلجة", "مدبلج", "كامل", "الموسم", "موسم"
-        ).forEach { t = t.replace(it, " ") }
-        SEASON_WORDS.forEach { (w, _) -> t = t.replace(w, " ") }
-        t = t.replace(Regex("\\s+"), " ").trim()
-        return t.ifBlank { raw.trim() }
-    }
-
-    private fun decode(value: String): String = try {
-        java.net.URLDecoder.decode(value, "UTF-8")
-    } catch (_: Throwable) {
-        value
-    }
-
-    private fun normKey(value: String): String =
-        value.lowercase().filter { it.isLetterOrDigit() }
-
-    private fun parseEpisodeLinks(doc: Document, season: Int, poster: String?): List<Episode> =
-        doc.select("div.EpsList li a[href], ul.EpsList li a[href]").mapNotNull { a ->
-            val epUrl = a.attr("href").trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val epName = a.attr("title").ifBlank { a.text() }.trim()
-            newEpisode(epUrl) {
-                this.name = epName
-                this.season = season
-                this.episode = numAfterHalka(epName)
-                this.posterUrl = poster
+        val selfNorm = stripWatchSuffix(selfUrl).trimEnd('/').lowercase()
+        val recSeen = HashSet<String>()
+        val recommendations = mutableListOf<SearchResponse>()
+        for (card in doc.select("div.related-posts li.movieItem, .AlsoWatch li.movieItem")) {
+            val r = card.toSearchResult() ?: continue
+            if (r.url.trimEnd('/').lowercase() == selfNorm) continue
+            if (recSeen.add(r.url)) {
+                recommendations.add(r)
             }
         }
 
-    private fun titleOf(doc: Document): String {
-        doc.selectFirst(".singleTitle em, .infoBox .singleTitle em")?.text()?.trim()
-            ?.takeIf { it.isNotBlank() }?.let { return it }
-        return doc.title().substringBefore("|").trim()
+        val isDub = isDubbedText("$rawTitle $categoryText", selfUrl)
+
+        return PageMetadata(
+            rawTitle = rawTitle,
+            poster = poster,
+            plot = plot,
+            year = year,
+            durationMinutes = durationMinutes,
+            score = score,
+            tags = tags.toList(),
+            trailerUrl = trailerUrl,
+            showStatus = showStatus,
+            isDubbed = isDub,
+            categoryText = categoryText,
+            recommendations = recommendations
+        )
     }
 
-    private fun posterOf(doc: Document): String? {
-        doc.selectFirst(".singleCover")?.attr("style")
-            ?.let { Regex("""url\((['"]?)([^'")]+)\1\)""").find(it)?.groupValues?.get(2) }
-            ?.takeIf { it.isNotBlank() }?.let { return it }
-        return doc.selectFirst(".single-thumbnail img, meta[property=og:image]")
-            ?.let { if (it.tagName() == "meta") it.attr("content") else it.attr("src") }
-            ?.takeIf { it.isNotBlank() }
+    private fun parseDurationMinutes(text: String): Int? {
+        val hms = Regex("""(\d{1,2}):(\d{2})(?::\d{2})?""").find(text)
+        if (hms != null) {
+            val h = hms.groupValues[1].toIntOrNull() ?: 0
+            val m = hms.groupValues[2].toIntOrNull() ?: 0
+            return (h * 60 + m).takeIf { it > 0 }
+        }
+        val hours = Regex("""(\d+)\s*ساع""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val mins = Regex("""(\d+)\s*دقيق""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: Regex("""\b(\d{2,3})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: 0
+        return (hours * 60 + mins).takeIf { it > 0 }
     }
 
-    private fun plotOf(doc: Document): String? =
-        doc.selectFirst(".extra-content p")?.text()?.trim()?.takeIf { it.isNotBlank() }
-            ?: doc.selectFirst(".singleStory")?.text()?.trim()?.takeIf { it.isNotBlank() }
-
-    private fun numAfterHalka(text: String): Int? {
-        Regex("(?:حلقه|الحلقة|الحلقه)\\s*(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
-            ?.let { return it }
-        return Regex("(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
-    }
-
-    /**
-     * The site is inconsistent with Arabic orthography: the same word appears with a
-     * final `ي` or `ى`, and with `أ`/`إ`/`آ` or bare `ا` (e.g. "الثاني" vs "الثانى",
-     * "الأول" vs "الاول"). Normalising removes diacritics and unifies those letters so
-     * every spelling matches the canonical SEASON_WORDS entries.
-     */
-    private fun normalizeAr(text: String): String = text
-        .replace('ى', 'ي')
-        .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
-        .replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
-
-    private fun arabicSeason(text: String): Int? {
-        val t = normalizeAr(text)
-        Regex("(?:الموسم|موسم)[\\s\\-_]*(\\d+)").find(t)?.groupValues?.get(1)?.toIntOrNull()
-            ?.let { return it }
-        SEASON_WORDS.forEach { (word, number) -> if (t.contains(normalizeAr(word))) return number }
-        Regex("(?i)season[\\s\\-_]?(\\d{1,2})").find(t)?.groupValues?.get(1)?.toIntOrNull()
-            ?.let { return it }
-        Regex("(?i)(?:^|[\\-_ ])s(\\d{1,2})(?:[\\-_ /]|$)").find(t)?.groupValues?.get(1)?.toIntOrNull()
-            ?.let { return it }
+    private fun normalizeYoutubeUrl(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val u = if (raw.startsWith("//")) "https:$raw" else raw
+        val embedId = Regex("""youtube\.com/embed/([A-Za-z0-9_-]{6,})""").find(u)?.groupValues?.get(1)
+        if (embedId != null) return "https://www.youtube.com/watch?v=$embedId"
+        if (u.contains("youtube.com/watch") || u.contains("youtu.be/")) return u
         return null
     }
 
-    // ----------------------------------------------------------------- links
+    private data class SeasonEntry(
+        val seasonUrl: String,
+        val seasonTitle: String,
+        val seasonNum: Int,
+        val isDubbed: Boolean,
+        val poster: String?
+    )
+
+    private fun extractSeasonEntries(doc: Document): List<SeasonEntry> {
+        val seen = HashSet<String>()
+        val list = mutableListOf<SeasonEntry>()
+        for (li in doc.select("div.seasons-list li.movieItem, .seasons-list li.movieItem")) {
+            val a = li.selectFirst("a[href]") ?: continue
+            val href = stripWatchSuffix(EgyDeadNetwork.encodeUrl(a.attr("abs:href").ifBlank { a.attr("href") }))
+            if (!href.startsWith("http") || !seen.add(href.lowercase())) continue
+            val sTitle = li.selectFirst(".BottomTitle, h1, h2, h3")?.text()?.trim()
+                ?.ifBlank { a.attr("title") }.orEmpty()
+            val sNum = parseSeasonNumber(sTitle, href) ?: (list.size + 1)
+            val isDub = isDubbedText(sTitle, href)
+            val sPoster = extractPoster(li)
+            list.add(SeasonEntry(href, sTitle, sNum, isDub, sPoster))
+        }
+        return list
+    }
+
+    private fun extractEpisodesFromSeasonDoc(
+        seasonDoc: Document,
+        seasonNum: Int,
+        seasonPoster: String?
+    ): List<Episode> {
+        val anchors = seasonDoc.select("div.EpsList li a[href], .EpsList li a[href], .episodes-list li a[href]")
+        if (anchors.isEmpty()) return emptyList()
+
+        val seen = HashSet<String>()
+        val rawEps = mutableListOf<Pair<Int, Episode>>()
+
+        for ((idx, a) in anchors.withIndex()) {
+            val rawHref = a.attr("abs:href").ifBlank { a.attr("href") }.trim()
+            if (rawHref.isBlank()) continue
+            val text = a.text().trim().ifBlank { a.attr("title").trim() }
+            if (text.contains("السابق") || text.contains("التالي")) continue
+
+            val epUrl = stripWatchSuffix(EgyDeadNetwork.encodeUrl(rawHref))
+            if (!seen.add(epUrl.lowercase())) continue
+
+            val epNum = parseEpisodeNumber(text, epUrl)
+            val sortKey = epNum ?: (anchors.size - idx)
+            val epLabel = when {
+                epNum != null && epNum >= 1000 -> "OVA ${epNum - 1000}"
+                epNum != null -> "الحلقة $epNum"
+                text.isNotBlank() -> cleanTitle(text, keepDubTag = false)
+                else -> "الحلقة ${idx + 1}"
+            }
+
+            val epObj = newEpisode(epUrl) {
+                this.name = epLabel
+                this.season = seasonNum
+                this.episode = if (epNum != null && epNum >= 1000) epNum else epNum
+                this.posterUrl = seasonPoster
+            }
+            rawEps.add(sortKey to epObj)
+        }
+
+        return rawEps.sortedBy { it.first }.mapIndexed { idx, (_, ep) ->
+            if (ep.episode == null) ep.apply { this.episode = idx + 1 } else ep
+        }
+    }
+
+    /**
+     * Parses inline multi-season episode blocks on `/episodes/<slug>/watch/`
+     * (`## حلقات المسلسل` -> `<h3>Season Title</h3>` + episode links).
+     */
+    private fun extractGroupedEpisodesFromWatchDoc(
+        watchDoc: Document,
+        seasonPostersByUrlOrTitle: List<SeasonEntry>,
+        fallbackPoster: String?
+    ): Pair<List<Episode>, List<Episode>> {
+        val subbed = mutableListOf<Episode>()
+        val dubbed = mutableListOf<Episode>()
+
+        // Each season block typically has an h3 heading followed by a ul/div of episode links
+        val headings = watchDoc.select("h3")
+        val usedAnchors = HashSet<Element>()
+
+        for (h3 in headings) {
+            val headingText = h3.text().trim()
+            if (headingText.isBlank()) continue
+            val container = h3.nextElementSibling() ?: continue
+            val epLinks = container.select("a[href*=\"/episode\"]")
+            if (epLinks.isEmpty()) continue
+
+            val isDub = isDubbedText(headingText)
+            val sNum = parseSeasonNumber(headingText) ?: 1
+            val matchedPoster = seasonPostersByUrlOrTitle.firstOrNull {
+                it.seasonNum == sNum && it.isDubbed == isDub
+            }?.poster ?: fallbackPoster
+
+            val seenUrls = HashSet<String>()
+            val parsed = mutableListOf<Pair<Int, Episode>>()
+            for ((idx, a) in epLinks.withIndex()) {
+                usedAnchors.add(a)
+                val rawHref = a.attr("abs:href").ifBlank { a.attr("href") }.trim()
+                val text = a.text().trim().ifBlank { a.attr("title").trim() }
+                if (text.contains("السابق") || text.contains("التالي")) continue
+                val epUrl = stripWatchSuffix(EgyDeadNetwork.encodeUrl(rawHref))
+                if (!seenUrls.add(epUrl.lowercase())) continue
+
+                val epNum = parseEpisodeNumber(text, epUrl)
+                val sortKey = epNum ?: (idx + 1)
+                val epLabel = when {
+                    epNum != null && epNum >= 1000 -> "OVA ${epNum - 1000}"
+                    epNum != null -> "الحلقة $epNum"
+                    text.isNotBlank() -> text
+                    else -> "الحلقة ${idx + 1}"
+                }
+                val epObj = newEpisode(epUrl) {
+                    this.name = epLabel
+                    this.season = sNum
+                    this.episode = epNum ?: (idx + 1)
+                    this.posterUrl = matchedPoster
+                }
+                parsed.add(sortKey to epObj)
+            }
+
+            val ordered = parsed.sortedBy { it.first }.map { it.second }
+            if (isDub) dubbed.addAll(ordered) else subbed.addAll(ordered)
+        }
+
+        // Fallback if single EpsList without h3 headings on watchDoc
+        if (subbed.isEmpty() && dubbed.isEmpty()) {
+            val directEps = extractEpisodesFromSeasonDoc(watchDoc, 1, fallbackPoster)
+            if (directEps.isNotEmpty()) {
+                subbed.addAll(directEps)
+            }
+        }
+
+        return subbed to dubbed
+    }
+
+    override suspend fun load(url: String): LoadResponse? = coroutineScope {
+        val activeUrl = stripWatchSuffix(EgyDeadNetwork.rewriteToActiveBase(url))
+        mainUrl = EgyDeadNetwork.getBaseUrl()
+
+        val doc = EgyDeadNetwork.fetchDocument(activeUrl) ?: return@coroutineScope null
+        val resolvedUrl = stripWatchSuffix(doc.location().ifBlank { activeUrl })
+        val lowerUrl = resolvedUrl.lowercase()
+
+        val meta = extractPageMetadata(doc, resolvedUrl)
+        val tvType = classifyTvType(resolvedUrl, meta.rawTitle, meta.categoryText)
+
+        // 1. Movie Collection / Franchise (`/film-series/<slug>/` or `/assembly/<slug>/`)
+        if (lowerUrl.contains("/film-series/") || lowerUrl.contains("/assembly/")) {
+            return@coroutineScope loadFilmSeriesCollection(doc, resolvedUrl, meta)
+        }
+
+        val isSeriesRoot = lowerUrl.contains("/series/") || lowerUrl.contains("/serie/")
+        val isSeasonPage = lowerUrl.contains("/seasons/") || lowerUrl.contains("/season/")
+        val isEpisodePage = lowerUrl.contains("/episodes/") || lowerUrl.contains("/episode/")
+        val hasSeasonsOrEpisodesDom = doc.selectFirst("div.EpsList, .EpsList, div.seasons-list, .seasons-list") != null
+
+        if (isSeriesRoot || isSeasonPage || isEpisodePage || hasSeasonsOrEpisodesDom) {
+            return@coroutineScope loadEpisodicContent(
+                doc = doc,
+                resolvedUrl = resolvedUrl,
+                meta = meta,
+                tvType = if (tvType == TvType.Movie) TvType.TvSeries else if (tvType == TvType.AnimeMovie) TvType.Anime else tvType,
+                isEpisodeEntry = isEpisodePage
+            )
+        }
+
+        // 2. Standalone Movie / AnimeMovie / Special Show
+        val movieTitle = cleanTitle(meta.rawTitle, keepDubTag = true)
+        newMovieLoadResponse(movieTitle, resolvedUrl, tvType, resolvedUrl) {
+            this.posterUrl = meta.poster
+            this.plot = meta.plot
+            this.year = meta.year
+            this.duration = meta.durationMinutes
+            this.score = meta.score
+            this.tags = meta.tags
+            if (meta.recommendations.isNotEmpty()) {
+                this.recommendations = meta.recommendations
+            }
+            if (!meta.trailerUrl.isNullOrBlank()) {
+                addTrailer(meta.trailerUrl)
+            }
+        }
+    }
+
+    private fun loadFilmSeriesCollection(
+        doc: Document,
+        resolvedUrl: String,
+        meta: PageMetadata
+    ): LoadResponse? {
+        val relatedElements = doc.select("div.related-posts li.movieItem, .AlsoWatch li.movieItem").toSet()
+        val franchiseCards = doc.select("li.movieItem").filterNot { it in relatedElements }
+
+        data class FranchiseMovie(val year: Int, val orderIdx: Int, val title: String, val href: String, val poster: String?)
+        val seen = HashSet<String>()
+        val movies = mutableListOf<FranchiseMovie>()
+
+        for ((idx, li) in franchiseCards.withIndex()) {
+            val a = li.selectFirst("a[href]") ?: continue
+            val href = stripWatchSuffix(EgyDeadNetwork.encodeUrl(a.attr("abs:href").ifBlank { a.attr("href") }))
+            if (!href.startsWith("http") || href.equals(resolvedUrl, ignoreCase = true)) continue
+            if (!seen.add(href.lowercase())) continue
+            val rawName = li.selectFirst(".BottomTitle, h1, h2, h3")?.text()?.trim()
+                ?.ifBlank { a.attr("title") }.orEmpty()
+            if (rawName.isBlank()) continue
+            val movieYear = Regex("""\b(19\d{2}|20\d{2})\b""").find(rawName)?.groupValues?.get(1)?.toIntOrNull() ?: 9999
+            movies.add(
+                FranchiseMovie(
+                    year = movieYear,
+                    orderIdx = franchiseCards.size - idx,
+                    title = cleanTitle(rawName, keepDubTag = true),
+                    href = href,
+                    poster = extractPoster(li) ?: meta.poster
+                )
+            )
+        }
+
+        val episodes = movies
+            .sortedWith(compareBy<FranchiseMovie> { it.year }.thenBy { it.orderIdx })
+            .mapIndexed { i, m ->
+                newEpisode(m.href) {
+                    this.name = m.title
+                    this.season = 1
+                    this.episode = i + 1
+                    this.posterUrl = m.poster
+                }
+            }
+
+        val collectionTitle = cleanTitle(meta.rawTitle, keepDubTag = false)
+        return newTvSeriesLoadResponse(collectionTitle, resolvedUrl, TvType.TvSeries, episodes) {
+            this.posterUrl = meta.poster
+            this.plot = meta.plot
+            this.year = meta.year ?: movies.minOfOrNull { it.year }?.takeIf { it < 9999 }
+            this.tags = meta.tags
+            if (meta.recommendations.isNotEmpty()) {
+                this.recommendations = meta.recommendations
+            }
+            if (!meta.trailerUrl.isNullOrBlank()) {
+                addTrailer(meta.trailerUrl)
+            }
+        }
+    }
+
+    private suspend fun loadEpisodicContent(
+        doc: Document,
+        resolvedUrl: String,
+        meta: PageMetadata,
+        tvType: TvType,
+        isEpisodeEntry: Boolean
+    ): LoadResponse = coroutineScope {
+        val subbedByKey = LinkedHashMap<String, Episode>()
+        val dubbedByKey = LinkedHashMap<String, Episode>()
+
+        fun addEpisodeDedup(isDub: Boolean, ep: Episode) {
+            val target = if (isDub) dubbedByKey else subbedByKey
+            val key = ep.data.trimEnd('/').lowercase()
+            if (!target.containsKey(key)) {
+                target[key] = ep
+            }
+        }
+
+        var watchDocRecommendations: List<SearchResponse> = emptyList()
+
+        if (isEpisodeEntry) {
+            // Fast path: `/episodes/<slug>/watch/` contains ALL seasons & episodes inline!
+            val watchUrl = "${resolvedUrl.trimEnd('/')}/watch/"
+            val watchDoc = EgyDeadNetwork.fetchDocument(watchUrl, referer = resolvedUrl)
+            if (watchDoc != null) {
+                val watchSeasons = extractSeasonEntries(watchDoc)
+                val (wSub, wDub) = extractGroupedEpisodesFromWatchDoc(watchDoc, watchSeasons, meta.poster)
+                wSub.forEach { addEpisodeDedup(false, it) }
+                wDub.forEach { addEpisodeDedup(true, it) }
+                if (meta.recommendations.isEmpty()) {
+                    watchDocRecommendations = extractPageMetadata(watchDoc, resolvedUrl).recommendations
+                }
+                // If watchDoc had seasons list but no inline grouped episodes, fetch seasons in parallel
+                if (subbedByKey.isEmpty() && dubbedByKey.isEmpty() && watchSeasons.isNotEmpty()) {
+                    fetchAllSeasonsInto(watchSeasons, null, resolvedUrl, meta.poster, ::addEpisodeDedup)
+                }
+            }
+            // Ensure current episode is always playable even on standalone specials
+            if (subbedByKey.isEmpty() && dubbedByKey.isEmpty()) {
+                val epNum = parseEpisodeNumber(meta.rawTitle, resolvedUrl) ?: 1
+                val sNum = parseSeasonNumber(meta.rawTitle, resolvedUrl) ?: 1
+                val single = newEpisode(resolvedUrl) {
+                    this.name = "الحلقة $epNum"
+                    this.season = sNum
+                    this.episode = epNum
+                    this.posterUrl = meta.poster
+                }
+                addEpisodeDedup(meta.isDubbed, single)
+            }
+        } else {
+            // `/Series/<slug>/` or `/seasons/<slug>/`
+            val seasonEntries = extractSeasonEntries(doc).toMutableList()
+            val currentSeasonNum = parseSeasonNumber(meta.rawTitle, resolvedUrl) ?: 1
+            val currentDirectEps = extractEpisodesFromSeasonDoc(doc, currentSeasonNum, meta.poster)
+
+            if (currentDirectEps.isNotEmpty()) {
+                currentDirectEps.forEach { addEpisodeDedup(meta.isDubbed, it) }
+            }
+
+            if (seasonEntries.isNotEmpty()) {
+                fetchAllSeasonsInto(
+                    seasons = seasonEntries,
+                    alreadyLoadedUrl = if (currentDirectEps.isNotEmpty()) resolvedUrl else null,
+                    referer = resolvedUrl,
+                    fallbackPoster = meta.poster,
+                    addFn = ::addEpisodeDedup
+                )
+            }
+        }
+
+        val subbedList = subbedByKey.values.sortedWith(compareBy<Episode>({ it.season ?: 1 }, { it.episode ?: 0 }))
+        val dubbedList = dubbedByKey.values.sortedWith(compareBy<Episode>({ it.season ?: 1 }, { it.episode ?: 0 }))
+
+        val seriesTitle = cleanSeriesRootTitle(meta.rawTitle)
+        val recs = meta.recommendations.ifEmpty { watchDocRecommendations }
+
+        // Use AnimeLoadResponse whenever Anime/Cartoon OR when BOTH Subbed & Dubbed tracks exist
+        // so CloudStream displays the native [Subbed | Dubbed] switcher + clean Season 1..N tabs!
+        if (tvType == TvType.Anime || (subbedList.isNotEmpty() && dubbedList.isNotEmpty())) {
+            newAnimeLoadResponse(seriesTitle, resolvedUrl, tvType) {
+                this.posterUrl = meta.poster
+                this.plot = meta.plot
+                this.year = meta.year
+                this.duration = meta.durationMinutes
+                this.score = meta.score
+                this.tags = meta.tags
+                this.showStatus = meta.showStatus
+                if (recs.isNotEmpty()) this.recommendations = recs
+                if (!meta.trailerUrl.isNullOrBlank()) addTrailer(meta.trailerUrl)
+                if (subbedList.isNotEmpty()) addEpisodes(DubStatus.Subbed, subbedList)
+                if (dubbedList.isNotEmpty()) addEpisodes(DubStatus.Dubbed, dubbedList)
+            }
+        } else {
+            val finalEpisodes = subbedList.ifEmpty { dubbedList }
+            val displayTitle = if (dubbedList.isNotEmpty() && !seriesTitle.contains("مدبلج")) {
+                "$seriesTitle (مدبلج)"
+            } else {
+                seriesTitle
+            }
+            newTvSeriesLoadResponse(displayTitle, resolvedUrl, tvType, finalEpisodes) {
+                this.posterUrl = meta.poster
+                this.plot = meta.plot
+                this.year = meta.year
+                this.duration = meta.durationMinutes
+                this.score = meta.score
+                this.tags = meta.tags
+                this.showStatus = meta.showStatus
+                if (recs.isNotEmpty()) this.recommendations = recs
+                if (!meta.trailerUrl.isNullOrBlank()) addTrailer(meta.trailerUrl)
+            }
+        }
+    }
+
+    private suspend fun fetchAllSeasonsInto(
+        seasons: List<SeasonEntry>,
+        alreadyLoadedUrl: String?,
+        referer: String,
+        fallbackPoster: String?,
+        addFn: (Boolean, Episode) -> Unit
+    ) = coroutineScope {
+        val skipNorm = alreadyLoadedUrl?.trimEnd('/')?.lowercase()
+        val orderedSeasons = seasons.sortedWith(compareBy<SeasonEntry>({ it.isDubbed }, { it.seasonNum }))
+        val sem = Semaphore(5)
+
+        val fetched = orderedSeasons.map { s ->
+            async(Dispatchers.IO) {
+                if (skipNorm != null && s.seasonUrl.trimEnd('/').lowercase() == skipNorm) {
+                    return@async s.isDubbed to emptyList()
+                }
+                sem.withPermit {
+                    val sDoc = EgyDeadNetwork.fetchDocument(s.seasonUrl, referer = referer)
+                        ?: return@withPermit s.isDubbed to emptyList()
+                    val eps = extractEpisodesFromSeasonDoc(sDoc, s.seasonNum, s.poster ?: fallbackPoster)
+                    s.isDubbed to eps
+                }
+            }
+        }.awaitAll()
+
+        for ((isDub, eps) in fetched) {
+            for (ep in eps) {
+                addFn(isDub, ep)
+            }
+        }
+    }
+
+    // =========================================================================
+    // Load Watch & Download Video Links (`/watch/` + Legacy Fallback)
+    // =========================================================================
+
+    private data class CandidateServer(
+        val url: String,
+        val serverName: String,
+        val qualityHint: Int,
+        val referer: String
+    )
+
+    private fun collectCandidateServers(doc: Document, pageReferer: String): List<CandidateServer> {
+        val candidates = mutableListOf<CandidateServer>()
+
+        // 1. Watch servers list (`ul.serversList li[data-link]`, etc.)
+        for (li in doc.select("ul.serversList li, .serversList li, .watch-servers li, [data-link], [data-embed]")) {
+            val rawLink = li.attr("data-link")
+                .ifBlank { li.attr("data-embed") }
+                .ifBlank { li.attr("data-src") }
+                .ifBlank { li.attr("data-url") }
+                .trim()
+            if (rawLink.isBlank()) continue
+            val fullLink = when {
+                rawLink.startsWith("//") -> "https:$rawLink"
+                rawLink.startsWith("http") -> rawLink
+                else -> continue
+            }
+            val sName = li.text().trim().ifBlank { "WatchServer" }
+            candidates.add(CandidateServer(fullLink, sName, Qualities.Unknown.value, pageReferer))
+        }
+
+        // 2. Active player iframes (excluding YouTube trailers & blank frames)
+        for (iframe in doc.select(".watch_player iframe, .player-iframe iframe, .PlayerHolder iframe, #player iframe, iframe[src]")) {
+            val src = iframe.attr("src").ifBlank { iframe.attr("data-src") }.trim()
+            if (src.isBlank()) continue
+            val full = if (src.startsWith("//")) "https:$src" else src
+            if (!full.startsWith("http")) continue
+            val low = full.lowercase()
+            if (low.contains("youtube.com") || low.contains("youtu.be") ||
+                low.contains("googletagmanager") || low.contains("facebook.com") ||
+                low.contains("doubleclick")
+            ) continue
+            candidates.add(CandidateServer(full, "Player", Qualities.Unknown.value, pageReferer))
+        }
+
+        // 3. Download servers (`ul.donwload-servers-list li` & `ul.download-servers-list li`)
+        for (li in doc.select("ul.donwload-servers-list li, .donwload-servers-list li, ul.download-servers-list li, .download-servers-list li")) {
+            val a = li.selectFirst("a.ser-link[href], a[href]") ?: continue
+            val rawHref = a.attr("href").trim()
+            val full = when {
+                rawHref.startsWith("//") -> "https:$rawHref"
+                rawHref.startsWith("http") -> rawHref
+                else -> continue
+            }
+            val sName = li.selectFirst(".ser-name, span.ser-name")?.text()?.trim()
+                ?.ifBlank { li.ownText().trim() } ?: "Download"
+            val qLabel = li.selectFirst(".ser-quality, span.ser-quality, em")?.text()?.trim()
+            val qHint = EgyDeadExtractorKit.parseQuality(qLabel)
+            candidates.add(CandidateServer(full, sName, qHint, pageReferer))
+        }
+
+        return candidates
+    }
 
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val doc = try {
-            cfPost(data, mapOf("View" to "1"), referer = data)
-        } catch (e: Throwable) {
-            Log.i(TAG, "View=1 failed $data -> $e")
-            return false
-        }
+    ): Boolean = coroutineScope {
+        val detailUrl = "${stripWatchSuffix(EgyDeadNetwork.rewriteToActiveBase(data)).trimEnd('/')}/"
+        val watchUrl = "${detailUrl}watch/"
 
-        val servers = doc.select("ul.serversList li[data-link]")
-            .mapNotNull { it.attr("data-link").trim().takeIf { l -> l.isNotBlank() } }
-        val downloads = doc.select("ul.donwload-servers-list a.ser-link[href]")
-            .mapNotNull { it.attr("href").trim().takeIf { l -> l.isNotBlank() } }
+        // Primary 2026 method: GET `<detailUrl>/watch/`
+        var activeReferer = watchUrl
+        var watchDoc = EgyDeadNetwork.fetchDocument(watchUrl, referer = detailUrl)
+        var candidates = if (watchDoc != null) collectCandidateServers(watchDoc, watchUrl) else emptyList()
 
-        val allServers = (servers + downloads).distinct()
-        if (allServers.isEmpty()) {
-            Log.i(TAG, "no servers found on $data")
-            return false
-        }
-
-        val seen = mutableSetOf<String>()
-        val emit: (ExtractorLink) -> Unit = { if (seen.add(it.url)) callback(it) }
-
-        var found = false
-        for (server in allServers) {
-            val abs = if (server.startsWith("//")) "https:$server" else server
-            found = handleServer(abs, data, subtitleCallback, emit) || found
-        }
-        Log.i(TAG, "loadLinks $data servers=${allServers.size} found=$found")
-        return found
-    }
-
-    private suspend fun handleServer(
-        server: String,
-        referer: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        emit: (ExtractorLink) -> Unit
-    ): Boolean {
-        // EgyDead's own "MegaMax"-style player rotates domains and hides its real sources
-        // behind Inertia payloads. Two endpoints exist:
-        //   /iframe/<hash>   -> streaming mirrors (props.streams)
-        //   /download/<hash> -> download mirrors  (props.attachments -> props.download)
-        // Everything else is a plain file host handed to loadExtractor.
-        val path = server.substringAfter("://").substringAfter("/", "")
-        if (path.startsWith("download/")) {
-            val mirrors = resolveDownloadMirrors(server)
-            if (mirrors.isNotEmpty()) {
-                var found = false
-                for (mirror in mirrors) {
-                    found = resolveOne(mirror, server, subtitleCallback, emit) || found
-                }
-                if (found) return true
+        // Fallback 1: Legacy POST `View=1` on `detailUrl`
+        if (candidates.isEmpty()) {
+            val postDoc = EgyDeadNetwork.postDocument(detailUrl, mapOf("View" to "1"), referer = detailUrl)
+            if (postDoc != null) {
+                activeReferer = detailUrl
+                candidates = collectCandidateServers(postDoc, detailUrl)
             }
-        } else if (path.startsWith("iframe/") || !isExtractorHost(server)) {
-            val mirrors = resolveStreamMirrors(server)
-            if (mirrors.isNotEmpty()) {
-                var found = false
-                // Re-label each resolved link with the driver name the player shows
-                // (`streamhg`, `earnvids`, …) and the quality group it came from.
-                for (mirror in mirrors) {
-                    val links = mutableListOf<ExtractorLink>()
-                    val ok = resolveOne(mirror.url, server, subtitleCallback) { links.add(it) }
-                    if (ok) found = true
-                    for (link in links) {
-                        emit(
-                            newExtractorLink(mirror.driver, mirror.driver, link.url, link.type) {
-                                this.referer = link.referer
-                                this.quality = mirror.quality
-                                this.headers = link.headers
-                            }
-                        )
+        }
+
+        // Fallback 2: Inline servers on `detailUrl`
+        if (candidates.isEmpty()) {
+            val detailDoc = EgyDeadNetwork.fetchDocument(detailUrl, referer = detailUrl)
+            if (detailDoc != null) {
+                // Follow explicit watch button href if custom slug
+                val customWatchHref = detailDoc.selectFirst("a[href*=\"/watch\"]")?.attr("abs:href")
+                if (!customWatchHref.isNullOrBlank() && !customWatchHref.equals(watchUrl, ignoreCase = true)) {
+                    val customWatchDoc = EgyDeadNetwork.fetchDocument(customWatchHref, referer = detailUrl)
+                    if (customWatchDoc != null) {
+                        activeReferer = customWatchHref
+                        candidates = collectCandidateServers(customWatchDoc, customWatchHref)
                     }
                 }
-                if (found) return true
-            }
-        }
-        return resolveOne(server, referer, subtitleCallback, emit)
-    }
-
-    /**
-     * Our own host extractors. [loadExtractor] only ever calls the *first* extractor whose
-     * `mainUrl` matches, and for hosts we share with a built-in (`vidmoly.biz`, `uqload.vc`,
-     * ...) that ordering is not guaranteed, so a stale built-in can win and emit nothing.
-     * Dispatching to our own extractor first removes that dependency entirely.
-     */
-    private val ownExtractors: List<ExtractorApi> = listOf(
-        EgyDeadStreamWish(), EgyDeadStreamWishSite(), EgyDeadHgCloud(), EgyDeadHgLink(),
-        EgyDeadEarnVids(), EgyDeadVidHide(), EgyDeadVidHideAlt(),
-        EgyDeadStreamRubyCom(), EgyDeadStreamRubyNet(), EgyDeadStreamRubyVip(),
-        EgyDeadVidmoly(), EgyDeadUqload(), EgyDeadVidara(), EgyDeadByse()
-    )
-
-    /** Hands a single embed URL to our own extractors, then CloudStream's built-ins. */
-    private suspend fun resolveOne(
-        url: String,
-        referer: String,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        emit: (ExtractorLink) -> Unit
-    ): Boolean {
-        val lowered = url.lowercase()
-        val own = ownExtractors.firstOrNull {
-            lowered.contains(it.mainUrl.substringAfter("://").trimEnd('/').lowercase())
-        }
-        if (own != null) {
-            var emitted = false
-            try {
-                own.getUrl(url, referer, subtitleCallback) { link ->
-                    emitted = true
-                    emit(link)
-                }
-            } catch (e: Throwable) {
-                Log.i(TAG, "own extractor failed $url -> $e")
-            }
-            if (emitted) return true
-        }
-        return try {
-            loadExtractor(url, referer, subtitleCallback, emit)
-        } catch (e: Throwable) {
-            Log.i(TAG, "extractor failed $url -> $e")
-            false
-        }
-    }
-
-    private fun isExtractorHost(url: String): Boolean {
-        val host = url.lowercase()
-        return EXTRACTOR_HOSTS.any { host.contains(it) }
-    }
-
-    /**
-     * Resolves `https://<host>/iframe/<hash>` into the list of real embed URLs by reading
-     * the Inertia page version and requesting the lazy `streams` prop.
-     */
-    private suspend fun resolveStreamMirrors(iframeUrl: String): List<StreamMirror> {
-        val page = try {
-            app.get(iframeUrl, headers = buildHeaders(mainUrl), timeout = 30).text
-        } catch (e: Throwable) {
-            return emptyList()
-        }
-        // The Inertia payload is JSON-escaped, so the component appears as
-        // `files\/mirror\/video`; normalise the slashes before matching.
-        val normalized = page.replace("\\/", "/")
-        if (!normalized.contains("data-page=\"app\"") || !normalized.contains(IFRAME_HOST)) {
-            return emptyList()
-        }
-        val version = Regex("\"version\":\"([^\"]+)\"").find(page)?.groupValues?.get(1)
-            ?: return emptyList()
-        val body = try {
-            app.get(
-                iframeUrl,
-                headers = buildHeaders(iframeUrl) + mapOf(
-                    "X-Inertia" to "true",
-                    "X-Inertia-Version" to version,
-                    "X-Inertia-Partial-Component" to IFRAME_HOST,
-                    "X-Inertia-Partial-Data" to "streams",
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Accept" to "text/html, application/xhtml+xml"
-                ),
-                referer = iframeUrl,
-                timeout = 30
-            ).text
-        } catch (e: Throwable) {
-            return emptyList()
-        }
-        return try {
-            val streams = JSONObject(body).getJSONObject("props").getJSONObject("streams")
-            val data = streams.optJSONArray("data") ?: return emptyList()
-            val out = mutableListOf<StreamMirror>()
-            val seen = mutableSetOf<String>()
-            for (i in 0 until data.length()) {
-                val group = data.getJSONObject(i)
-                val quality = qualityFromLabel(
-                    group.optString("quality").ifBlank { group.optString("label") }
-                )
-                val mirrors = group.optJSONArray("mirrors") ?: continue
-                for (j in 0 until mirrors.length()) {
-                    val mirror = mirrors.getJSONObject(j)
-                    var link = mirror.optString("link").trim()
-                    if (link.startsWith("//")) link = "https:$link"
-                    if (!link.startsWith("http")) continue
-                    val driver = mirror.optString("driver").trim().ifBlank { "Source" }
-                    if (seen.add("$driver|$link")) out.add(StreamMirror(link, driver, quality))
+                if (candidates.isEmpty()) {
+                    activeReferer = detailUrl
+                    candidates = collectCandidateServers(detailDoc, detailUrl)
                 }
             }
-            out
-        } catch (e: Throwable) {
-            emptyList()
         }
-    }
 
-    /** A single watch mirror plus the player's driver label and quality group. */
-    private data class StreamMirror(val url: String, val driver: String, val quality: Int)
+        if (candidates.isEmpty()) return@coroutineScope false
 
-    private fun qualityFromLabel(label: String): Int {
-        val height = Regex("""(\d{3,4})""").find(label)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        return when {
-            height >= 2160 -> Qualities.P2160.value
-            height >= 1440 -> Qualities.P1440.value
-            height >= 1080 -> Qualities.P1080.value
-            height >= 720 -> Qualities.P720.value
-            height >= 480 -> Qualities.P480.value
-            height >= 360 -> Qualities.P360.value
-            height >= 240 -> Qualities.P240.value
-            height >= 144 -> Qualities.P144.value
-            else -> Qualities.Unknown.value
+        // Canonical deduplication (merges `/iframe/<hash>` + `/download/<hash>` into unified MegaMax 4-channel pipeline)
+        val seenKeys = HashSet<String>()
+        val uniqueCandidates = candidates.filter { cand ->
+            !EgyDeadMirrorRouter.isDeadArchiveHost(cand.url) &&
+                seenKeys.add(EgyDeadMirrorRouter.canonicalDedupKey(cand.url))
         }
-    }
 
-    /**
-     * Resolves `https://<host>/download/<hash>` into the list of real download mirror
-     * URLs. Each quality is an "attachment"; POSTing its id returns the mirror list.
-     * The site is a Laravel + Inertia app, so the request carries the XSRF token and
-     * Inertia version harvested from the first GET.
-     */
-    private suspend fun resolveDownloadMirrors(downloadUrl: String): List<String> {
-        val first = try {
-            app.get(downloadUrl, headers = buildHeaders(mainUrl), timeout = 30)
-        } catch (e: Throwable) {
-            return emptyList()
-        }
-        val root = try {
-            JSONObject(first.document.selectFirst("script[data-page=app]")?.data() ?: return emptyList())
-        } catch (e: Throwable) {
-            return emptyList()
-        }
-        val attachments = root.optJSONObject("props")?.optJSONArray("attachments") ?: return emptyList()
-        if (attachments.length() == 0) return emptyList()
-        val version = root.optString("version")
+        if (uniqueCandidates.isEmpty()) return@coroutineScope false
 
-        val xsrf = first.cookies["XSRF-TOKEN"]?.let { raw ->
-            if (raw.contains('%')) runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw) else raw
-        }
-        val cookieHeader = first.cookies.entries.filter { it.value.isNotBlank() }
-            .joinToString("; ") { "${it.key}=${it.value}" }
-
-        val out = LinkedHashSet<String>()
-        for (i in 0 until attachments.length()) {
-            val attId = attachments.optJSONObject(i)?.optString("hashId")?.takeIf { it.isNotBlank() } ?: continue
-            val headers = mutableMapOf(
-                "User-Agent" to USER_AGENT,
-                "Accept" to "text/html, application/xhtml+xml",
-                "Content-Type" to "application/json",
-                "X-Requested-With" to "XMLHttpRequest",
-                "X-Inertia" to "true",
-                "X-Inertia-Partial-Component" to DOWNLOAD_COMPONENT,
-                "X-Inertia-Partial-Data" to "download"
-            )
-            if (version.isNotBlank()) headers["X-Inertia-Version"] = version
-            if (!xsrf.isNullOrBlank()) headers["X-XSRF-TOKEN"] = xsrf
-            if (cookieHeader.isNotBlank()) headers["Cookie"] = cookieHeader
-
-            val mirrors = try {
-                val resp = app.post(
-                    downloadUrl,
-                    headers = headers,
-                    json = mapOf("attach" to attId),
-                    referer = downloadUrl,
-                    timeout = 30
-                )
-                JSONObject(resp.text).optJSONObject("props")?.optJSONObject("download")
-                    ?.optJSONObject("data")?.optJSONArray("mirrors")
-            } catch (e: Throwable) {
-                null
-            } ?: continue
-
-            for (j in 0 until mirrors.length()) {
-                var link = mirrors.optJSONObject(j)?.optString("link")?.trim().orEmpty()
-                if (link.startsWith("//")) link = "https:$link"
-                if (link.startsWith("http")) out.add(link)
+        val emittedLinks = Collections.synchronizedSet(HashSet<String>())
+        val dedupCallback: (ExtractorLink) -> Unit = { link ->
+            if (emittedLinks.add(link.url)) {
+                callback(link)
             }
         }
-        return out.toList()
+
+        val sem = Semaphore(6)
+        uniqueCandidates.map { cand ->
+            async(Dispatchers.IO) {
+                sem.withPermit {
+                    EgyDeadMirrorRouter.resolve(
+                        url = cand.url,
+                        serverHint = cand.serverName,
+                        qualityHint = cand.qualityHint,
+                        referer = activeReferer,
+                        subtitleCallback = subtitleCallback,
+                        callback = dedupCallback
+                    )
+                }
+            }
+        }.awaitAll()
+
+        emittedLinks.isNotEmpty()
     }
 }

@@ -245,7 +245,7 @@
         "description": "أنمي سلاير — مشاهدة وتحميل الأنمي المترجم."
     },
     {
-        "iconUrl": "https://c4u1r.sbs/wp-content/uploads/2026/03/EgyDead-Logo.png",
+        "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/EgyDead.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
         "fileSize": 65887,
@@ -261,7 +261,7 @@
             "AnimeMovie",
             "Cartoon"
         ],
-        "version": 16,
+        "version": 17,
         "internalName": "EgyDead",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/EgyDead.cs3",
         "name": "إيجي ديد (EgyDead)",

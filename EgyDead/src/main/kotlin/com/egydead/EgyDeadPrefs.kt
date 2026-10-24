@@ -1,61 +1,92 @@
 package com.egydead
 
 import android.content.Context
-import com.lagradost.cloudstream3.APIHolder
+import android.content.SharedPreferences
 
 object EgyDeadPrefs {
-    private const val PREFS_NAME = "egydead_cf_prefs"
-    private const val KEY_COOKIES = "cf_cookies"
-    private const val KEY_LAST_HOST = "last_host"
-    private const val KEY_TS = "last_ts"
+    private const val FILE_NAME = "egydead_prefs_v2"
+    private const val KEY_CUSTOM_DOMAIN = "custom_domain"
+    private const val KEY_DISCOVERED_DOMAIN = "discovered_domain"
+    private const val KEY_USE_PROXY = "use_proxy"
+    private const val KEY_CUSTOM_PROXY = "custom_proxy"
+    private const val KEY_CF_CLEARANCE = "cf_clearance"
+    private const val KEY_CF_UA = "cf_ua"
 
-    private fun ctx(): Context? = APIHolder.getApiFromNameNull("إيجي ديد (EgyDead)")?.let { null } ?: APIHolder.apis.firstOrNull { it.name.contains("EgyDead") || it.javaClass.packageName.contains("egydead") }?.let { null }
+    @Volatile
+    private var prefs: SharedPreferences? = null
 
-    fun getContext(): Context? {
-        return try {
-            Class.forName("com.lagradost.cloudstream3.AcraApplication")
-                .getMethod("getCurrentActivity")
-                .invoke(null) as? Context
-        } catch (e: Exception) {
-            try {
-                Class.forName("com.lagradost.cloudstream3.MainActivity")
-                    .getDeclaredField("context")
-                    .apply { isAccessible = true }
-                    .get(null) as? Context
-            } catch (e2: Exception) {
-                null
-            }
+    @Volatile
+    var appContext: Context? = null
+        private set
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        if (prefs == null) {
+            prefs = appContext?.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
         }
     }
 
-    fun saveCookies(cookies: String?) {
-        if (cookies.isNullOrBlank()) return
-        val c = getContext() ?: return
-        c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putString(KEY_COOKIES, cookies)
-            .putLong(KEY_TS, System.currentTimeMillis())
-            .apply()
-    }
+    var customDomain: String?
+        get() = prefs?.getString(KEY_CUSTOM_DOMAIN, null)?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs?.edit()?.apply {
+                val clean = value?.trim()?.trimEnd('/')
+                if (clean.isNullOrBlank()) remove(KEY_CUSTOM_DOMAIN)
+                else putString(KEY_CUSTOM_DOMAIN, clean)
+                apply()
+            }
+        }
 
-    fun loadCookies(): String? {
-        val c = getContext() ?: return null
-        val prefs = c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val cookies = prefs.getString(KEY_COOKIES, null) ?: return null
-        val ts = prefs.getLong(KEY_TS, 0)
-        if (ts == 0L) return cookies
-        // Keep for 7 days
-        if (System.currentTimeMillis() - ts > 7L * 24 * 60 * 60 * 1000) return null
-        return cookies
-    }
+    var discoveredDomain: String?
+        get() = prefs?.getString(KEY_DISCOVERED_DOMAIN, null)?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs?.edit()?.apply {
+                val clean = value?.trim()?.trimEnd('/')
+                if (clean.isNullOrBlank()) remove(KEY_DISCOVERED_DOMAIN)
+                else putString(KEY_DISCOVERED_DOMAIN, clean)
+                apply()
+            }
+        }
 
-    fun saveHost(host: String?) {
-        if (host.isNullOrBlank()) return
-        val c = getContext() ?: return
-        c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_LAST_HOST, host).apply()
-    }
+    var useProxy: Boolean
+        get() = prefs?.getBoolean(KEY_USE_PROXY, false) ?: false
+        set(value) {
+            prefs?.edit()?.putBoolean(KEY_USE_PROXY, value)?.apply()
+        }
 
-    fun loadHost(): String? {
-        val c = getContext() ?: return null
-        return c.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_LAST_HOST, null)
+    var customProxy: String?
+        get() = prefs?.getString(KEY_CUSTOM_PROXY, null)?.trim()?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs?.edit()?.apply {
+                val clean = value?.trim()
+                if (clean.isNullOrBlank()) remove(KEY_CUSTOM_PROXY)
+                else putString(KEY_CUSTOM_PROXY, clean)
+                apply()
+            }
+        }
+
+    var cfClearance: String?
+        get() = prefs?.getString(KEY_CF_CLEARANCE, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs?.edit()?.apply {
+                if (value.isNullOrBlank()) remove(KEY_CF_CLEARANCE)
+                else putString(KEY_CF_CLEARANCE, value)
+                apply()
+            }
+        }
+
+    var savedUserAgent: String?
+        get() = prefs?.getString(KEY_CF_UA, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs?.edit()?.apply {
+                if (value.isNullOrBlank()) remove(KEY_CF_UA)
+                else putString(KEY_CF_UA, value)
+                apply()
+            }
+        }
+
+    fun clearCookies() {
+        cfClearance = null
+        savedUserAgent = null
     }
 }
