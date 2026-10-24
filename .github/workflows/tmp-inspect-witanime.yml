@@ -12,7 +12,7 @@ jobs:
   inspect:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,54 +21,111 @@ jobs:
       - name: Deep Inspect witanime.site DOM, JS Bundles, API & All Watch/Download Providers
         run: |
           pip install -q "curl_cffi" beautifulsoup4
+          rm -rf .tmp_wit
           mkdir -p .tmp_wit/hosts
           python3 - <<'PY'
-          import json, os, re, time, traceback, urllib.parse
+          import concurrent.futures, json, os, random, re, time, traceback, urllib.parse
           from bs4 import BeautifulSoup
           from curl_cffi import requests as creq
 
           BASE = "https://witanime.site"
           UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-          s = creq.Session(impersonate="chrome124")
-          report = {}
+          direct = creq.Session(impersonate="chrome124")
+          feeds = [
+              ("socks5h", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
+              ("socks5h", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"),
+              ("socks4", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"),
+          ]
+          cands = []
+          for sch, fu in feeds:
+              try:
+                  for ln in direct.get(fu, timeout=8).text.splitlines():
+                      ln = ln.strip()
+                      if re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", ln):
+                          cands.append(f"{sch}://{ln}")
+              except Exception:
+                  pass
+          random.shuffle(cands)
+
+          def is_valid_wit(r):
+              if not r or r.status_code != 200 or len(r.text) < 2000:
+                  return False
+              low = r.text[:6000].lower()
+              if "just a moment" in low or "_cf_chl_opt" in low:
+                  return False
+              return "witanime" in low
+
+          def test_px(px):
+              try:
+                  s = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  r = s.get(BASE + "/", timeout=8)
+                  if is_valid_wit(r):
+                      return px
+              except Exception:
+                  pass
+              return None
+
+          good_proxies = []
+          with concurrent.futures.ThreadPoolExecutor(max_workers=40) as ex:
+              for res in ex.map(test_px, cands[:220]):
+                  if res:
+                      good_proxies.append(res)
+                      if len(good_proxies) >= 12:
+                          break
+          print("Good proxies:", len(good_proxies), flush=True)
+          assert good_proxies, "No working proxy found for witanime.site"
+
+          def get_wit(url, start_idx=0):
+              for off in range(len(good_proxies)):
+                  idx = (start_idx + off) % len(good_proxies)
+                  px = good_proxies[idx]
+                  s = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  try:
+                      r = s.get(url, timeout=14)
+                      if is_valid_wit(r):
+                          return s, r, (idx + 1) % len(good_proxies)
+                  except Exception:
+                      pass
+              raise RuntimeError(f"Failed to fetch {url}")
+
+          report = {"good_proxies": len(good_proxies)}
 
           # 1. Homepage & Nav routes
-          r_home = s.get(BASE + "/", timeout=15)
+          _, r_home, p_idx = get_wit(BASE + "/", 0)
           open(".tmp_wit/home.html", "w", encoding="utf-8").write(r_home.text)
           soup_home = BeautifulSoup(r_home.text, "html.parser")
           nav_links = []
           for a in soup_home.select("header a[href], nav a[href], footer a[href], a[href]"):
               href = a.get("href", "")
               txt = a.get_text(" ", strip=True)
-              if href and not any(x in href for x in ("/watch/", "/anime/black-", "/anime/one-", "/movie/boku-")):
-                  if href.startswith("/") or href.startswith(BASE):
-                      p = urllib.parse.urlparse(href).path
-                      if p.count("/") <= 2 and p not in [x[1] for x in nav_links]:
-                          nav_links.append((txt[:50], p, href))
+              if href and (href.startswith("/") or href.startswith(BASE)):
+                  p = urllib.parse.urlparse(href).path
+                  if not p.startswith(("/watch/", "/anime/", "/movie/")) and p not in [x[1] for x in nav_links]:
+                      nav_links.append((txt[:50], p, href))
           report["home_status"] = r_home.status_code
           report["nav_routes"] = nav_links[:60]
 
           # Probe main browse pages discovered from nav_routes
           browse_tests = {}
           for txt, p, href in nav_links:
-              if p in ("/", "/login", "/register", "/continue-watching") or p.startswith(("/anime/", "/movie/", "/watch/")):
+              if p in ("/", "/login", "/register", "/continue-watching", "") or p.startswith(("/anime/", "/movie/", "/watch/")):
                   continue
               try:
                   u = urllib.parse.urljoin(BASE + "/", href)
-                  rb = s.get(u, timeout=12)
+                  _, rb, p_idx = get_wit(u, p_idx)
                   sb = BeautifulSoup(rb.text, "html.parser")
                   cards = len(sb.select("a[href*='/anime/'], a[href*='/movie/'], a[href*='/watch/']"))
-                  pags = [a.get("href") for a in sb.select("a[href*='page']")][:6]
-                  browse_tests[p] = {"status": rb.status_code, "title": sb.title.string if sb.title else "", "cards": cards, "pags": pags}
-                  if cards > 0 and len(browse_tests) <= 6:
-                      open(f".tmp_wit/browse_{p.strip('/').replace('/', '_') or 'root'}.html", "w", encoding="utf-8").write(rb.text[:150000])
+                  pags = [a.get("href") for a in sb.select("a[href*='page']")][:8]
+                  browse_tests[p] = {"status": rb.status_code, "title": sb.title.string.strip() if sb.title and sb.title.string else "", "cards": cards, "pags": pags}
+                  if cards > 0 and len(browse_tests) <= 8:
+                      open(f".tmp_wit/browse_{p.strip('/').replace('/', '_') or 'root'}.html", "w", encoding="utf-8").write(rb.text[:180000])
               except Exception as e:
                   browse_tests[p] = {"err": str(e)}
           report["browse_tests"] = browse_tests
 
           # 2. Search page
-          rs = s.get(f"{BASE}/search?q=tokyo", timeout=12)
+          _, rs, p_idx = get_wit(f"{BASE}/search?q=tokyo", p_idx)
           open(".tmp_wit/search.html", "w", encoding="utf-8").write(rs.text[:150000])
 
           # 3. Detail pages: Tokyo Revengers, One Piece (1201 eps), Movie
@@ -77,8 +134,8 @@ jobs:
               ("anime_op", "/anime/one-piece"),
               ("movie_boku", "/movie/boku-no-kokoro-no-yabai-yatsu-movie"),
           ]:
-              rd = s.get(BASE + path, timeout=15)
-              open(f".tmp_wit/{tag}.html", "w", encoding="utf-8").write(rd.text[:350000])
+              _, rd, p_idx = get_wit(BASE + path, p_idx)
+              open(f".tmp_wit/{tag}.html", "w", encoding="utf-8").write(rd.text[:450000])
               sd = BeautifulSoup(rd.text, "html.parser")
               ep_links = sd.select("a[href*='/watch/']")
               report[tag] = {
@@ -90,7 +147,7 @@ jobs:
 
           # 4. Watch page HTML + JS bundles
           w_target = f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"
-          rw = s.get(w_target, timeout=15)
+          ws_main, rw, p_idx = get_wit(w_target, p_idx)
           open(".tmp_wit/watch_tr4.html", "w", encoding="utf-8").write(rw.text)
           sw = BeautifulSoup(rw.text, "html.parser")
           js_srcs = [sc.get("src") for sc in sw.select("script[src]") if sc.get("src")]
@@ -98,100 +155,106 @@ jobs:
           for idx, jsrc in enumerate(js_srcs[:6]):
               ju = urllib.parse.urljoin(BASE + "/", jsrc)
               if "witanime" in ju or jsrc.startswith("/"):
-                  rj = s.get(ju, timeout=12)
-                  open(f".tmp_wit/bundle_{idx}.js", "w", encoding="utf-8").write(rj.text[:400000])
+                  try:
+                      rj = ws_main.get(ju, timeout=12)
+                      open(f".tmp_wit/bundle_{idx}.js", "w", encoding="utf-8").write(rj.text[:450000])
+                  except Exception:
+                      pass
 
           # 5. Resolve ALL watch & download servers on target episode + 3 extra pages for full provider coverage
-          def resolve_all_on_watch(watch_url, tag):
-              ws = creq.Session(impersonate="chrome124")
-              r1 = ws.get(watch_url, timeout=15)
-              soup = BeautifulSoup(r1.text, "html.parser")
-              csrf_el = soup.select_one("meta[name='csrf-token']")
-              csrf = csrf_el["content"] if csrf_el and csrf_el.has_attr("content") else ""
-              if not csrf:
-                  m = re.search(r'csrf-token["\'][^>]+content=["\']([^"\']+)["\']', r1.text)
-                  csrf = m.group(1) if m else ""
-              m_src = re.search(r'sourcesUrl\s*:\s*["\']([^"\']+)["\']', r1.text)
-              src_url = urllib.parse.urljoin(BASE + "/", m_src.group(1).replace("\\/", "/")) if m_src else watch_url.rstrip("/") + "/sources"
-              time.sleep(1.2)
-              r_src = ws.post(
-                  src_url,
-                  data=b"",
-                  headers={
-                      "Accept": "application/json",
-                      "X-CSRF-TOKEN": csrf,
-                      "X-Requested-With": "XMLHttpRequest",
-                      "Origin": BASE,
-                      "Referer": watch_url,
-                  },
-                  timeout=15,
-              )
-              out = {"watch_url": watch_url, "page_status": r1.status_code, "csrf_len": len(csrf), "sources_url": src_url, "sources_status": r_src.status_code}
-              try:
-                  sjson = r_src.json()
-                  out["sources_json"] = sjson
-              except Exception:
-                  out["sources_raw"] = r_src.text[:1000]
-                  return out
-
-              resolved = []
-              # Gather all stream & download items
-              items = []
-              for q, arr in (sjson.get("players") or {}).items():
-                  for obj in (arr or []):
-                      items.append(("stream", q, obj.get("label", ""), obj.get("token", ""), obj))
-              for q, arr in (sjson.get("downloads") or {}).items():
-                  for obj in (arr or []):
-                      items.append(("download", q, obj.get("label", ""), obj.get("token", ""), obj))
-
-              # On primary tr4, resolve ALL items; on secondary pages, resolve only unseen labels!
-              for idx, (kind, q, label, tok, raw_obj) in enumerate(items):
-                  if tag != "tr4" and label.lower() in seen_labels:
-                      continue
-                  seen_labels.add(label.lower())
-                  ep1 = "stream-source" if kind == "stream" else "download-source"
-                  ep2 = "stream-gate" if kind == "stream" else "download-gate"
-                  u1 = f"{BASE}/watch/{ep1}/{tok}"
-                  u2 = f"{BASE}/watch/{ep2}/{tok}"
-                  time.sleep(0.6)
-                  rs1 = ws.post(
-                      u1,
-                      data=b"",
-                      headers={
-                          "Accept": "application/json",
-                          "X-CSRF-TOKEN": csrf,
-                          "X-Requested-With": "XMLHttpRequest",
-                          "Origin": BASE,
-                          "Referer": watch_url,
-                      },
-                      timeout=12,
-                  )
-                  rg1 = ws.get(
-                      u2,
-                      headers={
-                          "Referer": watch_url,
-                          "Sec-Fetch-Site": "same-origin",
-                          "Sec-Fetch-Mode": "navigate",
-                          "Sec-Fetch-Dest": "iframe" if kind == "stream" else "document",
-                      },
-                      allow_redirects=False,
-                      timeout=12,
-                  )
-                  loc = rg1.headers.get("location", "")
-                  resolved.append({
-                      "kind": kind,
-                      "quality": q,
-                      "label": label,
-                      "source_status": rs1.status_code,
-                      "source_body": rs1.text[:300],
-                      "gate_status": rg1.status_code,
-                      "gate_location": loc,
-                      "gate_body": rg1.text[:400] if not loc else "",
-                  })
-              out["resolved"] = resolved
-              return out
-
           seen_labels = set()
+
+          def resolve_all_on_watch(watch_url, tag, start_p):
+              for attempt in range(4):
+                  try:
+                      ws, r1, start_p = get_wit(watch_url, start_p)
+                      soup = BeautifulSoup(r1.text, "html.parser")
+                      csrf_el = soup.select_one("meta[name='csrf-token']")
+                      csrf = csrf_el["content"] if csrf_el and csrf_el.has_attr("content") else ""
+                      if not csrf:
+                          m = re.search(r'csrf-token["\'][^>]+content=["\']([^"\']+)["\']', r1.text)
+                          csrf = m.group(1) if m else ""
+                      m_src = re.search(r'sourcesUrl\s*:\s*["\']([^"\']+)["\']', r1.text)
+                      src_url = urllib.parse.urljoin(BASE + "/", m_src.group(1).replace("\\/", "/")) if m_src else watch_url.rstrip("/") + "/sources"
+                      time.sleep(1.1)
+                      r_src = ws.post(
+                          src_url,
+                          data=b"",
+                          headers={
+                              "Accept": "application/json",
+                              "X-CSRF-TOKEN": csrf,
+                              "X-Requested-With": "XMLHttpRequest",
+                              "Origin": BASE,
+                              "Referer": watch_url,
+                          },
+                          timeout=14,
+                      )
+                      out = {"watch_url": watch_url, "page_status": r1.status_code, "csrf_len": len(csrf), "sources_url": src_url, "sources_status": r_src.status_code}
+                      if r_src.status_code != 200 or not r_src.text.strip().startswith("{"):
+                          out["sources_raw"] = r_src.text[:600]
+                          continue
+                      sjson = r_src.json()
+                      out["sources_json"] = sjson
+
+                      resolved = []
+                      items = []
+                      for q, arr in (sjson.get("players") or {}).items():
+                          for obj in (arr or []):
+                              items.append(("stream", q, obj.get("label", ""), obj.get("token", ""), obj))
+                      for q, arr in (sjson.get("downloads") or {}).items():
+                          for obj in (arr or []):
+                              items.append(("download", q, obj.get("label", ""), obj.get("token", ""), obj))
+
+                      for idx, (kind, q, label, tok, raw_obj) in enumerate(items):
+                          norm_lbl = f"{kind}:{label.lower()}"
+                          if tag != "tr4" and norm_lbl in seen_labels:
+                              continue
+                          seen_labels.add(norm_lbl)
+                          ep1 = "stream-source" if kind == "stream" else "download-source"
+                          ep2 = "stream-gate" if kind == "stream" else "download-gate"
+                          u1 = f"{BASE}/watch/{ep1}/{tok}"
+                          u2 = f"{BASE}/watch/{ep2}/{tok}"
+                          time.sleep(0.55)
+                          rs1 = ws.post(
+                              u1,
+                              data=b"",
+                              headers={
+                                  "Accept": "application/json",
+                                  "X-CSRF-TOKEN": csrf,
+                                  "X-Requested-With": "XMLHttpRequest",
+                                  "Origin": BASE,
+                                  "Referer": watch_url,
+                              },
+                              timeout=12,
+                          )
+                          rg1 = ws.get(
+                              u2,
+                              headers={
+                                  "Referer": watch_url,
+                                  "Sec-Fetch-Site": "same-origin",
+                                  "Sec-Fetch-Mode": "navigate",
+                                  "Sec-Fetch-Dest": "iframe" if kind == "stream" else "document",
+                              },
+                              allow_redirects=False,
+                              timeout=12,
+                          )
+                          loc = rg1.headers.get("location", "")
+                          resolved.append({
+                              "kind": kind,
+                              "quality": q,
+                              "label": label,
+                              "source_status": rs1.status_code,
+                              "source_body": rs1.text[:350],
+                              "gate_status": rg1.status_code,
+                              "gate_location": loc,
+                              "gate_body": rg1.text[:450] if not loc else "",
+                          })
+                      out["resolved"] = resolved
+                      return out, start_p
+                  except Exception as e:
+                      last_err = str(e)
+              return {"watch_url": watch_url, "err": last_err}, start_p
+
           report["watch_probes"] = {}
           for t_tag, t_url in [
               ("tr4", f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"),
@@ -199,7 +262,8 @@ jobs:
               ("bl9", f"{BASE}/watch/bleach-sennen-kessen-hen-kashin-tan/9"),
               ("mov", f"{BASE}/watch/movie/boku-no-kokoro-no-yabai-yatsu-movie"),
           ]:
-              report["watch_probes"][t_tag] = resolve_all_on_watch(t_url, t_tag)
+              res_w, p_idx = resolve_all_on_watch(t_url, t_tag, p_idx)
+              report["watch_probes"][t_tag] = res_w
 
           # 6. Probe every unique external host URL resolved!
           seen_ext_hosts = set()
@@ -221,6 +285,11 @@ jobs:
                   try:
                       sub_s = creq.Session(impersonate="chrome124")
                       rext = sub_s.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
+                      if rext.status_code in (403, 503) and good_proxies:
+                          ps = creq.Session(impersonate="chrome124", proxies={"http": good_proxies[0], "https": good_proxies[0]})
+                          rext2 = ps.get(eu, headers={"Referer": BASE + "/"}, timeout=15)
+                          if rext2.status_code == 200:
+                              rext = rext2
                       open(f".tmp_wit/hosts/{safe_k}.html", "w", encoding="utf-8").write(rext.text[:250000])
                       ext_probes[safe_k] = {"input": eu, "final": rext.url, "status": rext.status_code, "ct": rext.headers.get("content-type", ""), "len": len(rext.text)}
                   except Exception as e:
@@ -229,7 +298,7 @@ jobs:
 
           with open(".tmp_wit/report.json", "w", encoding="utf-8") as fh:
               json.dump(report, fh, ensure_ascii=False, indent=2)
-          print("INSPECTION COMPLETE! Ext hosts probed:", list(ext_probes.keys()))
+          print("INSPECTION COMPLETE! Ext hosts probed:", list(ext_probes.keys()), flush=True)
           PY
 
       - name: Commit inspection dump
@@ -237,7 +306,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f .tmp_wit
+          git add -A .tmp_wit
           git commit -m "chore: save WitAnime inspection dump [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
