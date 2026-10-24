@@ -270,14 +270,15 @@ jobs:
               "https://witanime.site/watch/movie/boku-no-kokoro-no-yabai-yatsu-movie",
           ]
 
-          for watch_url in TARGETS:
-              print(f"\n=== 2. Testing v23 Streaming Pipeline on {watch_url} (simulating residential 429 at gate #6) ===")
+          for t_idx, watch_url in enumerate(TARGETS):
+              print(f"\n=== 2.{t_idx+1}. Testing v23 Streaming Pipeline on {watch_url} (simulating residential 429 at gate #6) ===")
               sess = None
               r_page = None
               r_src = None
               csrf = None
               t0 = time.monotonic()
-              for px in working_proxies:
+              rotated_px = working_proxies[t_idx:] + working_proxies[:t_idx]
+              for px in rotated_px:
                   try:
                       t0 = time.monotonic()
                       cand_sess = requests.Session()
@@ -362,10 +363,11 @@ jobs:
                       if r1.status_code != 200:
                           continue
                       gj = r1.json()
-                      gu = urllib.parse.urljoin("https://witanime.site", gj["gateUrl"])
+                      default_gp = f"/watch/{'stream-gate' if kind=='stream' else 'download-gate'}/{tk}"
+                      gu = urllib.parse.urljoin("https://witanime.site", gj.get("gateUrl") or gj.get("url") or default_gp)
                       gh = {"Accept": "text/html,application/xhtml+xml", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" if kind=="stream" else "document", "Upgrade-Insecure-Requests": "1"}
-                      if gj.get("referrerPolicy") != "no-referrer":
-                          gh["Referer"] = watch_url
+                      if (gj.get("referrerPolicy") or "no-referrer").lower() == "origin":
+                          gh["Referer"] = "https://witanime.site/"
                       r2 = sess.get(gu, headers=gh, allow_redirects=False, timeout=8)
                       if r2.status_code in (301, 302, 303, 307, 308) and r2.headers.get("Location"):
                           loc = r2.headers["Location"]
