@@ -79,7 +79,15 @@ jobs:
               def open_ws(px):
                   try:
                       s = make_session(px)
-                      rw = s.get(watch_url, headers={"Referer": MAIN + "/"}, timeout=12)
+                      rw = s.get(watch_url, headers={
+                          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                          "Referer": MAIN + "/",
+                          "Sec-Fetch-Site": "same-origin",
+                          "Sec-Fetch-Mode": "navigate",
+                          "Sec-Fetch-User": "?1",
+                          "Sec-Fetch-Dest": "document",
+                          "Upgrade-Insecure-Requests": "1",
+                      }, timeout=12)
                       if rw.status_code != 200 or "_cf_chl_opt" in rw.text:
                           print(f"  [open_ws {px}] GET watch={rw.status_code} len={len(rw.text)}", flush=True)
                           return None
