@@ -1,393 +1,503 @@
-name: Inspect TimeMovies Temp
+name: Temp RE TimeMovies
 
 on:
   push:
     branches:
-      - "arena/**"
+      - arena/5a5a9059-mehdigm-stream
 
 jobs:
-  inspect:
+  live-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      checks: write
-      contents: read
+    timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17 & Python tools
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install jadx, pillow, androguard & download TimeMovies 1092 APK
+      - name: Run Live TimeMovies v4.7 + DoomPlayer API Probe
         run: |
-          pip3 install -q pillow androguard
-          mkdir -p /tmp/re/apks /tmp/re/report/icons
-          curl -fsSL "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/re/jadx.zip
-          unzip -q /tmp/re/jadx.zip -d /tmp/re/jadx
-          chmod +x /tmp/re/jadx/bin/jadx
-          curl -fL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk" -o /tmp/re/apks/TimeMovies_1092.apk
+          pip install --quiet --break-system-packages requests cryptography
+          mkdir -p /tmp/probe_out
+          curl -fsSL -o /tmp/TimeMovies_1092.apk \
+            "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk"
 
-          python3 - <<'PY'
-          import zipfile
-          z = zipfile.ZipFile("/tmp/re/apks/TimeMovies_1092.apk")
-          for name in ["res/sK.webp", "res/mB.png", "classes.dex"]:
-              if name in z.namelist():
-                  with open("/tmp/re/report/icons/" + name.replace("/", "_"), "wb") as f:
-                      f.write(z.read(name))
-          PY
+          python3 - <<'PY' > /tmp/probe_out/probe_report.txt 2>&1
+          import base64, hashlib, json, os, random, string, subprocess, time, urllib.parse, uuid, zipfile
+          import requests
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import ec
 
-      - name: Compile NDK memory DEX dumper and prepare emulator script
-        run: |
-          cat << 'EOF' > /tmp/re/dexdump_mem.c
-          #define _GNU_SOURCE
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include <stdint.h>
-          #include <string.h>
-          #include <fcntl.h>
-          #include <unistd.h>
+          BASE = "https://api.apks.lol/api/v4.7/app/"
+          APP_ID = "60129f949ea4ea03d6598c06"
+          AV = "6a3e1c72b864f954c0ef8d54"
+          XB = "1092"
+          FIREBASE_KEY = "AIzaSyCckkiH8i2ZARwOs1LEzFKld15aOG8ozKo"
 
-          static int is_dex_magic(const uint8_t *p) {
-              if (memcmp(p, "dex\n0", 5) != 0 && memcmp(p, "cdex0", 5) != 0) return 0;
-              if (p[7] != 0) return 0;
-              return (p[5] >= '0' && p[5] <= '9' && p[6] >= '0' && p[6] <= '9');
+          EXEMPT_PATHS = {
+              "d4f34a2a4f0249bbb3c92a7e45f3e1c2",
+              "f9e1a68e9d0c4f8ab4be63f0ed3aa1a4",
+              "c205267f10be4a52a21ed4e7fa890263",
+              "983fd0915e2841ec914088970dc6f059",
+              "2b1ea8f4c8174afb90d75f29e38c1ab3",
+              "5a0c0b8e7c3248f1a2d3e4f5b6c7d8e9",
+              "c7f4a2e91b8d43a6ae05f7c2d9b16e30",
+              "c9459fd0ac295d0f93237e370e6de40f",
+              "528e9d0f958445e68b76f657a75ea1d4",
+              "b05a119684b640ea8589ec4134dadefa",
+              "ef91fe43a60d496598d95cf8e3c1f139",
+              "2993cdecb5324ebc808f50f81c176d89",
+              "0a3431eed2894035810bfcad800f7a4c",
           }
 
-          int main(int argc, char **argv) {
-              if (argc < 3) return 1;
-              int pid = atoi(argv[1]);
-              const char *outdir = argv[2];
-              char maps_path[256], mem_path[256];
-              snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
-              snprintf(mem_path, sizeof(mem_path), "/proc/%d/mem", pid);
-              FILE *maps = fopen(maps_path, "r");
-              int memfd = open(mem_path, O_RDONLY);
-              if (!maps || memfd < 0) return 1;
-              char line[1024];
-              int found = 0;
-              while (fgets(line, sizeof(line), maps)) {
-                  unsigned long start = 0, end = 0;
-                  char perms[8] = {0};
-                  char path[512] = {0};
-                  int n = sscanf(line, "%lx-%lx %4s %*s %*s %*s %511[^\n]", &start, &end, perms, path);
-                  if (n < 3) continue;
-                  if (perms[0] != 'r' || perms[1] != '-') continue;
-                  size_t region_sz = end - start;
-                  if (region_sz < 1024 || region_sz > (256UL * 1024 * 1024)) continue;
-                  if (strstr(path, "/system/framework/") || strstr(path, "/apex/")) continue;
+          def b64url(b: bytes) -> str:
+              return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
-                  uint8_t *buf = malloc(region_sz);
-                  if (!buf) continue;
-                  ssize_t rd = pread(memfd, buf, region_sz, (off_t)start);
-                  if (rd > 112) {
-                      for (size_t off = 0; off + 112 <= (size_t)rd; off += 4) {
-                          const uint8_t *p = buf + off;
-                          uint32_t fsize = *(const uint32_t *)(p + 32);
-                          uint32_t hsize = *(const uint32_t *)(p + 36);
-                          uint32_t endian = *(const uint32_t *)(p + 40);
-                          if (is_dex_magic(p) && (hsize == 0x70 || hsize == 0x78) && endian == 0x12345678 && fsize > 1000 && fsize <= 64*1024*1024) {
-                              size_t avail = (size_t)rd - off;
-                              size_t to_write = fsize <= avail ? fsize : avail;
-                              char outpath[512];
-                              snprintf(outpath, sizeof(outpath), "%s/dump_%03d_%lx_%u.dex", outdir, found++, start + off, fsize);
-                              FILE *out = fopen(outpath, "wb");
-                              if (out) {
-                                  fwrite(p, 1, to_write, out);
-                                  fclose(out);
-                                  printf("Dumped %s (%zu/%u)\n", outpath, to_write, fsize);
-                              }
-                              if (fsize >= 0x70) off += ((fsize - 4) & ~3UL);
-                          }
-                      }
+          # Extract APK signing cert SHA1
+          cert_sha1 = ""
+          try:
+              out = subprocess.check_output(["keytool", "-printcert", "-jarfile", "/tmp/TimeMovies_1092.apk"], text=True)
+              for line in out.splitlines():
+                  if "SHA1:" in line:
+                      cert_sha1 = line.split("SHA1:", 1)[1].strip().replace(":", "")
+                      break
+          except Exception as e:
+              print("keytool err:", e)
+          print("APK CERT SHA1:", cert_sha1)
+
+          def uuidv7() -> str:
+              ms = int(time.time() * 1000)
+              rand_a = random.getrandbits(12)
+              rand_b = random.getrandbits(62)
+              hi = ((ms & ((1 << 48) - 1)) << 16) | 0x7000 | rand_a
+              lo = (0b10 << 62) | rand_b
+              hx = f"{hi:016x}{lo:016x}"
+              return f"{hx[:8]}-{hx[8:12]}-{hx[12:16]}-{hx[16:20]}-{hx[20:]}"
+
+          class TMClient:
+              def __init__(self):
+                  self.s = requests.Session()
+                  self.s.headers.update({"User-Agent": "okhttp/4.12.0", "Accept": "application/json"})
+                  self.tk = ""
+                  self.usp_id = None
+                  self.maturity = None
+                  self.dk = None
+                  self.priv = ec.generate_private_key(ec.SECP256R1())
+                  self.pub_b64 = b64url(self.priv.public_key().public_bytes(
+                      serialization.Encoding.DER,
+                      serialization.PublicFormat.SubjectPublicKeyInfo
+                  ))
+                  self.time_offset_ms = 0
+
+              def req(self, method: str, path_or_url: str, params=None, json_body=None, extra_headers=None, sign=True):
+                  url = path_or_url if path_or_url.startswith("http") else BASE + path_or_url
+                  if params:
+                      qs = urllib.parse.urlencode([(k, str(v)) for k, v in params.items() if v is not None])
+                      if qs:
+                          url = url + ("&" if "?" in url else "?") + qs
+                  parsed = urllib.parse.urlsplit(url)
+                  t_str = str(int(time.time() * 1000) + self.time_offset_ms)
+                  n_str = str(uuid.uuid4())
+                  headers = {
+                      "x-b": XB,
+                      "ai": APP_ID,
+                      "av": AV,
+                      "n": n_str,
+                      "t": t_str,
                   }
-                  free(buf);
-              }
-              fclose(maps);
-              close(memfd);
-              return 0;
+                  if self.tk:
+                      headers["x-t"] = self.tk
+                  if self.usp_id is not None:
+                      headers["x-p"] = str(self.usp_id)
+                      if self.maturity is not None:
+                          headers["m-a"] = str(self.maturity)
+                  raw_body = ""
+                  data_bytes = None
+                  if json_body is not None:
+                      raw_body = json.dumps(json_body, separators=(",", ":"), ensure_ascii=False)
+                      data_bytes = raw_body.encode("utf-8")
+                      headers["Content-Type"] = "application/json; charset=UTF-8"
+
+                  is_exempt = any(ex in parsed.path for ex in EXEMPT_PATHS)
+                  if sign and self.tk and "/api/v4.7/" in parsed.path and not is_exempt and self.dk:
+                      q_parts = [p for p in parsed.query.split("&") if p]
+                      q_sorted = "&".join(sorted(q_parts)) if q_parts else ""
+                      body_for_hash = raw_body if raw_body else "{}"
+                      body_sha256 = hashlib.sha256(body_for_hash.encode("utf-8")).hexdigest()
+                      canonical = "\n".join([
+                          method.upper(),
+                          parsed.hostname.lower(),
+                          parsed.path or "/",
+                          q_sorted,
+                          AV,
+                          XB,
+                          self.tk,
+                          str(self.usp_id) if self.usp_id is not None else "",
+                          str(self.maturity) if (self.usp_id is not None and self.maturity is not None) else "",
+                          t_str,
+                          n_str,
+                          body_sha256,
+                          self.dk,
+                      ])
+                      der_sig = self.priv.sign(canonical.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+                      headers["dk"] = self.dk
+                      headers["ds"] = b64url(der_sig)
+                      headers["da"] = "ECDSA_SHA256_DER"
+
+                  if extra_headers:
+                      headers.update(extra_headers)
+                  r = self.s.request(method, url, data=data_bytes, headers=headers, timeout=25)
+                  return r
+
+              def enroll_device_key(self):
+                  r1 = self.req("GET", "c81d2e64a4d64d8faea7e1abf4cb8c13", sign=False)
+                  print("Challenge:", r1.status_code, r1.text[:500])
+                  j1 = r1.json()
+                  d1 = j1.get("data") or j1
+                  cid, ch = d1["cid"], d1["ch"]
+                  payload = f"{cid}\n{ch}\n{self.pub_b64}\nECDSA_SHA256_DER"
+                  sig = b64url(self.priv.sign(payload.encode("utf-8"), ec.ECDSA(hashes.SHA256())))
+                  r2 = self.req("POST", "e4ad21d4b1fc41bca62d94bd972e93f6", json_body={
+                      "cid": cid,
+                      "pk": self.pub_b64,
+                      "sig": sig,
+                      "alg": "ECDSA_SHA256_DER",
+                  }, sign=False)
+                  print("Enroll:", r2.status_code, r2.text[:500])
+                  j2 = r2.json()
+                  d2 = j2.get("data") or j2
+                  self.dk = d2.get("dk")
+                  return self.dk
+
+          c = TMClient()
+
+          print("\n=== 1. AST (AppSettings) ===")
+          r_ast = c.req("GET", "b05a119684b640ea8589ec4134dadefa")
+          print("AST status:", r_ast.status_code, "headers:", dict(r_ast.headers))
+          print("AST body:", r_ast.text[:3000])
+
+          print("\n=== 2. Unauth Home & RefreshToken test ===")
+          r_home0 = c.req("GET", "6ec4ebc493d342fba913e1fb7c3b1b2a")
+          print("Unauth Home:", r_home0.status_code, r_home0.text[:600])
+          sid = uuidv7()
+          r_ref0 = c.req("POST", "d4f34a2a4f0249bbb3c92a7e45f3e1c2", json_body={"sid": sid})
+          print("Unauth Refresh:", r_ref0.status_code, r_ref0.text[:600])
+
+          print("\n=== 3. Firebase Auth + SocialData / SignUp test ===")
+          fb_headers = {
+              "X-Android-Package": "com.extremeqr.proapps",
+              "X-Android-Cert": cert_sha1,
+              "Content-Type": "application/json",
           }
-          EOF
-          NDK_CLANG=$(find "$ANDROID_HOME/ndk" -name "x86_64-linux-android24-clang" | sort | tail -n 1)
-          "$NDK_CLANG" -O2 -static /tmp/re/dexdump_mem.c -o /tmp/re/dexdump_mem
-
-          cat << 'EMUSCRIPT' > /tmp/re/run_emu.sh
-          #!/usr/bin/env bash
-          set -x
-          exec > /tmp/re/report/emu_trace.txt 2>&1
-          mkdir -p /tmp/re/dumped_1092 /tmp/re/appdata_1092
-          adb root || true
-          sleep 1
-          adb remount || true
-          adb shell "mv /system/xbin/su /system/xbin/su.bak 2>/dev/null || true; mv /system/bin/su /system/bin/su.bak 2>/dev/null || true" || true
-          adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
-          adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1092"
-          adb install -r /tmp/re/apks/TimeMovies_1092.apk
-          adb logcat -c || true
-          adb shell am start -n com.extremeqr.proapps/.ui.screens.activity.MainActivity || true
-          sleep 15
-          PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
-          echo "1092 PID=$PID92"
-          adb shell "/data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092" || true
-          adb pull /data/local/tmp/tm1092 /tmp/re/dumped_1092/ || true
-          adb pull /data/data/com.extremeqr.proapps /tmp/re/appdata_1092/ || true
-          adb logcat -d > /tmp/re/report/logcat_1092.txt 2>&1 || true
-          echo "done"
-          EMUSCRIPT
-          chmod +x /tmp/re/run_emu.sh
-          bash -n /tmp/re/run_emu.sh
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Run Android Emulator (API 30 default x86_64)
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          target: default
-          arch: x86_64
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -writable-system
-          script: bash /tmp/re/run_emu.sh
-
-      - name: Decompile with --show-bad-code, dump critical bytecode + appdata, publish check-runs
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set +e
-          python3 - <<'PY' > /tmp/re/report/small_dex_and_appdata.txt 2>&1
-          import glob, os, re, sqlite3
-          try:
-              from loguru import logger
-              logger.disable("androguard")
-          except Exception:
-              pass
-          from androguard.core.dex import DEX
-
-          # 1. Inspect small dumped DEXes + stub classes.dex completely
-          small_dexes = sorted(glob.glob("/tmp/re/dumped_1092/**/dump_00[4-9]_*.dex", recursive=True))
-          if os.path.exists("/tmp/re/report/icons/classes.dex"):
-              small_dexes.append("/tmp/re/report/icons/classes.dex")
-          for df in small_dexes:
-              raw = open(df, "rb").read()
-              print(f"\n================ SMALL DEX: {df} ({len(raw)} B, magic={raw[:8]!r}) ================")
-              try:
-                  d = DEX(raw)
-                  print("Strings:", d.get_strings()[:250])
-                  for c in d.get_classes():
-                      print("  CLASS:", c.get_name(), "super=", c.get_superclassname())
-                      for m in c.get_methods():
-                          print("    METHOD:", m.get_name(), m.get_descriptor(), "flags=", hex(m.get_access_flags()))
-                          code = m.get_code()
-                          if code:
-                              bc = code.get_bc()
-                              insns = list(bc.get_instructions())
-                              for ins in insns[:120]:
-                                  print("      ", ins.get_name(), ins.get_output())
-              except Exception as e:
-                  print("  DEX parse err:", e)
-                  strs = [s.decode("ascii", "ignore") for s in re.findall(b"[ -~]{4,}", raw)]
-                  print("  RAW STRINGS:", strs[:250])
-
-          # 2. Inspect /tmp/re/appdata_1092
-          print("\n================ APPDATA FILES ================")
-          for root, dirs, files in os.walk("/tmp/re/appdata_1092"):
-              if "code_cache" in root or "cache/image_cache" in root:
-                  continue
-              for fn in sorted(files):
-                  fp = os.path.join(root, fn)
-                  try:
-                      sz = os.path.getsize(fp)
-                  except Exception:
-                      continue
-                  print(f"FILE: {fp} ({sz} B)")
-                  if sz < 250000 and any(k in fp.lower() for k in ("datastore", "shared_prefs", "device_key", "rasplab", "protector", "json", "xml", ".pb", "secret", "files/")):
-                      try:
-                          raw = open(fp, "rb").read()
-                          strs = re.findall(b"[ -~]{4,}", raw)
-                          print("  ASCII:", [s.decode("ascii", "ignore")[:300] for s in strs[:80]])
-                      except Exception as e:
-                          print("  read err:", e)
-                  if fn.endswith(".db") or "database" in root.lower():
-                      try:
-                          con = sqlite3.connect(fp)
-                          cur = con.cursor()
-                          tabs = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-                          print("  SQLITE TABLES:", tabs)
-                          for tb in tabs:
-                              cnt = cur.execute(f"SELECT count(*) FROM `{tb}`").fetchone()[0]
-                              print(f"    {tb}: {cnt} rows")
-                              if cnt > 0 and tb not in ("android_metadata", "room_master_table"):
-                                  rows = cur.execute(f"SELECT * FROM `{tb}` LIMIT 3").fetchall()
-                                  print("    sample:", repr(rows)[:600])
-                          con.close()
-                      except Exception as e:
-                          print("  sqlite err:", e)
-          PY
-
-          # Filter relevant lines from logcat
-          grep -iE "extremeqr|okhttp|retrofit|apks\.lol|protector|firebase|Exception|Error " /tmp/re/report/logcat_1092.txt | tail -n 250 > /tmp/re/report/logcat_filtered.txt || true
-          rm -f /tmp/re/report/logcat_1092.txt /tmp/re/report/icons/classes.dex
-
-          # Run jadx WITH --show-bad-code on valid standard DEXes (dump_000..003) + stub APK classes.dex
-          mkdir -p /tmp/re/jadx_bad /tmp/re/jadx_stub /tmp/re/r5_src
-          ALL_DEXS=$(python3 -c 'import glob; print(" ".join(sorted(f for f in glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True) if open(f,"rb").read(4)==b"dex\n")))')
-          echo "Standard DEX files for jadx: $ALL_DEXS"
-          /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_bad $ALL_DEXS || true
-          /tmp/re/jadx/bin/jadx -j 4 --show-bad-code --no-res -d /tmp/re/jadx_stub /tmp/re/apks/TimeMovies_1092.apk || true
-
-          python3 - <<'PY'
-          import glob, os, re, shutil
-          try:
-              from loguru import logger
-              logger.disable("androguard")
-          except Exception:
-              pass
-          from androguard.core.dex import DEX
-
-          # Copy all stub/protector/tm classes
-          for root_base in ["/tmp/re/jadx_stub/sources", "/tmp/re/jadx_bad/sources"]:
-              for sub in ["com/protector", "tm", "com/extremeqr/proapps/security", "com/extremeqr/proapps/utils"]:
-                  p = os.path.join(root_base, sub)
-                  if os.path.isdir(p):
-                      dst = os.path.join("/tmp/re/r5_src", sub)
-                      os.makedirs(dst, exist_ok=True)
-                      for fn in os.listdir(p):
-                          if fn.endswith(".java"):
-                              shutil.copy2(os.path.join(p, fn), os.path.join(dst, fn))
-
-          # Target defpackage classes (all crypto/interceptors/UUID callers/auth/media/subtitles)
-          explicit = {
-              "q86", "r86", "s86", "t86", "u86", "uu1", "tu1", "vu1", "u04", "v04", "w04",
-              "pe3", "q52", "y52", "hq7", "j18", "wc7", "ro", "to", "dk2", "ek2", "f18",
-              "de9", "q00", "jw9", "zy1", "pr4", "c33", "mx", "ow1", "cw9", "dw9",
-              "fx", "ex", "bb8", "kv", "at5", "bt5", "ct5", "dt5", "et5",
-              "kd", "od", "rca", "cca", "k0", "f81", "fv3", "yb3", "nv", "mv",
-              "xv", "fw", "qv", "lv", "jw", "rv", "hw", "ax", "zu9", "tu9", "vu9",
-              "tba", "qca", "uba", "vba", "wba", "d24", "hx6", "ax6", "jw6", "l41",
-              "u6", "v6", "r6", "e41", "f41", "g41"
-          }
-
-          re_hex32 = re.compile(r'"[0-9a-f]{32}"')
-          must_terms = (
-              "AES/GCM", "AES/CBC", "HmacSHA", "SecretKeySpec", "GCMParameterSpec",
-              "X-Media-Grant", "\"x-t\"", "\"x-t.v2\"", "\"x-p\"", "\"m-a\"", "\"x-b\"",
-              "60129f949ea4ea03d6598c06", "6a3e1c72b864f954c0ef8d54",
-              "VidStream", "FreeDownloadPrepareResponse", "FreeDownloadConfirmRequest",
-              "WKC", "EDWI", "ExternalExecutionDto", "SubtitleTrack", "subtools",
-              "signInAnonymously", "getIdToken", "prepare_token", "watch_token",
-              "timesnizz", "timesdizz", "resolve-play", "resolve-download",
-              "tm.Protector", "com.protector"
+          # 3a. Anonymous Firebase signUp
+          r_fb_anon = requests.post(
+              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_KEY}",
+              headers=fb_headers,
+              json={"returnSecureToken": True},
+              timeout=20,
           )
+          print("FB anon signUp:", r_fb_anon.status_code, r_fb_anon.text[:500])
 
-          defpkg_dir = "/tmp/re/jadx_bad/sources/defpackage"
-          out_defpkg = "/tmp/re/r5_src/defpackage"
-          os.makedirs(out_defpkg, exist_ok=True)
+          # 3b. Email/Password Firebase signUp
+          rand_slug = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
+          rand_email = f"tmuser_{rand_slug}@gmail.com"
+          rand_pass = f"TmPass#{rand_slug}9A"
+          r_fb_email = requests.post(
+              f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_KEY}",
+              headers=fb_headers,
+              json={"email": rand_email, "password": rand_pass, "returnSecureToken": True},
+              timeout=20,
+          )
+          print("FB email signUp:", r_fb_email.status_code, r_fb_email.text[:500])
 
-          selected = set()
-          if os.path.isdir(defpkg_dir):
-              for fn in os.listdir(defpkg_dir):
-                  if not fn.endswith(".java"):
-                      continue
-                  cls = fn[:-5]
-                  fp = os.path.join(defpkg_dir, fn)
-                  txt = open(fp, "r", encoding="utf-8", errors="ignore").read()
-                  if cls in explicit or re_hex32.search(txt) or any(t in txt for t in must_terms):
-                      selected.add(cls)
-                      shutil.copy2(fp, os.path.join(out_defpkg, fn))
-
-          # Also include any immediate helper classes referenced inside q86, uu1, ex, at5, kd, rca, bb8
-          re_imp = re.compile(r"\b([a-z][a-z0-9]{1,4})\b")
-          pivots = ["q86", "uu1", "t86", "ex", "at5", "kd", "rca", "bb8", "xv", "fw", "qv", "lv", "mv", "jw", "k0"]
-          for pv in pivots:
-              pf = os.path.join(out_defpkg, pv + ".java")
-              if os.path.exists(pf):
-                  txt = open(pf).read()
-                  for tok in set(re_imp.findall(txt)):
-                      cand = os.path.join(defpkg_dir, tok + ".java")
-                      if tok not in selected and os.path.exists(cand) and os.path.getsize(cand) < 80000:
-                          ct = open(cand, "r", encoding="utf-8", errors="ignore").read()
-                          if "androidx.compose." not in ct and "androidx.fragment." not in ct:
-                              selected.add(tok)
-                              shutil.copy2(cand, os.path.join(out_defpkg, tok + ".java"))
-
-          print(f"Copied {len(selected)} defpackage classes to r5_src/defpackage")
-
-          # Dalvik bytecode fallback for any method in critical classes so ZERO instructions can be lost!
-          bytecode_targets = {
-              f"L{c};" for c in [
-                  "q86", "r86", "s86", "t86", "uu1", "u04", "v04", "w04",
-                  "ex", "at5", "kd", "rca", "od", "bb8", "pe3",
-                  "xv", "fw", "qv", "lv", "mv", "jw", "rv", "hw", "ax", "k0"
-              ]
+          dev_uid = uuid.uuid4().hex[:16]
+          user_device = {
+              "name": "Pixel 8 Pro",
+              "device_name": "husky",
+              "unique_id": dev_uid,
+              "brand": "google",
+              "device_id": "UQ1A.240205.004",
+              "device_type": "Handset",
+              "device_model": "Pixel 8 Pro",
+              "device_version": "14",
+              "device_readable_version": "1.0.6.5",
+              "system_name": "Android",
+              "system_version": "14",
+              "total_memory": "128849018880",
+              "total_ram": "12202659840",
+              "device_manufacturer": "Google",
+              "build_number": "1092",
+              "installer_package": "com.android.vending",
+              "device_lang": "ar",
+              "device_board": "husky",
+              "device_product": "husky",
+              "device_hardware": "husky",
+              "device_abis": "arm64-v8a,armeabi-v7a,armeabi",
+              "device_package": "com.extremeqr.proapps",
           }
-          with open("/tmp/re/report/bytecode_critical.txt", "w") as out_bc:
-              for df in sorted(glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True)):
-                  raw = open(df, "rb").read()
-                  if raw[:4] != b"dex\n":
-                      continue
-                  try:
-                      d = DEX(raw)
-                  except Exception as e:
-                      out_bc.write(f"DEX err on {df}: {e}\n")
-                      continue
-                  for c in d.get_classes():
-                      cname = c.get_name()
-                      if cname in bytecode_targets or cname.startswith("Ltm/") or cname.startswith("Lcom/protector/"):
-                          out_bc.write(f"\n================ {cname} ({os.path.basename(df)}) ================\n")
-                          for f in c.get_fields():
-                              out_bc.write(f"  FIELD: {f.get_name()}:{f.get_descriptor()} init={f.get_init_value()}\n")
-                          for m in c.get_methods():
-                              out_bc.write(f"  METHOD: {m.get_name()}{m.get_descriptor()} flags={hex(m.get_access_flags())}\n")
-                              code = m.get_code()
-                              if code:
-                                  for ins in code.get_bc().get_instructions():
-                                      out_bc.write(f"    {ins.get_name():20s} {ins.get_output()}\n")
-          PY
 
-          tar -czf /tmp/re/r5_bundle.tar.gz -C /tmp/re report r5_src
-          ls -lh /tmp/re/r5_bundle.tar.gz
-
-          python3 - <<'PY'
-          import os, base64, json, subprocess
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          sha = os.environ["GITHUB_SHA"]
-
-          def upload_tar(path, prefix):
-              if not os.path.exists(path):
-                  return
-              with open(path, "rb") as f:
-                  b64 = base64.b64encode(f.read()).decode("ascii")
-              chunk_sz = 60000
-              chunks = [b64[i:i+chunk_sz] for i in range(0, len(b64), chunk_sz)]
-              print(f"Uploading {prefix}: {len(b64)} b64 chars in {len(chunks)} chunks")
-              for idx, ch in enumerate(chunks[:60]):
-                  payload = {
-                      "name": f"{prefix}-{idx:02d}",
-                      "head_sha": sha,
-                      "status": "completed",
-                      "conclusion": "success",
-                      "output": {
-                          "title": f"{prefix} part {idx+1}/{len(chunks)}",
-                          "summary": f"total={len(chunks)} size={len(b64)}",
-                          "text": ch
-                      }
+          # Try SocialData with Firebase user if either FB call succeeded
+          for label, r_fb in [("anon", r_fb_anon), ("email", r_fb_email)]:
+              if r_fb.status_code == 200:
+                  fbj = r_fb.json()
+                  now_ms = int(time.time() * 1000)
+                  social_payload = {
+                      "appUser": {
+                          "email": fbj.get("email") or rand_email,
+                          "uid": fbj["localId"],
+                          "displayName": f"User {rand_slug[:6]}",
+                          "isEmailVerified": True,
+                          "phoneNumber": None,
+                          "photoUrl": None,
+                          "lastSignInTime": now_ms,
+                          "creationTime": now_ms,
+                          "appName": "[DEFAULT]",
+                          "device": dev_uid,
+                          "idToken": fbj["idToken"],
+                      },
+                      "device": user_device,
                   }
-                  p = subprocess.run(
-                      ["gh", "api", f"repos/{repo}/check-runs", "--method", "POST", "--input", "-"],
-                      input=json.dumps(payload).encode("utf-8"),
-                      capture_output=True
-                  )
-                  if p.returncode != 0:
-                      print("ERR:", p.stderr.decode("utf-8", "ignore")[:300])
+                  for ep in ["f9e1a68e9d0c4f8ab4be63f0ed3aa1a4", "c205267f10be4a52a21ed4e7fa890263", "983fd0915e2841ec914088970dc6f059"]:
+                      rs = c.req("POST", ep, json_body=social_payload)
+                      print(f"SocialData({label}) -> {ep}:", rs.status_code, rs.text[:500])
+                      if rs.status_code == 200:
+                          jr = rs.json()
+                          cand = jr.get("data")
+                          if isinstance(cand, str) and cand.count(".") == 2:
+                              c.tk = cand
+                              print("GOT JWT FROM SocialData!!", ep)
+                              break
+              if c.tk:
+                  break
 
-          upload_tar("/tmp/re/r5_bundle.tar.gz", "r5-tm")
+          # Also test UserEmailSignUp against the 3 endpoints if c.tk not yet obtained
+          if not c.tk:
+              signup_payload = {
+                  "email": rand_email,
+                  "isEmailError": False,
+                  "emailError": "",
+                  "name": f"Ahmed {rand_slug[:6]}",
+                  "isNameError": False,
+                  "nameError": "",
+                  "pass": rand_pass,
+                  "isPassError": False,
+                  "passError": "",
+                  "confirmPass": rand_pass,
+                  "isConfirmPassError": False,
+                  "confirmPassError": "",
+                  "device": user_device,
+                  "recheckEmail": False,
+              }
+              for ep in ["f9e1a68e9d0c4f8ab4be63f0ed3aa1a4", "c205267f10be4a52a21ed4e7fa890263", "983fd0915e2841ec914088970dc6f059"]:
+                  rs = c.req("POST", ep, json_body=signup_payload)
+                  print(f"UserEmailSignUp -> {ep}:", rs.status_code, rs.text[:500])
+                  if rs.status_code == 200:
+                      jr = rs.json()
+                      cand = jr.get("data")
+                      if isinstance(cand, str) and cand.count(".") == 2:
+                          c.tk = cand
+                          print("GOT JWT FROM UserEmailSignUp!!", ep)
+                          break
+
+          if c.tk:
+              parts = c.tk.split(".")
+              pad = "=" * (-len(parts[1]) % 4)
+              au = json.loads(base64.urlsafe_b64decode(parts[1] + pad))
+              print("\n=== 4. Decoded JWT (AU) ===")
+              print(json.dumps(au, indent=2, ensure_ascii=False))
+
+              print("\n=== 5. Enroll Device Key (ECDSA P-256) ===")
+              c.enroll_device_key()
+
+              print("\n=== 6. User Profiles (USP) ===")
+              r_usp = c.req("GET", "2468218428cc4065b0e37dc68c950505")
+              print("USP GET:", r_usp.status_code, r_usp.text[:1000])
+              usp_list = (r_usp.json().get("data") if r_usp.status_code == 200 else None) or []
+              if not usp_list:
+                  r_create_usp = c.req("POST", "83fd64bbed2640be9a849fbe975bad53", json_body={
+                      "_id": None,
+                      "name": "Main",
+                      "isNameError": False,
+                      "nameError": "",
+                      "fav_count": 0,
+                      "is_main": True,
+                      "is_vip_locked": False,
+                      "is_pin_set": False,
+                      "pic": 0,
+                      "lang": "ar",
+                      "default_stream_quality": "Auto",
+                      "pr": 10,
+                      "pf": 10,
+                      "default_download_quality": "720",
+                      "is_download_completed_notification": True,
+                      "is_download_completed_notification_sound": True,
+                      "is_download_wifi_only": False,
+                      "season_order": 1,
+                      "episode_order": 1,
+                      "is_episode_thumb": True,
+                      "is_auto_play_next_episode": True,
+                      "subtitle_text_color": 0,
+                      "subtitle_text_size": 35,
+                      "subtitle_text_edge_style": 1,
+                      "subtitle_text_edge_color": 1,
+                      "subtitle_background_color": 0,
+                      "subtitle_is_background_transparent": False,
+                      "subtitle_window_color": 0,
+                      "subtitle_is_window_color_transparent": False,
+                      "subtitle_language": "ar",
+                      "subtitle_bottom_padding": 15.0,
+                      "subtitle_typeface": None,
+                      "maturity": 18,
+                  })
+                  print("Create USP:", r_create_usp.status_code, r_create_usp.text[:800])
+                  r_usp = c.req("GET", "2468218428cc4065b0e37dc68c950505")
+                  usp_list = (r_usp.json().get("data") if r_usp.status_code == 200 else None) or []
+              if usp_list:
+                  c.usp_id = usp_list[0]["_id"]
+                  c.maturity = usp_list[0].get("maturity", 18)
+                  print("Selected USP:", c.usp_id, "maturity:", c.maturity)
+
+              print("\n=== 7. Home, Genres, CategoryPage, PageFilter, Search ===")
+              r_home = c.req("GET", "6ec4ebc493d342fba913e1fb7c3b1b2a")
+              print("Home:", r_home.status_code, "len=", len(r_home.text))
+              print("Home sample:", r_home.text[:2500])
+
+              r_genres = c.req("GET", "da8f8e755b58479f8e0385d6ea37261a")
+              print("Genres:", r_genres.status_code, r_genres.text[:1500])
+
+              hm_data = r_home.json().get("data") or {}
+              hm_lists = hm_data.get("list") or []
+              if hm_lists:
+                  cat0 = hm_lists[0].get("cat") or {}
+                  cat_id = cat0.get("_id")
+                  r_cat = c.req("GET", "f406853b625443cdbfb82ff8c1c35037", params={"catId": cat_id, "li": 10})
+                  print(f"Cat({cat_id}, {cat0.get('n')}):", r_cat.status_code, r_cat.text[:1500])
+
+              for pg in ["movies", "series", "anime", "asian", "arabic", "0", "1", "2"]:
+                  r_pf = c.req("GET", "807f73ed5aec4e3faef1df605238f727", params={"page": pg, "level": 0})
+                  print(f"PageFilter({pg}):", r_pf.status_code, r_pf.text[:400])
+
+              r_srch = c.req("GET", "3571075248fa4bb78355e487c9730be7", params={"search": "The Dark Knight", "page": 1})
+              print("Search('The Dark Knight'):", r_srch.status_code, r_srch.text[:2000])
+
+              r_srch_s = c.req("GET", "3571075248fa4bb78355e487c9730be7", params={"search": "Breaking Bad", "page": 1})
+              print("Search('Breaking Bad'):", r_srch_s.status_code, r_srch_s.text[:2000])
+
+              # Pick 1 movie and 1 series
+              movie_id = None
+              series_id = None
+              try:
+                  sd1 = r_srch.json().get("data") or {}
+                  mvs = sd1.get("movies") or sd1.get("mvs") or sd1.get("works") or []
+                  if isinstance(mvs, dict):
+                      mvs = mvs.get("works") or mvs.get("list") or []
+                  if mvs:
+                      movie_id = mvs[0]["_id"]
+              except Exception as e:
+                  print("parse movie err:", e)
+              try:
+                  sd2 = r_srch_s.json().get("data") or {}
+                  srs = sd2.get("series") or sd2.get("srs") or sd2.get("tv") or []
+                  if isinstance(srs, dict):
+                      srs = srs.get("works") or srs.get("list") or []
+                  if srs:
+                      series_id = srs[0]["_id"]
+              except Exception as e:
+                  print("parse series err:", e)
+
+              # Fallback from home
+              if not movie_id and hm_lists:
+                  for hl in hm_lists:
+                      for w in (hl.get("works") or []):
+                          movie_id = w["_id"]
+                          break
+                      if movie_id:
+                          break
+
+              for kind, wid in [("MOVIE", movie_id), ("SERIES", series_id)]:
+                  if not wid:
+                      continue
+                  print(f"\n=== 8. Work Detail ({kind}: {wid}) ===")
+                  rw = c.req("GET", "30df69a88f6e4ac2a7ea8b9797890911", params={"wk": wid})
+                  print(f"Work({kind}):", rw.status_code, "len=", len(rw.text))
+                  print(rw.text[:3000])
+                  wj = rw.json().get("data") or rw.json().get("work") or rw.json()
+                  if isinstance(wj, dict) and "work" in wj:
+                      wj = wj["work"]
+
+                  rc = c.req("GET", "02a8434328ff4c1fb911e9f235aff282", params={"wk": wid})
+                  print(f"Cast({kind}):", rc.status_code, rc.text[:800])
+
+                  ep_id = None
+                  fc = wj.get("fc") if isinstance(wj, dict) else None
+                  ss_id = None
+                  if isinstance(wj, dict) and wj.get("ss"):
+                      s0 = wj["ss"][0]
+                      ss_id = (s0.get("ss") or {}).get("_id")
+                      eps = s0.get("eps") or []
+                      if eps:
+                          ep_id = eps[0].get("_id")
+                          fc = eps[0].get("fc") or fc
+                          print(f"First episode: ep_id={ep_id}, fc={fc}, ss_id={ss_id}, sample={json.dumps(eps[0], ensure_ascii=False)[:600]}")
+
+                  rq = c.req("POST", "media/qualities", json_body={
+                      "work_id": wid,
+                      "episode_id": ep_id,
+                      "action": "watch",
+                  })
+                  print(f"media/qualities({kind}):", rq.status_code, rq.text[:1000])
+
+                  for action in ["watch", "download"]:
+                      for target in ["internal", "external"]:
+                          rg = c.req("POST", "media/grant", json_body={
+                              "work_id": wid,
+                              "version": 1,
+                              "episode_id": ep_id,
+                              "action": action,
+                              "quality": None,
+                              "executor_target": target,
+                              "player_installed": True,
+                              "client_attempt_key": str(uuid.uuid4()),
+                              "season_id": ss_id,
+                          })
+                          print(f"media/grant({kind}, {action}, {target}):", rg.status_code, rg.text[:1500])
+                          if rg.status_code == 200:
+                              gj = rg.json()
+                              gd = gj.get("data") or gj
+                              ext = gd.get("external") or {}
+                              ticket = ext.get("ticket")
+                              grant = gd.get("grant")
+                              if ticket:
+                                  dp_ep = "resolve-download" if action == "download" else "resolve-play"
+                                  rdp = requests.post(
+                                      f"https://api.apks.lol/api/player/v1.6/app/{dp_ep}",
+                                      headers={
+                                          "ai": "6a5216d91e12eeadc194ab91",
+                                          "x-b": "1065",
+                                          "Content-Type": "application/json",
+                                          "User-Agent": "okhttp/4.12.0",
+                                      },
+                                      json={"src": ticket},
+                                      timeout=20,
+                                  )
+                                  print(f"  DoomPlayer {dp_ep}:", rdp.status_code, rdp.text[:1500])
+                                  if rdp.status_code == 200:
+                                      dpd = (rdp.json().get("data") or rdp.json())
+                                      murl = dpd.get("url") if isinstance(dpd, dict) else None
+                                      if murl and ".m3u8" in murl:
+                                          rm3u = requests.get(murl, timeout=15)
+                                          print(f"  M3U8 ({rm3u.status_code}):\n{rm3u.text[:2000]}")
+                              if grant:
+                                  v2_ep = "download" if action == "download" else "manifest"
+                                  rv2 = requests.post(
+                                      f"https://api.apks.lol/v2/media/{v2_ep}",
+                                      headers={"X-Media-Grant": grant, "User-Agent": "okhttp/4.12.0"},
+                                      timeout=20,
+                                  )
+                                  print(f"  v2/media/{v2_ep}:", rv2.status_code, rv2.text[:1500])
           PY
+          head -n 250 /tmp/probe_out/probe_report.txt
+
+      - name: Upload Probe Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: re-report-r6
+          path: /tmp/probe_out
