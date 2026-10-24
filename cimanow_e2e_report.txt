@@ -36,7 +36,7 @@ Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/in
 > Task :CimaNow:make
 Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/CimaNow.cs3
 
-BUILD SUCCESSFUL in 1m 39s
+BUILD SUCCESSFUL in 1m 55s
 10 actionable tasks: 9 executed, 1 up-to-date
 MAKE_RC=0
 === STEP 2: :CimaNow:testDebugUnitTest (CIMANOW_LIVE_E2E=1) ===
@@ -45,8 +45,8 @@ Initialized jansi services in: /home/runner/.gradle/native
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.12/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Starting process 'Gradle build daemon'. Working directory: /home/runner/.gradle/daemon/8.12 Command: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED --add-opens=java.base/java.nio.charset=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.xml/javax.xml.namespace=ALL-UNNAMED -Xmx2048m -Dfile.encoding=UTF-8 -Duser.country -Duser.language=en -Duser.variant -cp /home/runner/.gradle/wrapper/dists/gradle-8.12-bin/cetblhg4pflnnks72fxwobvgv/gradle-8.12/lib/gradle-daemon-main-8.12.jar -javaagent:/home/runner/.gradle/wrapper/dists/gradle-8.12-bin/cetblhg4pflnnks72fxwobvgv/gradle-8.12/lib/agents/gradle-instrumentation-agent-8.12.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.12
 Successfully started process 'Gradle build daemon'
-An attempt to start the daemon took 0.991 secs.
-The client will now receive all logging from the daemon (pid: 2629). The daemon log file: /home/runner/.gradle/daemon/8.12/daemon-2629.out.log
+An attempt to start the daemon took 0.958 secs.
+The client will now receive all logging from the daemon (pid: 2643). The daemon log file: /home/runner/.gradle/daemon/8.12/daemon-2643.out.log
 Daemon will be stopped at the end of the build 
 Using 4 worker leases.
 Received JVM installation metadata from '/usr/lib/jvm/temurin-17-jdk-amd64': {JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64, JAVA_VERSION=17.0.20.1, JAVA_VENDOR=Eclipse Adoptium, RUNTIME_NAME=OpenJDK Runtime Environment, RUNTIME_VERSION=17.0.20.1+1, VM_NAME=OpenJDK 64-Bit Server VM, VM_VERSION=17.0.20.1+1, VM_VENDOR=Eclipse Adoptium, OS_ARCH=amd64}
@@ -61,7 +61,7 @@ Included projects: [root project 'MehdigmStream', project ':Anime3rb', project '
 > Configure project :
 Evaluating root project 'MehdigmStream' using build file '/home/runner/work/mehdigm-stream/mehdigm-stream/build.gradle.kts'.
 Using default execution profile
-Build 67b7f898-1d1d-4688-bff4-8dec21887490 is started
+Build 73f88a82-ed28-475e-aed6-0f6bf9441cb3 is started
 Using Kotlin Gradle Plugin gradle85 variant
 Using default execution profile
 Using Kotlin Gradle Plugin gradle85 variant
@@ -201,37 +201,37 @@ Resolve mutations for :CimaNow:generateDebugResValues (Thread[Execution worker,5
 Caching disabled for task ':CimaNow:generateDebugResValues' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugResValues' as it is up-to-date.
-Resolve mutations for :CimaNow:generateDebugResources (Thread[Execution worker,5,main]) started.
-:CimaNow:generateDebugResources (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:generateDebugResources (Thread[included builds,5,main]) started.
+:CimaNow:generateDebugResources (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:generateDebugResources UP-TO-DATE
 Caching disabled for task ':CimaNow:generateDebugResources' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugResources' as it is up-to-date.
-Resolve mutations for :CimaNow:packageDebugResources (Thread[Execution worker,5,main]) started.
-:CimaNow:packageDebugResources (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:packageDebugResources (Thread[included builds,5,main]) started.
+:CimaNow:packageDebugResources (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:packageDebugResources UP-TO-DATE
 Caching disabled for task ':CimaNow:packageDebugResources' because:
   Build cache is disabled
 Skipping task ':CimaNow:packageDebugResources' as it is up-to-date.
-Resolve mutations for :CimaNow:parseDebugLocalResources (Thread[Execution worker,5,main]) started.
-:CimaNow:parseDebugLocalResources (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:parseDebugLocalResources (Thread[included builds,5,main]) started.
+:CimaNow:parseDebugLocalResources (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:parseDebugLocalResources UP-TO-DATE
 Caching disabled for task ':CimaNow:parseDebugLocalResources' because:
   Build cache is disabled
 Skipping task ':CimaNow:parseDebugLocalResources' as it is up-to-date.
-Resolve mutations for :CimaNow:generateDebugRFile (Thread[Execution worker,5,main]) started.
-:CimaNow:generateDebugRFile (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:generateDebugRFile (Thread[included builds,5,main]) started.
+:CimaNow:generateDebugRFile (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:generateDebugRFile UP-TO-DATE
 Caching disabled for task ':CimaNow:generateDebugRFile' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugRFile' as it is up-to-date.
-work action resolve package-aware-r.txt (project :CimaNow) (Thread[Execution worker,5,main]) started.
-Resolve mutations for :CimaNow:compileDebugKotlin (Thread[Execution worker,5,main]) started.
-:CimaNow:compileDebugKotlin (Thread[included builds,5,main]) started.
+work action resolve package-aware-r.txt (project :CimaNow) (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:compileDebugKotlin (Thread[included builds,5,main]) started.
+:CimaNow:compileDebugKotlin (Thread[Execution worker Thread 2,5,main]) started.
 
 > Task :CimaNow:compileDebugKotlin UP-TO-DATE
 Caching disabled for task ':CimaNow:compileDebugKotlin' because:
@@ -239,46 +239,184 @@ Caching disabled for task ':CimaNow:compileDebugKotlin' because:
 Skipping task ':CimaNow:compileDebugKotlin' as it is up-to-date.
 Resolve mutations for :CimaNow:javaPreCompileDebug (Thread[included builds,5,main]) started.
 :CimaNow:javaPreCompileDebug (Thread[included builds,5,main]) started.
-Resolve mutations for :CimaNow:preDebugUnitTestBuild (Thread[Execution worker,5,main]) started.
-:CimaNow:preDebugUnitTestBuild (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:preDebugUnitTestBuild (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:preDebugUnitTestBuild (Thread[Execution worker Thread 2,5,main]) started.
 
 > Task :CimaNow:preDebugUnitTestBuild UP-TO-DATE
 Skipping task ':CimaNow:preDebugUnitTestBuild' as it has no actions.
-Resolve mutations for :CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker,5,main]) started.
-:CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker Thread 2,5,main]) started.
 
 > Task :CimaNow:javaPreCompileDebug
 Caching disabled for task ':CimaNow:javaPreCompileDebug' because:
   Build cache is disabled
 Task ':CimaNow:javaPreCompileDebug' is not up-to-date because:
   No history is available.
+Resolve mutations for :CimaNow:compileDebugJavaWithJavac (Thread[included builds,5,main]) started.
+:CimaNow:compileDebugJavaWithJavac (Thread[included builds,5,main]) started.
 
-> Task :CimaNow:generateDebugUnitTestStubRFile FAILED
+> Task :CimaNow:compileDebugJavaWithJavac NO-SOURCE
+Skipping task ':CimaNow:compileDebugJavaWithJavac' as it has no source files and no previous output files.
+Resolve mutations for :CimaNow:bundleLibRuntimeToJarDebug (Thread[included builds,5,main]) started.
+:CimaNow:bundleLibRuntimeToJarDebug (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:bundleLibCompileToJarDebug (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:bundleLibCompileToJarDebug (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:javaPreCompileDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:javaPreCompileDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
+
+> Task :CimaNow:javaPreCompileDebugUnitTest
+Caching disabled for task ':CimaNow:javaPreCompileDebugUnitTest' because:
+  Build cache is disabled
+Task ':CimaNow:javaPreCompileDebugUnitTest' is not up-to-date because:
+  No history is available.
+Resolve mutations for :CimaNow:processDebugJavaRes (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:processDebugJavaRes (Thread[Execution worker Thread 3,5,main]) started.
+
+> Task :CimaNow:generateDebugUnitTestStubRFile
 Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/json/json/20240303/json-20240303.pom]
 Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/junit/junit/4.13.2/junit-4.13.2.pom]
-Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom]
-Downloading https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom to /home/runner/.gradle/.tmp/gradle_download1466268769245786250bin
-Downloading https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.pom to /home/runner/.gradle/.tmp/gradle_download17850212317908896504bin
-Resource missing. [HTTP GET: https://repo.maven.apache.org/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom]
-Resource missing. [HTTP GET: https://jitpack.io/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom]
+Downloading https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.pom to /home/runner/.gradle/.tmp/gradle_download4202117948377900556bin
+Downloading https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom to /home/runner/.gradle/.tmp/gradle_download4267794199714196305bin
 Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom]
-Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom to /home/runner/.gradle/.tmp/gradle_download18359351288318386311bin
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom to /home/runner/.gradle/.tmp/gradle_download8980842231107562227bin
 Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/hamcrest/hamcrest-parent/1.3/hamcrest-parent-1.3.pom]
-Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-parent/1.3/hamcrest-parent-1.3.pom to /home/runner/.gradle/.tmp/gradle_download12402180983902343900bin
-Build 67b7f898-1d1d-4688-bff4-8dec21887490 is closed
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-parent/1.3/hamcrest-parent-1.3.pom to /home/runner/.gradle/.tmp/gradle_download7412036414975422751bin
+Caching disabled for task ':CimaNow:generateDebugUnitTestStubRFile' because:
+  Build cache is disabled
+Task ':CimaNow:generateDebugUnitTestStubRFile' is not up-to-date because:
+  No history is available.
+The input changes require a full rebuild for incremental task ':CimaNow:generateDebugUnitTestStubRFile'.
+
+> Task :CimaNow:bundleLibRuntimeToJarDebug
+Caching disabled for task ':CimaNow:bundleLibRuntimeToJarDebug' because:
+  Build cache is disabled
+  Simple merging task
+Task ':CimaNow:bundleLibRuntimeToJarDebug' is not up-to-date because:
+  No history is available.
+
+> Task :CimaNow:bundleLibCompileToJarDebug
+Caching disabled for task ':CimaNow:bundleLibCompileToJarDebug' because:
+  Build cache is disabled
+  Simple merging task
+Task ':CimaNow:bundleLibCompileToJarDebug' is not up-to-date because:
+  No history is available.
+
+> Task :CimaNow:processDebugJavaRes
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
+Caching disabled for task ':CimaNow:processDebugJavaRes' because:
+  Build cache is disabled
+  Caching has been disabled for the task
+Task ':CimaNow:processDebugJavaRes' is not up-to-date because:
+  No history is available.
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
+work action resolve classes.jar (project :CimaNow) (Thread[Execution worker,5,main]) started.
+work action resolve out (project :CimaNow) (Thread[Execution worker Thread 2,5,main]) started.
+work action resolve classes.jar (project :CimaNow) (Thread[Execution worker Thread 2,5,main]) started.
+Resolve mutations for :CimaNow:compileDebugUnitTestKotlin (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:compileDebugUnitTestKotlin (Thread[Execution worker Thread 2,5,main]) started.
+
+> Task :CimaNow:compileDebugUnitTestKotlin
+Downloading https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar to /home/runner/.gradle/.tmp/gradle_download10616724037468224885bin
+Downloading https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar to /home/runner/.gradle/.tmp/gradle_download11362563235369148162bin
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar to /home/runner/.gradle/.tmp/gradle_download15961488644683764537bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.json/json/20240303/ebb88e8fb5122b7506d5cf1d69f1ccdb790d22a/json-20240303.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/42a25dc3219429f0e5d060061f71acb49bf010a0/hamcrest-core-1.3.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12/junit-4.13.2.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/9d74efe5cdf0569441ef8595a2a8b1d2/transformed/jetified-hamcrest-core-1.3.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/16f29579e2e4bc2578b1d96318f86c93/transformed/jetified-json-20240303.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/3d299e4d4c18ca267cd2704259384969/transformed/jetified-junit-4.13.2.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/debugUnitTest/generateDebugUnitTestStubRFile/R.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/16f29579e2e4bc2578b1d96318f86c93/transformed/jetified-json-20240303.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/3d299e4d4c18ca267cd2704259384969/transformed/jetified-junit-4.13.2.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/9d74efe5cdf0569441ef8595a2a8b1d2/transformed/jetified-hamcrest-core-1.3.jar because:
+  Build cache is disabled
+Caching disabled for task ':CimaNow:compileDebugUnitTestKotlin' because:
+  Build cache is disabled
+Task ':CimaNow:compileDebugUnitTestKotlin' is not up-to-date because:
+  No history is available.
+The input changes require a full rebuild for incremental task ':CimaNow:compileDebugUnitTestKotlin'.
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debugUnitTest/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debugUnitTest/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debugUnitTest/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debugUnitTest/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debugUnitTest/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/kotlin', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/java', not found
+file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/java', not found
+Kotlin source files: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/kotlin/com/cimanow/CimaNowLiveE2ETest.kt
+Java source files: 
+Script source files: 
+Script file extensions: 
+Using Kotlin/JVM incremental compilation
+[KOTLIN] Kotlin compilation 'jdkHome' argument: null
+i: starting the daemon as: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java -cp /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar -Djava.awt.headless=true -Djava.rmi.server.hostname=127.0.0.1 -Xmx2048m -XX:ReservedCodeCacheSize=320m -Dkotlin.environment.keepalive -ea -XX:+UseCodeCacheFlushing -XX:+UseParallelGC -Dkotlin.daemon.initiator.marker.file=/tmp/kotlin-compiler-in-ehdigmtream-17608771866379131045.alive --add-exports java.base/sun.nio.ch=ALL-UNNAMED org.jetbrains.kotlin.daemon.KotlinCompileDaemon --daemon-runFilesPath /home/runner/.kotlin/daemon --daemon-autoshutdownIdleSeconds=7200 --daemon-compilerClasspath /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar
+i: #1 retrying connecting to the daemon 
+Options for KOTLIN DAEMON: IncrementalCompilationOptions(super=CompilationOptions(compilerMode=INCREMENTAL_COMPILER, targetPlatform=JVM, reportCategories=[0, 3], reportSeverity=2, requestedCompilationResults=[0], kotlinScriptExtensions=[]), sourceChanges=org.jetbrains.kotlin.buildtools.api.SourcesChanges$Unknown@3f60699b, classpathChanges=NotAvailableForNonIncrementalRun, workingDir=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, multiModuleICSettings=MultiModuleICSettings(buildHistoryFile=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state/build-history.bin, useModuleDetection=true), usePreciseJavaTracking=true, icFeatures=IncrementalCompilationFeatures(withAbiSnapshot=false, preciseCompilationResultsBackup=true, keepIncrementalCompilationCachesInMemory=true, enableUnsafeIncrementalCompilationForMultiplatform=false, enableMonotonousIncrementalCompileSetExpansion=true), outputFiles=[/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/tmp/kotlin-classes/debugUnitTest, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state])
+e: file:///home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/kotlin/com/cimanow/CimaNowLiveE2ETest.kt:97:39 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'List<String>?'.
+Finished executing kotlin compiler using DAEMON strategy
+
+> Task :CimaNow:compileDebugUnitTestKotlin FAILED
+Build 73f88a82-ed28-475e-aed6-0f6bf9441cb3 is closed
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':CimaNow:generateDebugUnitTestStubRFile'.
-> Could not resolve all files for configuration ':CimaNow:debugUnitTestRuntimeClasspath'.
-   > Could not find com.lagradost:cloudstream3:pre-release.
-     Searched in the following locations:
-       - https://dl.google.com/dl/android/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-       - https://repo.maven.apache.org/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-       - https://jitpack.io/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-     Required by:
-         project :CimaNow
+Execution failed for task ':CimaNow:compileDebugUnitTestKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
 
 * Try:
 > Run with --debug option to get more log output.
@@ -286,8 +424,17 @@ Execution failed for task ':CimaNow:generateDebugUnitTestStubRFile'.
 > Get more help at https://help.gradle.org.
 
 * Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':CimaNow:generateDebugUnitTestStubRFile'.
-	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:38)
+org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':CimaNow:compileDebugUnitTestKotlin'.
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
+	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
+	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
+	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:40)
+	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
@@ -310,41 +457,33 @@ org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':CimaNow
 	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
 	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
 	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
-Caused by: org.gradle.api.internal.artifacts.ivyservice.TypedResolveException: Could not resolve all files for configuration ':CimaNow:debugUnitTestRuntimeClasspath'.
-	at org.gradle.api.internal.artifacts.ResolveExceptionMapper.mapFailure(ResolveExceptionMapper.java:68)
-	at org.gradle.api.internal.artifacts.ResolveExceptionMapper.mapFailures(ResolveExceptionMapper.java:60)
-	at org.gradle.api.internal.artifacts.configurations.DefaultConfiguration$DefaultResolutionHost.consolidateFailures(DefaultConfiguration.java:1974)
-	at org.gradle.api.internal.artifacts.configurations.ResolutionHost.rethrowFailuresAndReportProblems(ResolutionHost.java:75)
-	at org.gradle.api.internal.artifacts.configurations.ResolutionBackedFileCollection.maybeThrowResolutionFailures(ResolutionBackedFileCollection.java:86)
-	at org.gradle.api.internal.artifacts.configurations.ResolutionBackedFileCollection.visitContents(ResolutionBackedFileCollection.java:76)
-	at org.gradle.api.internal.file.AbstractFileCollection.visitStructure(AbstractFileCollection.java:360)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection.lambda$calculateFinalizedValue$1(DefaultConfigurableFileCollection.java:408)
-	at org.gradle.api.internal.file.collections.UnpackingVisitor.add(UnpackingVisitor.java:67)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection$UnresolvedItemsCollector.visitContents(DefaultConfigurableFileCollection.java:616)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection.calculateFinalizedValue(DefaultConfigurableFileCollection.java:408)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection.finalizeNow(DefaultConfigurableFileCollection.java:124)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection.lambda$visitChildren$2(DefaultConfigurableFileCollection.java:432)
-	at org.gradle.api.internal.provider.ValueState.finalizeOnReadIfNeeded(ValueState.java:140)
-	at org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection.visitChildren(DefaultConfigurableFileCollection.java:432)
-	at org.gradle.api.internal.file.CompositeFileCollection.visitContents(CompositeFileCollection.java:113)
-	at org.gradle.api.internal.file.AbstractFileCollection.visitStructure(AbstractFileCollection.java:360)
-	at org.gradle.api.internal.file.CompositeFileCollection.lambda$visitContents$0(CompositeFileCollection.java:113)
-	at org.gradle.api.internal.file.collections.UnpackingVisitor.add(UnpackingVisitor.java:67)
-	at org.gradle.api.internal.file.collections.UnpackingVisitor.add(UnpackingVisitor.java:92)
-	at org.gradle.api.internal.file.DefaultFileCollectionFactory$ResolvingFileCollection.visitChildren(DefaultFileCollectionFactory.java:306)
-	at org.gradle.api.internal.file.CompositeFileCollection.visitContents(CompositeFileCollection.java:113)
-	at org.gradle.api.internal.file.AbstractFileCollection.visitStructure(AbstractFileCollection.java:360)
-	at org.gradle.api.internal.file.CompositeFileCollection.lambda$visitContents$0(CompositeFileCollection.java:113)
-	at org.gradle.api.internal.tasks.PropertyFileCollection.visitChildren(PropertyFileCollection.java:48)
-	at org.gradle.api.internal.file.CompositeFileCollection.visitContents(CompositeFileCollection.java:113)
-	at org.gradle.api.internal.file.AbstractFileCollection.visitStructure(AbstractFileCollection.java:360)
-	at org.gradle.internal.fingerprint.impl.DefaultFileCollectionSnapshotter.snapshot(DefaultFileCollectionSnapshotter.java:47)
-	at org.gradle.internal.execution.impl.DefaultInputFingerprinter$InputCollectingVisitor.visitInputFileProperty(DefaultInputFingerprinter.java:133)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.visitRegularInputs(TaskExecution.java:324)
-	at org.gradle.internal.execution.impl.DefaultInputFingerprinter.fingerprintInputProperties(DefaultInputFingerprinter.java:63)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.captureExecutionStateWithOutputs(AbstractCaptureStateBeforeExecutionStep.java:109)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.lambda$captureExecutionState$0(AbstractCaptureStateBeforeExecutionStep.java:74)
-	at org.gradle.internal.execution.steps.BuildOperationStep$1.call(BuildOperationStep.java:37)
+Caused by: org.gradle.workers.internal.DefaultWorkerExecutor$WorkExecutionException: A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+	at org.gradle.workers.internal.DefaultWorkerExecutor$WorkItemExecution.waitForCompletion(DefaultWorkerExecutor.java:287)
+	at org.gradle.internal.work.DefaultAsyncWorkTracker.lambda$waitForItemsAndGatherFailures$2(DefaultAsyncWorkTracker.java:130)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLocks(DefaultWorkerLeaseService.java:335)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLocks(DefaultWorkerLeaseService.java:318)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLock(DefaultWorkerLeaseService.java:323)
+	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForItemsAndGatherFailures(DefaultAsyncWorkTracker.java:126)
+	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForItemsAndGatherFailures(DefaultAsyncWorkTracker.java:92)
+	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForAll(DefaultAsyncWorkTracker.java:78)
+	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForCompletion(DefaultAsyncWorkTracker.java:66)
+	at org.gradle.api.internal.tasks.execution.TaskExecution$3.run(TaskExecution.java:252)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:29)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:26)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:47)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeAction(TaskExecution.java:229)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeActions(TaskExecution.java:212)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.executeWithPreviousOutputFiles(TaskExecution.java:195)
+	at org.gradle.api.internal.tasks.execution.TaskExecution.execute(TaskExecution.java:162)
+	at org.gradle.internal.execution.steps.ExecuteStep.executeInternal(ExecuteStep.java:105)
+	at org.gradle.internal.execution.steps.ExecuteStep.access$000(ExecuteStep.java:44)
+	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:59)
+	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:56)
 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
@@ -352,12 +491,47 @@ Caused by: org.gradle.api.internal.artifacts.ivyservice.TypedResolveException: C
 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
 	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.internal.execution.steps.BuildOperationStep.operation(BuildOperationStep.java:34)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.captureExecutionState(AbstractCaptureStateBeforeExecutionStep.java:69)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:62)
+	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:56)
+	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:44)
+	at org.gradle.internal.execution.steps.CancelExecutionStep.execute(CancelExecutionStep.java:42)
+	at org.gradle.internal.execution.steps.TimeoutStep.executeWithoutTimeout(TimeoutStep.java:75)
+	at org.gradle.internal.execution.steps.TimeoutStep.execute(TimeoutStep.java:55)
+	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:50)
+	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:28)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:67)
+	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:37)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:61)
+	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:26)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:69)
+	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:46)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:40)
+	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:29)
+	at org.gradle.internal.execution.steps.BuildCacheStep.executeWithoutCache(BuildCacheStep.java:189)
+	at org.gradle.internal.execution.steps.BuildCacheStep.lambda$execute$1(BuildCacheStep.java:75)
+	at org.gradle.internal.Either$Right.fold(Either.java:175)
+	at org.gradle.internal.execution.caching.CachingState.fold(CachingState.java:62)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:73)
+	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:48)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:46)
+	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:35)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.executeBecause(SkipUpToDateStep.java:75)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.lambda$execute$2(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:53)
+	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:35)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:37)
+	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:27)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:49)
+	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:27)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:71)
+	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:39)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:65)
+	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:36)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:107)
+	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:56)
+	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:64)
 	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:43)
 	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:125)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:56)
+	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:61)
 	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:36)
 	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
 	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
@@ -408,16 +582,40 @@ Caused by: org.gradle.api.internal.artifacts.ivyservice.TypedResolveException: C
 	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
 	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
 	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
-Caused by: org.gradle.internal.resolve.ModuleVersionNotFoundException: Could not find com.lagradost:cloudstream3:pre-release.
-Searched in the following locations:
-  - https://dl.google.com/dl/android/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-  - https://repo.maven.apache.org/maven2/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-  - https://jitpack.io/com/lagradost/cloudstream3/pre-release/cloudstream3-pre-release.pom
-Required by:
-    project :CimaNow
+Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilation error. See log for more details
+	at org.jetbrains.kotlin.gradle.tasks.TasksUtilsKt.throwExceptionIfCompilationFailed(tasksUtils.kt:21)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.run(GradleKotlinCompilerWork.kt:119)
+	at org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction.execute(GradleCompilerRunnerWithWorkers.kt:76)
+	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:63)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)
+	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)
+	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+	... 2 more
 
 
-BUILD FAILED in 14s
-8 actionable tasks: 2 executed, 6 up-to-date
+BUILD FAILED in 18s
+13 actionable tasks: 7 executed, 6 up-to-date
 TEST_RC=1
 MAKE_RC=0 TEST_RC=1
