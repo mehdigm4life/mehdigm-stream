@@ -467,12 +467,12 @@ async function renderWatchingInLocalChrome(watchingUrl, rawHtml, assetsMap, prox
 function inspectRawWatchingVault(rawHtml) {
   const tags = [...rawHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
     idx,
-    attrs: m[1].trim().slice(0, 260),
+    attrs: m[1].trim().slice(0, 320),
     len: m[2].length,
-    head: m[2].slice(0, 1500),
-    tail: m[2].length > 1500 ? m[2].slice(-1500) : "",
+    content: m[1].includes("text/plain") ? m[2].slice(0, 400) : m[2].slice(0, 25000),
   }));
-  return { totalLen: rawHtml.length, scriptCount: tags.length, tags };
+  const nonScriptHtml = rawHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "[SCRIPT]");
+  return { totalLen: rawHtml.length, nonScriptHtml: nonScriptHtml.slice(0, 3000), scriptCount: tags.length, tags };
 }
 
 async function processItem(item, proxies, assetsMap, idx) {
@@ -496,17 +496,14 @@ async function processItem(item, proxies, assetsMap, idx) {
       const gw = buildGatewayPostBody(r3.text);
       if (!gw) continue;
 
-      // Test 0-second immediate POST first! If rejected, wait remaining time to 10.5s and retry!
+      // Wait 10.3s so PHP session countdown passes (calling earlier returns decoy `https://cimanow.cc/pig/watching/`!)
+      await sleep(10300);
       const postHeaders = {
         "Content-Type": "application/x-www-form-urlencoded",
         Origin: "https://rm.freex2line.online",
         "X-Requested-With": "XMLHttpRequest",
       };
-      let zeroWaitStatus = null;
-      let zeroWaitBody = null;
-      let mintedUrl = "";
-
-      const p0 = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/get-link.php", {
+      const p10 = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/get-link.php", {
         proxy,
         cookieJar: jar,
         method: "POST",
@@ -514,41 +511,11 @@ async function processItem(item, proxies, assetsMap, idx) {
         referer: "https://rm.freex2line.online/2020/02/blog-post.html/",
         headers: postHeaders,
       });
-      zeroWaitStatus = p0.status;
-      zeroWaitBody = p0.text.trim().slice(0, 300);
-
-      if (p0.text.trim().startsWith("http")) {
-        mintedUrl = p0.text.trim();
-      } else {
-        // Wait 10.5s (possibly with fresh blog-post.html/ if 0s attempt invalidated the nonce)
-        const r3b = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/", {
-          proxy,
-          cookieJar: jar,
-          referer: "https://rm.freex2line.online/redirectingfree/",
-        });
-        const gwb = buildGatewayPostBody(r3b.text);
-        await sleep(10500);
-        const p10 = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/get-link.php", {
-          proxy,
-          cookieJar: jar,
-          method: "POST",
-          formBody: gwb.postBody,
-          referer: "https://rm.freex2line.online/2020/02/blog-post.html/",
-          headers: postHeaders,
-        });
-        if (p10.text.trim().startsWith("http")) {
-          mintedUrl = p10.text.trim();
-        } else {
-          return {
-            ok: false,
-            stage: "both_0s_and_10s_post_failed",
-            zeroWaitStatus,
-            zeroWaitBody,
-            tenSecStatus: p10.status,
-            tenSecBody: p10.text.trim().slice(0, 300),
-          };
-        }
+      const candUrl = p10.text.trim();
+      if (!candUrl.startsWith("http") || !candUrl.includes("?token=") || candUrl.includes("/pig/")) {
+        continue;
       }
+      const mintedUrl = candUrl;
 
       // Fetch `/watching/?token=...`!
       const watchRes = await curlReq(mintedUrl, {
@@ -625,7 +592,6 @@ async function processItem(item, proxies, assetsMap, idx) {
       return {
         ok: !!chromeWatch.rendered?.ready,
         proxy,
-        zeroWaitResult: { status: zeroWaitStatus, workedImmediately: zeroWaitBody?.startsWith("http"), body: zeroWaitBody },
         mintedUrl,
         cookiesJar: fs.existsSync(jar) ? fs.readFileSync(jar, "utf8") : "",
         rawVaultStructure,
