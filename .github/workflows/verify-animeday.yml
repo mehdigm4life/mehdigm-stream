@@ -66,7 +66,6 @@ jobs:
           PY
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git pull --rebase origin "$GITHUB_REF_NAME" || true
           git add -f build/AnimeDay.cs3 build/CimaCloud.cs3 plugins.json animeday_e2e_report.json animeday_gradle.log
           if ! git diff --cached --quiet; then
             git commit -m "🤖 Verify AnimeDay v29 build & E2E [skip ci]"
