@@ -207,8 +207,7 @@ class EgyDead : MainAPI() {
                 b.contains("WEB") -> SearchQuality.WebRip
                 b.contains("1080") || b.contains("FHD") -> SearchQuality.HD
                 b.contains("720") || b.contains("HDTV") || b.contains("HDRIP") -> SearchQuality.HD
-                b.contains("HDCAM") || b.contains("HDTS") || b.contains("TS") -> SearchQuality.Telesync
-                b.contains("CAM") -> SearchQuality.Cam
+                b.contains("HDCAM") || b.contains("HDTS") || b.contains("TS") || b.contains("CAM") -> SearchQuality.Cam
                 b.contains("DVD") -> SearchQuality.DVD
                 else -> null
             }

@@ -8,6 +8,10 @@ on:
       - 'build/EgyDead.png'
       - '.github/workflows/build-egydead.yml'
 
+permissions:
+  contents: write
+  checks: write
+
 jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '🤖')"
@@ -26,20 +30,99 @@ jobs:
           cache: 'gradle'
 
       - name: Configure Android SDK, test, and build EgyDead plugin
+        id: gradle_build
         run: |
+          set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :EgyDead:testDebugUnitTest :EgyDead:make --info --stacktrace --no-daemon
+          ./gradlew :EgyDead:testDebugUnitTest :EgyDead:make --info --stacktrace --no-daemon 2>&1 | tee gradle.log
 
-      - name: Upload EgyDead test reports
+      - name: Publish Detailed Test & Build Report to Check Run API
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: EgyDead-test-reports
-          path: EgyDead/build/reports/tests/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUTCOME: ${{ steps.gradle_build.outcome }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          log_text = ""
+          if os.path.exists("gradle.log"):
+              with open("gradle.log", "r", encoding="utf-8", errors="replace") as fh:
+                  lines = fh.readlines()
+              important = [
+                  ln for ln in lines
+                  if any(k in ln for k in [
+                      "Discovered live", "Shelf [", "Search ", "Movie loaded",
+                      "Lupin Season", "Episode fast-path", "Root Series", "Film Collection",
+                      "Fall 2 ", "Cruella 2021", "[VERIFY", "Verified playable",
+                      "e: file://", "FAILED", "FAILURE:", "> Task :EgyDead:", "BUILD "
+                  ])
+              ]
+              summary_block = "".join(important)[-28000:]
+              tail_block = "".join(lines[-250:])[-28000:]
+              log_text = "### Filtered Highlights\n```\n" + summary_block + "\n```\n\n### Log Tail\n```\n" + tail_block + "\n```"
+
+          outcome = os.environ.get("OUTCOME", "failure")
+          conclusion = "success" if outcome == "success" else "failure"
+          payload = {
+              "name": "EgyDead Diagnostics",
+              "head_sha": os.environ["SHA"],
+              "status": "completed",
+              "conclusion": conclusion,
+              "output": {
+                  "title": f"EgyDead Build & Live E2E: {conclusion}",
+                  "summary": f"Gradle outcome: `{outcome}`",
+                  "text": log_text[:64000]
+              }
+          }
+          with open("check_payload.json", "w", encoding="utf-8") as fh:
+              json.dump(payload, fh)
+
+          subprocess.run([
+              "gh", "api", "--method", "POST",
+              f"repos/{os.environ['REPO']}/check-runs",
+              "--input", "check_payload.json"
+          ], check=False)
+          PY
 
       - name: Upload EgyDead.cs3 artifact
         uses: actions/upload-artifact@v4
         with:
           name: EgyDead
           path: EgyDead/build/EgyDead.cs3
+
+      - name: Commit and push built EgyDead.cs3 to build/
+        run: |
+          if [ -f "EgyDead/build/EgyDead.cs3" ]; then
+            mkdir -p build
+            cp -f EgyDead/build/EgyDead.cs3 build/EgyDead.cs3
+            python3 - <<'PY'
+          import os, re
+          sz = os.path.getsize("build/EgyDead.cs3")
+          with open("plugins.json", "r", encoding="utf-8") as fh:
+              txt = fh.read()
+          def repl(m):
+              blk = m.group(0)
+              if '"internalName": "EgyDead"' not in blk:
+                  return blk
+              return re.sub(r'("fileSize"\s*:\s*)\d+', rf'\g<1>{sz}', blk, count=1)
+          new_txt = re.sub(r'\{[^{}]*"internalName"\s*:\s*"EgyDead"[^{}]*\}', repl, txt, flags=re.S)
+          if new_txt != txt:
+              with open("plugins.json", "w", encoding="utf-8") as fh:
+                  fh.write(new_txt)
+          PY
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/EgyDead.cs3 plugins.json
+            if ! git diff --cached --quiet; then
+              git commit -m "🤖 Build EgyDead.cs3 [skip ci]"
+              git pull --rebase origin "$GITHUB_REF_NAME" || true
+              git push
+            fi
+          else
+            echo "EgyDead.cs3 not found!"
+            exit 1
+          fi
