@@ -402,78 +402,116 @@ async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
   return info;
 }
 
+async function smartReq(url, proxies, opts = {}) {
+  let lastErr = null;
+  for (const p of proxies) {
+    try {
+      const r = await curlReq(url, { ...opts, proxy: p });
+      if (r.status > 0 && !isCimaBlock(r.text)) return { ...r, usedProxy: p };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error(`All proxies failed for ${url}`);
+}
+
 async function main() {
   const out = {};
-  const proxies = await getWorkingProxies();
-  out.proxies = proxies;
-  const p0 = proxies[0];
-
-  // Also fetch `nbm2oHaQcN60y6Ozwm.js?v=2.3` that we saw in `<link rel="preload" as="script">`!
   try {
-    const nbm = await curlReq("https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3", {
-      proxy: p0,
-      referer: "https://cimanow.cc/home/",
-    });
-    out.nbmPreloadScript = { status: nbm.status, len: nbm.text.length, preview: nbm.text.slice(0, 2500) };
-  } catch (e) {
-    out.nbmPreloadScript = { err: String(e.message || e) };
-  }
+    const proxies = await getWorkingProxies();
+    out.proxies = proxies;
+    const p0 = proxies[0];
 
-  const testItems = [
-    {
-      name: "ForeignMovie_Fall2",
-      url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/",
-    },
-    {
-      name: "ArabicMovie_BeitElRuby",
-      url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-%d8%a8%d9%8a%d8%aa-%d8%a7%d9%84%d8%b1%d9%88%d8%a8%d9%8a-2023/",
-    },
-    {
-      name: "ForeignEpisode_LupinS4E1",
-      url: "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/",
-    },
-  ];
-
-  out.itemFlows = {};
-  for (const item of testItems) {
-    const mv = await curlReq(item.url, { proxy: p0, referer: "https://cimanow.cc/home/" });
-    const shineMatch = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i);
-    const shineUrl = shineMatch?.[1] || "";
-
-    const chain = shineUrl ? await followGatewayChain(shineUrl, item.url, p0) : { error: "No .shine href found" };
-    const flowReport = {
-      shineUrl,
-      hops: chain.hops,
-      cookiesAtEnd: chain.cookiesAtEnd,
-    };
-
-    if (chain.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
-      const finalHop = chain.hops[chain.hops.length - 1];
-      flowReport.watching = await inspectWatchingPage(chain.finalResp.text, finalHop.reqUrl, p0, chain.jar);
+    try {
+      const nbm = await smartReq(
+        "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3",
+        proxies,
+        { referer: "https://cimanow.cc/home/" }
+      );
+      out.nbmPreloadScript = { status: nbm.status, len: nbm.text.length, preview: nbm.text.slice(0, 2500) };
+    } catch (e) {
+      out.nbmPreloadScript = { err: String(e.message || e) };
     }
 
-    if (chain.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
-    out.itemFlows[item.name] = flowReport;
-  }
+    const testItems = [
+      {
+        name: "ForeignMovie_Fall2",
+        url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/",
+      },
+      {
+        name: "ArabicMovie_BeitElRuby",
+        url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-%d8%a8%d9%8a%d8%aa-%d8%a7%d9%84%d8%b1%d9%88%d8%a8%d9%8a-2023/",
+      },
+      {
+        name: "ForeignEpisode_LupinS4E1",
+        url: "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/",
+      },
+    ];
 
-  // Test if that final Referer discovered in `hops` unlocks `/watching/` DIRECTLY in 1 request without visiting `rm.freex2line.online`!
-  const firstFlowHops = out.itemFlows.ForeignMovie_Fall2?.hops || [];
-  const winningHop = firstFlowHops.find((h) => h.reqUrl?.includes("/watching/") && h.status === 200);
-  if (winningHop?.reqReferer) {
-    const directTest = await curlReq(
-      "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad2-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/watching/",
-      { proxy: p0, referer: winningHop.reqReferer, follow: false }
-    );
-    out.oneShotRefererBypassTest = {
-      testedReferer: winningHop.reqReferer,
-      status: directTest.status,
-      hasWatch: directTest.text.includes('id="watch"') && directTest.text.includes("data-index"),
-      len: directTest.text.length,
-    };
+    out.itemFlows = {};
+    for (const item of testItems) {
+      try {
+        const mv = await smartReq(item.url, proxies, { referer: "https://cimanow.cc/home/" });
+        const shineMatch = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i);
+        const shineUrl = shineMatch?.[1] || "";
+
+        // Try each working proxy for sticky PHPSESSID chain until `/watching/` succeeds!
+        let chain = null;
+        let stickyP = mv.usedProxy || p0;
+        for (const candP of [stickyP, ...proxies.filter((x) => x !== stickyP)]) {
+          chain = shineUrl ? await followGatewayChain(shineUrl, item.url, candP) : { error: "No .shine href found" };
+          stickyP = candP;
+          if (chain.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
+            break;
+          }
+          if (chain.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
+        }
+
+        const flowReport = {
+          usedProxy: stickyP,
+          shineUrl,
+          hops: chain?.hops || [],
+          chainError: chain?.error || null,
+          cookiesAtEnd: chain?.cookiesAtEnd || "",
+        };
+
+        if (chain?.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
+          const finalHop = chain.hops[chain.hops.length - 1];
+          flowReport.watching = await inspectWatchingPage(chain.finalResp.text, finalHop.reqUrl, stickyP, chain.jar);
+        }
+
+        if (chain?.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
+        out.itemFlows[item.name] = flowReport;
+      } catch (e) {
+        out.itemFlows[item.name] = { error: String(e.stack || e) };
+      }
+    }
+
+    const firstFlowHops = out.itemFlows.ForeignMovie_Fall2?.hops || [];
+    const winningHop = firstFlowHops.find((h) => h.reqUrl?.includes("/watching/") && h.status === 200);
+    if (winningHop?.reqReferer) {
+      try {
+        const directTest = await smartReq(
+          "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad2-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/watching/",
+          proxies,
+          { referer: winningHop.reqReferer, follow: false }
+        );
+        out.oneShotRefererBypassTest = {
+          testedReferer: winningHop.reqReferer,
+          status: directTest.status,
+          hasWatch: directTest.text.includes('id="watch"') && directTest.text.includes("data-index"),
+          len: directTest.text.length,
+        };
+      } catch (e) {
+        out.oneShotRefererBypassTest = { err: String(e.message || e) };
+      }
+    }
+  } catch (e) {
+    out.fatalError = String(e.stack || e);
   }
 
   fs.writeFileSync("cimanow_recon.json", JSON.stringify(out, null, 2));
-  console.log("Wrote v7 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
+  console.log("Wrote v7b recon report, bytes:", fs.statSync("cimanow_recon.json").size);
 }
 
 main();
