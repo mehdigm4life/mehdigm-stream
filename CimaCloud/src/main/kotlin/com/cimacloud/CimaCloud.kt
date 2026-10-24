@@ -570,8 +570,9 @@ class CimaCloud : MainAPI() {
 
         for (sIdx in 0 until seasonsArr.length()) {
             val seasonObj = seasonsArr.optJSONObject(sIdx) ?: continue
-            val seasonNum = seasonObj.optInt("season_number", 0).takeIf { it > 0 }
-                ?: extractTrailingInt(seasonObj.optString("name"))
+            val seasonNum = seasonObj.optString("season_number").trim().toIntOrNull()?.takeIf { it > 0 }
+                ?: seasonObj.optInt("season_number", 0).takeIf { it > 0 }
+                ?: extractTrailingInt(seasonObj.optString("title").ifBlank { seasonObj.optString("name") })
                 ?: (sIdx + 1)
             val epsArr = seasonObj.optJSONArray("episodes") ?: continue
 
@@ -580,19 +581,33 @@ class CimaCloud : MainAPI() {
                 val epId = epObj.optString("id").trim()
                 if (epId.isEmpty() || !seenEpIds.add(epId)) continue
 
-                val epName = epObj.optString("name").trim()
+                // In CimaCloud /series/{id}/episodes, `title` holds "الحلقة 1" while `name` holds the series title
+                val rawEpTitle = epObj.optString("title").trim()
+                val rawEpName = epObj.optString("name").trim()
+                val epLabelBase = rawEpTitle.ifEmpty { rawEpName }
+
                 val epNum = epObj.optInt("episode_number", 0).takeIf { it > 0 }
-                    ?: extractTrailingInt(epName)
+                    ?: extractTrailingInt(rawEpTitle)
+                    ?: extractTrailingInt(rawEpName)
+
+                val isFiller = epObj.optBoolean("filer", false) || epObj.optBoolean("filler", false)
+                val finalEpName = buildString {
+                    append(epLabelBase.ifEmpty { if (epNum != null) "الحلقة $epNum" else "حلقة" })
+                    if (isFiller && !contains("فلر")) append(" [فلر]")
+                }
+
                 val epPoster = normalizeImageUrl(
-                    epObj.optString("still_path")
+                    epObj.optString("image")
+                        .ifBlank { epObj.optString("still_path") }
                         .ifBlank { epObj.optString("poster") }
+                        .ifBlank { epObj.optString("cover") }
                         .ifBlank { seasonObj.optString("poster_path") },
                 ) ?: defaultPoster
-                val epOverview = epObj.optString("overview").trim().takeIf { it.isNotEmpty() }
+                val epOverview = epObj.optString("overview").trim().takeIf { it.isNotEmpty() && it != "null" }
                 val airDate = epObj.optString("air_date").trim()
 
                 val epItem = newEpisode("$mainUrl/episode/$epId/servers") {
-                    this.name = epName.ifEmpty { if (epNum != null) "الحلقة $epNum" else "حلقة" }
+                    this.name = finalEpName
                     this.season = seasonNum
                     this.episode = epNum
                     this.posterUrl = epPoster

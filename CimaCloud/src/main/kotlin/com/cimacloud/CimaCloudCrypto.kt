@@ -262,8 +262,26 @@ internal object CimaCloudCrypto {
             val rawBody = httpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 resp.body?.string()
-            } ?: return null
+            }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
 
+            // Case 1: Raw Base64 ciphertext body (used by /movie/{id}/servers & /episode/{id}/servers)
+            if (!rawBody.startsWith("{") && !rawBody.startsWith("[")) {
+                val decryptedText = decryptResponse(rawBody, key)?.trim() ?: return null
+                return when {
+                    decryptedText.startsWith("{") -> {
+                        val obj = safeJsonObject(decryptedText) ?: return null
+                        if (obj.optBoolean("blocked", false)) null else (obj.optJSONObject("data") ?: obj)
+                    }
+                    decryptedText.startsWith("[") -> JSONObject().put("items", JSONArray(decryptedText))
+                    else -> null
+                }
+            }
+
+            if (rawBody.startsWith("[")) {
+                return JSONObject().put("items", JSONArray(rawBody))
+            }
+
+            // Case 2 & 3: JSON envelope (either encrypted data field or plain JSON response)
             val outer = safeJsonObject(rawBody) ?: return null
             if (outer.optBoolean("blocked", false)) return null
 
@@ -279,7 +297,6 @@ internal object CimaCloudCrypto {
                 }
             }
 
-            // Unencrypted envelope: either data is a JSONObject or fields sit directly on outer
             outer.optJSONObject("data")?.let { return it }
             outer
         } catch (_: Throwable) {

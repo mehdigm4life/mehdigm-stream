@@ -46,9 +46,10 @@ SSL_CTX.verify_mode = ssl.CERT_NONE
 
 NODE_CRYPTO_HELPER = r"""
 const crypto = require('crypto');
-const mode = process.argv[2];
-if (mode === 'seal') {
-  const payload = Buffer.from(process.argv[3], 'utf8');
+const fs = require('fs');
+const req = JSON.parse(fs.readFileSync(0, 'utf8'));
+if (req.mode === 'seal') {
+  const payload = Buffer.from(req.payload, 'utf8');
   const spkiDer = Buffer.from(
     'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwDPYEppEb3xys/R99+zmZW54vhcQIcV+6+BtHI/Qmb4I0M2hw0fQ9fzLY/RhKM33yuOOZNAulpq4ByJ7b556fkkplaPMI3vbESmoJqCk3QCh65Nbi4mKRFFJyDkJVepBX2BDr3+zECzdSy0oVSn+nFqw5YJcS+d06Lgyyr5oZSaZSeGh9FtgJkuz17n265rLB6ruUUrHQVeEDl8ph3t/x/NynwtwQDA5VX+a/AVmedgb2JZCQLry8Za/lvsq4Lhuthcts6gtVq3uPExSKdLBpbqbwQNvhRgB3IEYV47OyddG32qbriJbxdvW+n5OzowiYQrsC8hG65GPBGCuj3zO7wIDAQAB',
     'base64'
@@ -62,12 +63,12 @@ if (mode === 'seal') {
   const sealed = Buffer.concat([ct, tag]);
   const encKey = crypto.publicEncrypt({ key: pubKey, padding: crypto.constants.RSA_PKCS1_PADDING }, aesKey);
   process.stdout.write(encKey.toString('base64') + '.' + iv.toString('base64') + '.' + sealed.toString('base64'));
-} else if (mode === 'dec') {
-  const b64 = process.argv[3];
-  const key = process.argv[4];
+} else if (req.mode === 'dec') {
+  const b64 = req.data.replace(/\s+/g, '');
+  const key = req.key;
   const salt = 'Gm4il@G00Gl3.Com';
-  const aesKey = Buffer.from(crypto.createHash('md5').update(salt + key).digest('hex'), 'utf8');
-  const iv = Buffer.from(crypto.createHash('md5').update(key + salt).digest('hex').slice(0, 16), 'utf8');
+  const aesKey = Buffer.from(crypto.createHash('md5').update(salt + key, 'utf8').digest('hex').toLowerCase(), 'utf8');
+  const iv = Buffer.from(crypto.createHash('md5').update(key + salt, 'utf8').digest('hex').toLowerCase().slice(0, 16), 'utf8');
   const decipher = crypto.createDecipheriv('aes-256-cbc', aesKey, iv);
   const pt = Buffer.concat([decipher.update(Buffer.from(b64, 'base64')), decipher.final()]);
   process.stdout.write(pt.toString('utf8'));
@@ -99,11 +100,23 @@ def build_secure_token():
         },
         separators=(",", ":"),
     )
-    return subprocess.check_output(["node", "-e", NODE_CRYPTO_HELPER, "seal", payload]).decode()
+    p = subprocess.run(
+        ["node", "-e", NODE_CRYPTO_HELPER],
+        input=json.dumps({"mode": "seal", "payload": payload}).encode(),
+        capture_output=True,
+        check=True,
+    )
+    return p.stdout.decode()
 
 
 def decrypt_response(b64_data: str, key: str) -> str:
-    return subprocess.check_output(["node", "-e", NODE_CRYPTO_HELPER, "dec", b64_data, key]).decode()
+    p = subprocess.run(
+        ["node", "-e", NODE_CRYPTO_HELPER],
+        input=json.dumps({"mode": "dec", "data": b64_data, "key": key}).encode(),
+        capture_output=True,
+        check=True,
+    )
+    return p.stdout.decode()
 
 
 def http_req(url: str, method: str = "GET", headers: dict = None, body: bytes = None, timeout: int = 14, max_bytes: int = 1_500_000):
@@ -131,9 +144,16 @@ def api_call(path: str, method: str = "GET", form: dict = None):
         body = urllib.parse.urlencode(form).encode()
         hdrs["Content-Type"] = "application/x-www-form-urlencoded"
     st, _, _, raw = http_req(f"{API_ROOT}/{path.lstrip('/')}", method=method, headers=hdrs, body=body, timeout=15)
-    outer = json.loads(raw.decode("utf-8", errors="replace"))
-    if outer.get("encrypted") and isinstance(outer.get("data"), str):
-        return json.loads(decrypt_response(outer["data"], SESSION_KEY))
+    txt = raw.decode("utf-8", errors="replace").strip()
+    if not txt:
+        return {}
+    if not txt.startswith("{") and not txt.startswith("["):
+        dec = decrypt_response(txt, SESSION_KEY).strip()
+        outer = json.loads(dec)
+    else:
+        outer = json.loads(txt)
+        if outer.get("encrypted") and isinstance(outer.get("data"), str):
+            outer = json.loads(decrypt_response(outer["data"], SESSION_KEY))
     if isinstance(outer.get("data"), dict):
         return outer["data"]
     return outer
@@ -574,7 +594,7 @@ def main():
         "id": phony_id,
         "name": phony_detail.get("name"),
         "seasons": len(phony_seasons),
-        "episodes": [{"id": e["id"], "name": e["name"], "ep": e.get("episode_number")} for e in phony_eps],
+        "episodes": [{"id": e["id"], "title": e.get("title") or e.get("name")} for e in phony_eps],
     }
     report["star_one_detail"] = {
         "id": star_one_id,
@@ -586,7 +606,8 @@ def main():
     # 4. Run full watch & download multi-quality extraction across Phony, Star One, Anime, and Cartoon!
     targets = []
     for ep in phony_eps:
-        targets.append((f"Phony - {ep['name']} (ep_id={ep['id']})", f"episode/{ep['id']}/servers"))
+        ep_lbl = ep.get("title") or ep.get("name")
+        targets.append((f"Phony - {ep_lbl} (ep_id={ep['id']})", f"episode/{ep['id']}/servers"))
     targets.append((f"Star One (movie_id={star_one_id})", f"movie/{star_one_id}/servers"))
     targets.append(("Anime Series: Frieren S2 Ep 1 (ep_id=369392)", "episode/369392/servers"))
     targets.append(("Anime Movie: Hunter x Hunter Pilot (movie_id=27291)", "movie/27291/servers"))
