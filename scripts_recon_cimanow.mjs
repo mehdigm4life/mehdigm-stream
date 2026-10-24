@@ -1,5 +1,6 @@
 import fs from "fs";
-import crypto from "crypto";
+import os from "os";
+import path from "path";
 import { spawn, execFile } from "child_process";
 import { promisify } from "util";
 
@@ -25,31 +26,41 @@ function isCimaBlock(body) {
 }
 
 async function curlReq(url, opts = {}) {
-  const { proxy = null, referer = null, timeoutSec = 14 } = opts;
+  const {
+    proxy = null,
+    referer = null,
+    cookieJar = null,
+    method = "GET",
+    formBody = null,
+    headers = {},
+    follow = true,
+    timeoutSec = 15,
+  } = opts;
   const args = [
     "-sS",
     "-k",
     "--compressed",
-    "-L",
-    "--max-redirs",
-    "5",
     "--max-time",
     String(timeoutSec),
     "--connect-timeout",
     "7",
     "-A",
     UA,
-    "-w",
-    "\n__CURL_META__:%{http_code}|%{url_effective}",
   ];
+  if (follow) args.push("-L", "--max-redirs", "5");
+  if (method !== "GET") args.push("-X", method);
+  if (formBody !== null) args.push("--data-raw", formBody);
   if (proxy) args.push("-x", proxy.replace(/^socks5:\/\//, "socks5h://"));
   if (referer) args.push("-e", referer);
+  if (cookieJar) args.push("-b", cookieJar, "-c", cookieJar);
+  for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
+  args.push("-w", "\n__CURL_META__:%{http_code}|%{url_effective}|%{redirect_url}");
   args.push(url);
-  const { stdout } = await execFileAsync("curl", args, { maxBuffer: 25 * 1024 * 1024 });
+  const { stdout } = await execFileAsync("curl", args, { maxBuffer: 30 * 1024 * 1024 });
   const idx = stdout.lastIndexOf("\n__CURL_META__:");
   const text = idx >= 0 ? stdout.slice(0, idx) : stdout;
-  const [codeStr, effectiveUrl] = (idx >= 0 ? stdout.slice(idx + 15).trim() : "0|").split("|");
-  return { status: Number(codeStr) || 0, effectiveUrl, text };
+  const [codeStr, effectiveUrl, redirectUrl] = (idx >= 0 ? stdout.slice(idx + 15).trim() : "0||").split("|");
+  return { status: Number(codeStr) || 0, effectiveUrl, redirectUrl, text };
 }
 
 async function getWorkingProxies() {
@@ -66,27 +77,26 @@ async function getWorkingProxies() {
     } catch {}
   }
   const working = [];
-  for (let i = 0; i < candidates.length && working.length < 8; i += 25) {
+  for (let i = 0; i < candidates.length && working.length < 10; i += 25) {
     const batch = candidates.slice(i, i + 25);
     await Promise.all(
       batch.map(async (p) => {
-        if (working.length >= 8) return;
+        if (working.length >= 10) return;
         try {
-          const r1 = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 9 });
+          const t0 = Date.now();
+          const r1 = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 8 });
           if (r1.status === 200 && !isCimaBlock(r1.text) && r1.text.includes("cimanow")) {
-            const r2 = await curlReq("https://rm.freex2line.online/redirectingfree/", { proxy: p, timeoutSec: 9 });
-            if (r2.status > 0 && !r2.text.includes("Just a moment...")) {
-              working.push(p);
-            }
+            working.push({ proxy: p, ms: Date.now() - t0 });
           }
         } catch {}
       })
     );
   }
-  return working;
+  working.sort((a, b) => a.ms - b.ms);
+  return working.map((w) => w.proxy);
 }
 
-function decodeVaultToCtx(vaultHtml) {
+function decodeVaultHtml(vaultHtml) {
   const arrStart = vaultHtml.search(/window\["[^"]+"\]\s*=\s*\[/);
   const openBracket = arrStart >= 0 ? vaultHtml.indexOf("[", vaultHtml.indexOf("=", arrStart)) : -1;
   const arrEnd = openBracket >= 0 ? vaultHtml.indexOf("];", openBracket) : -1;
@@ -106,9 +116,9 @@ function decodeVaultToCtx(vaultHtml) {
       if (!ok) continue;
       const probe = Buffer.from(raw.slice(0, 96).map((v, i) => v ^ key[i % klen])).toString("utf8");
       if (probe.includes("<script>") && probe.includes("window.")) {
-        const topSlice = Buffer.from(raw.slice(0, 1200).map((v, i) => v ^ key[i % klen])).toString("utf8");
-        const topScript = topSlice.match(/<script>([\s\S]*?)<\/script>/i)?.[1] || "";
-        return { vaultKey: key.toString("utf8"), topScript };
+        const decoded = Buffer.from(raw.map((v, i) => v ^ key[i % klen])).toString("utf8");
+        const topScript = decoded.match(/<script>([\s\S]*?)<\/script>/i)?.[1] || "";
+        return { vaultKey: key.toString("utf8"), topScript, decodedHtml: decoded };
       }
     }
   }
@@ -147,7 +157,7 @@ class CDPClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`CDP timeout: ${method}`));
-      }, 22000);
+      }, 20000);
       this.pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
@@ -164,8 +174,33 @@ class CDPClient {
   }
 }
 
-async function runChromeFlow(item, proxyUrl, port) {
-  const userDataDir = `/tmp/chrome_cn_${port}_${Math.random().toString(36).slice(2)}`;
+async function fetchGatewayAssets(proxies) {
+  const assets = {
+    "https://rm.freex2line.online/dwcn/Assets/js/openads.js": "var zJSYdQ = true;",
+  };
+  const urls = [
+    "https://rm.freex2line.online/dwcn/Assets/js/jquery-1.8.3.js",
+    "https://rm.freex2line.online/dwcn/Assets/js/owl.carousel.min.js",
+    "https://rm.freex2line.online/dwcn/Assets/js/jquery.countdown360.min.js",
+    "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3",
+  ];
+  for (const u of urls) {
+    for (const p of [null, ...proxies.slice(0, 4)]) {
+      try {
+        const r = await curlReq(u, { proxy: p, timeoutSec: 10 });
+        if (r.status === 200 && r.text.length > 500 && !r.text.includes("<html")) {
+          assets[u] = r.text;
+          break;
+        }
+      } catch {}
+    }
+  }
+  return assets;
+}
+
+// Run LOCAL Chrome (NO proxy!) with Fetch.enable serving the decoded HTML & assets from memory in <50ms!
+async function evaluatePageInLocalChrome(targetUrl, htmlBody, assetsMap, port, waitForGetLink = false) {
+  const userDataDir = `/tmp/chrome_local_${port}_${Math.random().toString(36).slice(2)}`;
   const chromeBin = fs.existsSync("/usr/bin/google-chrome")
     ? "/usr/bin/google-chrome"
     : "/usr/bin/google-chrome-stable";
@@ -181,7 +216,6 @@ async function runChromeFlow(item, proxyUrl, port) {
       "--disable-blink-features=AutomationControlled",
       "--window-size=1280,800",
       `--user-agent=${UA}`,
-      `--proxy-server=${proxyUrl}`,
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       "about:blank",
@@ -189,18 +223,14 @@ async function runChromeFlow(item, proxyUrl, port) {
     { stdio: "ignore" }
   );
 
-  const reqMap = new Map();
   let cdp = null;
-  let blogPostVaultCtx = null;
-  let getLinkEvent = null;
-  let mintedWatchingUrl = "";
-  let rawWatchingHtmlSample = "";
-  const encodedStringsLog = [];
+  const cryptoLogs = [];
+  let interceptedGetLinkPost = null;
 
   try {
     let wsUrl = null;
     for (let i = 0; i < 30; i++) {
-      await sleep(300);
+      await sleep(250);
       try {
         const res = await fetch(`http://127.0.0.1:${port}/json/list`);
         const pages = await res.json();
@@ -208,228 +238,163 @@ async function runChromeFlow(item, proxyUrl, port) {
         if (page) { wsUrl = page.webSocketDebuggerUrl; break; }
       } catch {}
     }
-    if (!wsUrl) throw new Error("Chrome CDP failed to start");
+    if (!wsUrl) throw new Error("Local Chrome CDP failed to start");
 
     cdp = new CDPClient(wsUrl);
     await cdp.connect();
     await cdp.send("Page.enable");
-    await cdp.send("Network.enable");
     await cdp.send("Runtime.enable");
+    await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
 
-    // Intercept TextEncoder.prototype.encode + SubtleCrypto.prototype.importKey/sign via console.debug (does NOT touch XMLHttpRequest or window globals!)
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
       source: `
         try { delete Object.getPrototypeOf(navigator).webdriver; } catch (e) {}
         try {
-          const origEncode = TextEncoder.prototype.encode;
-          TextEncoder.prototype.encode = function(str) {
-            try {
-              if (typeof str === 'string' && str.length > 4 && str.length < 400) {
-                console.debug('__TE_ENC__:' + str);
-              }
-            } catch (e) {}
-            return origEncode.call(this, str);
+          const toHex = (buf) => {
+            const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf.buffer ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : buf);
+            let s = '', a = '';
+            for (let i = 0; i < u8.length; i++) {
+              s += u8[i].toString(16).padStart(2, '0');
+              a += (u8[i] >= 32 && u8[i] < 127) ? String.fromCharCode(u8[i]) : '.';
+            }
+            return { len: u8.length, hex: s.slice(0, 300), ascii: a.slice(0, 300) };
           };
+          if (window.SubtleCrypto) {
+            SubtleCrypto.prototype.importKey = new Proxy(SubtleCrypto.prototype.importKey, {
+              apply(target, thisArg, args) {
+                try {
+                  if (args[0] === 'raw' && args[1]) {
+                    console.debug('__CRYPTO__:' + JSON.stringify({ op: 'importKey', alg: args[2], key: toHex(args[1]) }));
+                  }
+                } catch (e) {}
+                return Reflect.apply(target, thisArg, args);
+              }
+            });
+            SubtleCrypto.prototype.sign = new Proxy(SubtleCrypto.prototype.sign, {
+              apply(target, thisArg, args) {
+                try {
+                  if (args[2]) {
+                    console.debug('__CRYPTO__:' + JSON.stringify({ op: 'sign', alg: args[0], data: toHex(args[2]) }));
+                  }
+                } catch (e) {}
+                return Reflect.apply(target, thisArg, args);
+              }
+            });
+            SubtleCrypto.prototype.digest = new Proxy(SubtleCrypto.prototype.digest, {
+              apply(target, thisArg, args) {
+                try {
+                  if (args[1]) {
+                    console.debug('__CRYPTO__:' + JSON.stringify({ op: 'digest', alg: args[0], data: toHex(args[1]) }));
+                  }
+                } catch (e) {}
+                return Reflect.apply(target, thisArg, args);
+              }
+            });
+          }
+          TextEncoder.prototype.encode = new Proxy(TextEncoder.prototype.encode, {
+            apply(target, thisArg, args) {
+              try {
+                if (typeof args[0] === 'string' && args[0].length > 2 && args[0].length < 400) {
+                  console.debug('__CRYPTO__:' + JSON.stringify({ op: 'encode', str: args[0] }));
+                }
+              } catch (e) {}
+              return Reflect.apply(target, thisArg, args);
+            }
+          });
         } catch (e) {}
       `,
     });
 
     cdp.on("Runtime.consoleAPICalled", (p) => {
-      if (p.type === "debug" && p.args?.[0]?.value?.startsWith?.("__TE_ENC__:")) {
-        const s = p.args[0].value.slice("__TE_ENC__:".length);
-        if (!encodedStringsLog.includes(s) && encodedStringsLog.length < 60) {
-          encodedStringsLog.push(s);
-        }
-      }
-    });
-
-    // Skip `href.li/__challenge` completely! Intercept navigation to `https://href.li/?...` or detect `loadon` finish!
-    cdp.on("Network.requestWillBeSent", (p) => {
-      reqMap.set(p.requestId, {
-        requestId: p.requestId,
-        type: p.type,
-        method: p.request.method,
-        url: p.request.url,
-        headers: p.request.headers,
-        postData: p.request.postData || null,
-      });
-    });
-
-    cdp.on("Network.loadingFinished", async (p) => {
-      const entry = reqMap.get(p.requestId);
-      if (!entry) return;
-      if (entry.url.endsWith("/2020/02/blog-post.html/")) {
+      if (p.type === "debug" && p.args?.[0]?.value?.startsWith?.("__CRYPTO__:")) {
         try {
-          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
-          const html = b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body;
-          blogPostVaultCtx = decodeVaultToCtx(html);
-        } catch {}
-      } else if (entry.url.includes("get-link.php")) {
-        try {
-          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
-          const txt = (b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body).trim();
-          getLinkEvent = {
-            url: entry.url,
-            method: entry.method,
-            headers: entry.headers,
-            postData: entry.postData,
-            respBody: txt,
-          };
-          if (txt.startsWith("http")) mintedWatchingUrl = txt;
-        } catch {}
-      } else if (entry.url.includes("/watching/")) {
-        try {
-          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
-          const html = b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body;
-          if (html.length > 5000) rawWatchingHtmlSample = html.slice(0, 6000);
+          const item = JSON.parse(p.args[0].value.slice("__CRYPTO__:".length));
+          if (cryptoLogs.length < 80) cryptoLogs.push(item);
         } catch {}
       }
     });
 
-    // Step 1: Load `shineUrl` (`loadon/?link=...`) just long enough to set `PHPSESSID`, then jump straight to `/redirectingfree/` (skipping `href.li`)!
-    await cdp.send("Page.navigate", { url: item.shineUrl, referrer: item.url });
-    for (let w = 0; w < 12; w++) {
-      await sleep(500);
-      const ck = await cdp.send("Network.getAllCookies");
-      if ((ck.cookies || []).some((c) => c.name === "PHPSESSID" && c.domain.includes("freex2line"))) {
-        break;
-      }
-    }
-    // Navigate directly to `/redirectingfree/` with empty referrer (just like href.li does)!
-    await cdp.send("Page.navigate", { url: "https://rm.freex2line.online/redirectingfree/", referrer: "" });
-
-    // Wait up to 20s for `get-link.php` to return `mintedWatchingUrl`!
-    for (let t = 0; t < 40; t++) {
-      await sleep(500);
-      if (mintedWatchingUrl) break;
-    }
-
-    if (!mintedWatchingUrl) {
-      return {
-        ok: false,
-        stage: "waiting_for_get_link_php",
-        proxyUsed: proxyUrl,
-        blogPostVaultCtx,
-        getLinkEvent,
-        encodedStringsLog,
-      };
-    }
-
-    // Step 2: Navigate directly to `mintedWatchingUrl` with Referer `https://rm.freex2line.online/2020/02/blog-post.html/`!
-    await cdp.send("Page.navigate", {
-      url: mintedWatchingUrl,
-      referrer: "https://rm.freex2line.online/2020/02/blog-post.html/",
-    });
-
-    let watchingData = null;
-    for (let t = 0; t < 20; t++) {
-      await sleep(750);
+    const normalizedTarget = new URL(targetUrl).href;
+    cdp.on("Fetch.requestPaused", async (p) => {
+      const u = p.request.url;
       try {
-        const evW = await cdp.send("Runtime.evaluate", {
-          expression: `(() => {
-            if (!document.querySelector('#watch')) return JSON.stringify({ ready: false, url: location.href, title: document.title, bodyLen: document.body ? document.body.innerHTML.length : 0 });
-            const tabs = [...document.querySelectorAll('#watch li')].map(li => ({
-              ariaLabel: li.getAttribute('aria-label') || '',
-              dataIndex: li.getAttribute('data-index') || '',
-              dataId: li.getAttribute('data-id') || '',
-              cls: li.className || '',
-              text: (li.innerText || li.textContent || '').trim(),
-              innerHtml: li.innerHTML.slice(0, 600)
-            }));
-            const dlUl = document.querySelector('#download');
-            const dlRawHtml = dlUl ? dlUl.outerHTML.slice(0, 10000) : '';
-            const downloads = [...document.querySelectorAll('#download li')].map(q => ({
-              ariaLabel: q.getAttribute('aria-label') || '',
-              text: (q.innerText || '').trim().slice(0, 300),
-              links: [...q.querySelectorAll('a[href]')].map(a => ({
-                href: a.href,
-                text: (a.innerText || a.textContent || '').trim()
-              }))
-            })).filter(d => d.links.length > 0);
-            const scripts = [...document.querySelectorAll('script')].map((s, idx) => ({
-              idx,
-              src: s.src || '',
-              id: s.id || '',
-              len: (s.innerHTML || '').length,
-              preview: (s.innerHTML || '').slice(0, 400)
-            }));
-            return JSON.stringify({
-              ready: true,
-              url: location.href,
-              title: document.title,
-              cookie: document.cookie,
-              hasGetCoreToken: typeof window._getCoreToken === 'function',
-              sampleCoreToken1: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
-              sampleCoreToken2: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
-              coreTokenFnSrc: typeof window._getCoreToken === 'function' ? window._getCoreToken.toString().slice(0, 3000) : null,
-              tabs,
-              dlRawHtml,
-              downloads,
-              scripts
-            });
-          })()`,
-          returnByValue: true,
-        });
-        if (evW?.result?.value) {
-          watchingData = JSON.parse(evW.result.value);
-          if (watchingData.ready) break;
+        if (u === normalizedTarget || u === targetUrl) {
+          await cdp.send("Fetch.fulfillRequest", {
+            requestId: p.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: "Content-Type", value: "text/html; charset=UTF-8" }],
+            body: Buffer.from(htmlBody, "utf8").toString("base64"),
+          });
+        } else if (u.includes("get-link.php")) {
+          interceptedGetLinkPost = {
+            url: u,
+            method: p.request.method,
+            headers: p.request.headers,
+            postData: p.request.postData || "",
+          };
+          await cdp.send("Fetch.fulfillRequest", {
+            requestId: p.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: "Content-Type", value: "text/plain; charset=UTF-8" }],
+            body: Buffer.from("https://cimanow.cc/watching/?token=dummy", "utf8").toString("base64"),
+          });
+        } else if (assetsMap[u]) {
+          await cdp.send("Fetch.fulfillRequest", {
+            requestId: p.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: "Content-Type", value: "application/javascript; charset=UTF-8" }],
+            body: Buffer.from(assetsMap[u], "utf8").toString("base64"),
+          });
+        } else {
+          const ct = u.endsWith(".js")
+            ? "application/javascript"
+            : u.endsWith(".css")
+            ? "text/css"
+            : "text/plain";
+          await cdp.send("Fetch.fulfillRequest", {
+            requestId: p.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: "Content-Type", value: ct }],
+            body: "",
+          });
         }
       } catch {}
-    }
+    });
 
-    // Step 3: Switch EVERY server tab via `core.php`!
-    let switchResults = [];
-    if (watchingData?.ready) {
-      const evSw = await cdp.send("Runtime.evaluate", {
-        expression: `(async () => {
-          const out = [];
-          const lis = [...document.querySelectorAll('#watch li[data-id]')].filter(
-            li => li.getAttribute('data-index') !== '00' && li.getAttribute('aria-label') !== 'embed'
-          );
-          if (lis[0]) {
-            const r0 = await fetch('/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=' + encodeURIComponent(lis[0].dataset.index) + '&id=' + encodeURIComponent(lis[0].dataset.id), {
-              headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            });
-            out.push({ testNoToken: true, status: r0.status, body: (await r0.text()).trim().slice(0, 500) });
+    await cdp.send("Page.navigate", { url: targetUrl });
+
+    if (waitForGetLink) {
+      for (let t = 0; t < 30; t++) {
+        await sleep(500);
+        if (interceptedGetLinkPost) break;
+      }
+      return { interceptedGetLinkPost, cryptoLogs };
+    } else {
+      await sleep(1500);
+      const ev = await cdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const hasFn = typeof window._getCoreToken === 'function';
+          let tokens = [], fnSrc = null;
+          if (hasFn) {
+            for (let i = 0; i < 16; i++) {
+              try { tokens.push(window._getCoreToken()); } catch (e) { tokens.push('ERR:' + e); break; }
+            }
+            try { fnSrc = window._getCoreToken.toString().slice(0, 3000); } catch (e) {}
           }
-          for (const li of lis) {
-            const tok = typeof window._getCoreToken === 'function' ? window._getCoreToken() : '';
-            const u = '/wp-content/themes/Cima%20Now%20New/core.php?token=' + encodeURIComponent(tok) + '&action=switch&index=' + encodeURIComponent(li.dataset.index) + '&id=' + encodeURIComponent(li.dataset.id);
-            const r = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            out.push({
-              name: (li.innerText || '').trim(),
-              index: li.dataset.index,
-              id: li.dataset.id,
-              tokenUsed: tok,
-              status: r.status,
-              body: (await r.text()).trim().slice(0, 600)
-            });
+          const winKeys = Object.keys(window).filter(k => /^(ctx_|map_|ptr_|_0x|_get|__)/.test(k));
+          const winVals = {};
+          for (const k of winKeys) {
+            try { winVals[k] = typeof window[k] === 'function' ? window[k].toString().slice(0, 500) : window[k]; } catch (e) {}
           }
-          return JSON.stringify(out);
+          return JSON.stringify({ hasFn, tokens, fnSrc, winKeys, winVals });
         })()`,
-        awaitPromise: true,
         returnByValue: true,
       });
-      if (evSw?.result?.value) switchResults = JSON.parse(evSw.result.value);
+      return {
+        evalResult: ev?.result?.value ? JSON.parse(ev.result.value) : null,
+        cryptoLogs,
+      };
     }
-
-    const ckEnd = await cdp.send("Network.getAllCookies");
-    const allBrowserCookies = (ckEnd.cookies || []).filter(
-      (c) => c.domain.includes("cimanow") || c.domain.includes("freex2line")
-    );
-
-    return {
-      ok: !!watchingData?.ready,
-      proxyUsed: proxyUrl,
-      blogPostVaultCtx,
-      getLinkEvent,
-      mintedWatchingUrl,
-      encodedStringsLog,
-      rawWatchingHtmlSample,
-      allBrowserCookies,
-      watchingData,
-      switchResults,
-    };
   } finally {
     if (cdp) cdp.close();
     try { proc.kill("SIGKILL"); } catch {}
@@ -437,11 +402,222 @@ async function runChromeFlow(item, proxyUrl, port) {
   }
 }
 
+function parseWatchingDom(html) {
+  const tabs = [];
+  const watchBlock = html.match(/<ul[^>]*id=["']watch["'][^>]*>([\s\S]*?)<\/ul>/i)?.[1] || "";
+  for (const m of watchBlock.matchAll(/<li\b([^>]*)>([\s\S]*?)<\/li>/gi)) {
+    const attrs = m[1];
+    const inner = m[2];
+    const dataId = attrs.match(/data-id=["']([^"']+)["']/i)?.[1] || "";
+    const dataIndex = attrs.match(/data-index=["']([^"']*)["']/i)?.[1] || "";
+    const ariaLabel = attrs.match(/aria-label=["']([^"']*)["']/i)?.[1] || "";
+    const text = inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const iframeSrc = inner.match(/<iframe[^>]+src=["']([^"']+)["']/i)?.[1] || "";
+    tabs.push({ ariaLabel, dataIndex, dataId, text, iframeSrc });
+  }
+
+  const dlPos = html.search(/id=["']download["']/i);
+  const dlRawSlice = dlPos >= 0 ? html.slice(Math.max(0, dlPos - 100), dlPos + 12000) : "";
+  const dlLinks = [];
+  if (dlRawSlice) {
+    for (const m of dlRawSlice.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      dlLinks.push({
+        href: m[1],
+        text: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+      });
+    }
+  }
+
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
+    idx,
+    attrs: m[1].trim(),
+    len: m[2].length,
+    preview: m[2].trim().slice(0, 600),
+  }));
+
+  return { tabs, dlLinks, dlRawSlice: dlRawSlice.slice(0, 6000), scripts };
+}
+
+async function processItem(item, proxies, assetsMap, idx) {
+  let lastErr = null;
+  for (const proxy of proxies.slice(0, 4)) {
+    const jar = path.join(os.tmpdir(), `cn_v13_${idx}_${Math.random().toString(36).slice(2)}.cookies`);
+    try {
+      const mv = await curlReq(item.url, { proxy, cookieJar: jar, referer: "https://cimanow.cc/home/" });
+      if (mv.status !== 200 || isCimaBlock(mv.text)) continue;
+      const shineUrl = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] || "";
+      if (!shineUrl) continue;
+
+      // 1) loadon -> sets PHPSESSID
+      const r1 = await curlReq(shineUrl, { proxy, cookieJar: jar, referer: item.url });
+      // 2) redirectingfree (no referer, skips href.li!)
+      const r2 = await curlReq("https://rm.freex2line.online/redirectingfree/", { proxy, cookieJar: jar });
+      // 3) blog-post.html/
+      const tFetchVault = Date.now();
+      const r3 = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/", {
+        proxy,
+        cookieJar: jar,
+        referer: "https://rm.freex2line.online/redirectingfree/",
+      });
+      const vault = decodeVaultHtml(r3.text);
+      if (!vault) continue;
+
+      // 4) Run decodedHtml in LOCAL Chrome (zero network!) to capture exact `get-link.php` POST + WebCrypto calls!
+      const localGateway = await evaluatePageInLocalChrome(
+        "https://rm.freex2line.online/2020/02/blog-post.html/",
+        vault.decodedHtml,
+        assetsMap,
+        9320 + idx * 2,
+        true
+      );
+      if (!localGateway.interceptedGetLinkPost?.postData) {
+        return {
+          ok: false,
+          stage: "local_gateway_no_post",
+          proxy,
+          topScript: vault.topScript,
+          localGateway,
+        };
+      }
+
+      // Ensure at least ~10.2s elapsed since blog-post.html/ was issued on server if server checks timestamp,
+      // wait — FIRST test immediate POST if <10s elapsed? Actually localGateway ALREADY waited ~10s for countdown!
+      const elapsedMs = Date.now() - tFetchVault;
+      const postRes = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/get-link.php", {
+        proxy,
+        cookieJar: jar,
+        method: "POST",
+        formBody: localGateway.interceptedGetLinkPost.postData,
+        referer: "https://rm.freex2line.online/2020/02/blog-post.html/",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: "https://rm.freex2line.online",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+
+      const mintedUrl = postRes.text.trim();
+      if (!mintedUrl.startsWith("http")) {
+        return {
+          ok: false,
+          stage: "get_link_php_rejected",
+          proxy,
+          elapsedMs,
+          topScript: vault.topScript,
+          localGateway,
+          postStatus: postRes.status,
+          postResp: postRes.text.slice(0, 600),
+          cookiesFile: fs.existsSync(jar) ? fs.readFileSync(jar, "utf8") : "",
+        };
+      }
+
+      // 5) Fetch `/watching/?token=...` via curl!
+      const watchRes = await curlReq(mintedUrl, {
+        proxy,
+        cookieJar: jar,
+        referer: "https://rm.freex2line.online/2020/02/blog-post.html/",
+      });
+      if (watchRes.status !== 200 || isCimaBlock(watchRes.text) || !watchRes.text.includes("id=\"watch\"")) {
+        return {
+          ok: false,
+          stage: "watching_fetch_failed",
+          proxy,
+          mintedUrl,
+          watchStatus: watchRes.status,
+          watchEffectiveUrl: watchRes.effectiveUrl,
+          watchPreview: watchRes.text.slice(0, 800),
+          topScript: vault.topScript,
+          localGateway,
+        };
+      }
+
+      const dom = parseWatchingDom(watchRes.text);
+
+      // 6) Evaluate `/watching/` HTML in LOCAL Chrome to capture `window._getCoreToken()` + WebCrypto calls!
+      const localWatch = await evaluatePageInLocalChrome(
+        mintedUrl,
+        watchRes.text,
+        assetsMap,
+        9321 + idx * 2,
+        false
+      );
+
+      // 7) Call `core.php?action=switch` for ALL tabs (first without token, then with `t1` / fresh tokens)!
+      const validTabs = dom.tabs.filter((t) => t.dataId && t.dataIndex !== "00" && t.ariaLabel !== "embed");
+      const switchResults = [];
+      if (validTabs[0]) {
+        const noTok = await curlReq(
+          `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=${encodeURIComponent(validTabs[0].dataIndex)}&id=${encodeURIComponent(validTabs[0].dataId)}`,
+          {
+            proxy,
+            cookieJar: jar,
+            referer: mintedUrl,
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          }
+        );
+        switchResults.push({
+          testNoToken: true,
+          status: noTok.status,
+          body: noTok.text.trim().slice(0, 500),
+        });
+      }
+
+      const tokList = localWatch.evalResult?.tokens || [];
+      for (let ti = 0; ti < validTabs.length; ti++) {
+        const tab = validTabs[ti];
+        const tokToUse = tokList[ti] || tokList[0] || "";
+        const sw = await curlReq(
+          `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?token=${encodeURIComponent(tokToUse)}&action=switch&index=${encodeURIComponent(tab.dataIndex)}&id=${encodeURIComponent(tab.dataId)}`,
+          {
+            proxy,
+            cookieJar: jar,
+            referer: mintedUrl,
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          }
+        );
+        switchResults.push({
+          name: tab.text,
+          index: tab.dataIndex,
+          id: tab.dataId,
+          tokenUsed: tokToUse,
+          status: sw.status,
+          body: sw.text.trim().slice(0, 600),
+        });
+      }
+
+      return {
+        ok: true,
+        proxy,
+        elapsedMs,
+        topScript: vault.topScript,
+        gatewayPostData: localGateway.interceptedGetLinkPost.postData,
+        gatewayCryptoLogs: localGateway.cryptoLogs,
+        mintedUrl,
+        cookiesAfterWatching: fs.existsSync(jar) ? fs.readFileSync(jar, "utf8") : "",
+        watchingLocalEval: localWatch.evalResult,
+        watchingCryptoLogs: localWatch.cryptoLogs,
+        tabs: dom.tabs,
+        dlLinks: dom.dlLinks,
+        dlRawSlice: idx === 0 ? dom.dlRawSlice : undefined,
+        watchingScripts: idx === 0 ? dom.scripts : undefined,
+        switchResults,
+      };
+    } catch (e) {
+      lastErr = String(e.stack || e);
+    } finally {
+      try { fs.rmSync(jar, { force: true }); } catch {}
+    }
+  }
+  return { ok: false, stage: "all_proxies_failed", lastErr };
+}
+
 async function main() {
   const out = {};
   try {
     const proxies = await getWorkingProxies();
     out.proxies = proxies;
+    const assetsMap = await fetchGatewayAssets(proxies);
+    out.loadedAssets = Object.keys(assetsMap);
 
     const items = [
       {
@@ -460,43 +636,14 @@ async function main() {
 
     out.items = {};
     for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      let shineUrl = "";
-      let workingP = proxies[0];
-      for (const p of proxies) {
-        try {
-          const mv = await curlReq(it.url, { proxy: p, referer: "https://cimanow.cc/home/" });
-          if (mv.status === 200 && !isCimaBlock(mv.text)) {
-            shineUrl = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] || "";
-            workingP = p;
-            if (shineUrl) break;
-          }
-        } catch {}
-      }
-      it.shineUrl = shineUrl;
-
-      let flowRes = null;
-      for (const candP of [workingP, ...proxies.filter((x) => x !== workingP)].slice(0, 2)) {
-        try {
-          flowRes = await runChromeFlow(it, candP, 9222 + i);
-          if (flowRes.ok) break;
-        } catch (e) {
-          flowRes = { ok: false, err: String(e.stack || e), proxyTried: candP };
-        }
-      }
-      if (i > 0 && flowRes?.watchingData) {
-        delete flowRes.watchingData.dlRawHtml;
-        delete flowRes.watchingData.scripts;
-        delete flowRes.rawWatchingHtmlSample;
-      }
-      out.items[it.name] = flowRes;
+      out.items[items[i].name] = await processItem(items[i], proxies, assetsMap, i);
     }
   } catch (e) {
     out.fatalError = String(e.stack || e);
   }
 
   fs.writeFileSync("cimanow_recon.json", JSON.stringify(out, null, 2));
-  console.log("Wrote v12 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
+  console.log("Wrote v13 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
 }
 
 main();
