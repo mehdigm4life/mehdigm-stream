@@ -10,6 +10,7 @@ class WitAnimePlugin : Plugin() {
         WitAnimeNetwork.init(context)
         registerMainAPI(WitAnime())
         registerExtractorAPI(WitAnimeVideasExtractor())
+        registerExtractorAPI(WitAnimeVideasFrExtractor())
         registerExtractorAPI(WitAnimeVideaExtractor())
         registerExtractorAPI(WitAnimeMegaExtractor())
         registerExtractorAPI(WitAnimeHgCloudExtractor())

@@ -240,18 +240,21 @@ jobs:
           def test_extract(item):
               kind, ver, q, sname, url, ref = item
               low = url.lower()
-              if "videas.com" in low:
-                  rh = requests.get(url, headers={"User-Agent": UA, "Referer": MAIN + "/"}, timeout=12).text
+              if "videas.com" in low or "videas.fr" in low:
+                  p_u = urlparse(url)
+                  v_org = f"{p_u.scheme}://{p_u.netloc}"
+                  norm_u = url.replace("/embed/media/", "/embed/")
+                  rh = requests.get(norm_u, headers={"User-Agent": UA, "Referer": MAIN + "/"}, timeout=12).text
                   cfg = json.loads(BeautifulSoup(rh, "html.parser").select_one("#videas-embed-config").string)
-                  rv = requests.get(f"https://app.videas.com/api/visitor/embed/{cfg['embedId']}/?viewer_id={uuid.uuid4()}",
-                      headers={"User-Agent": UA, "Accept": "application/json", "Referer": url, "X-Embed-Opening": cfg["opening"]}, timeout=12).json()
+                  rv = requests.get(f"{v_org}/api/visitor/embed/{cfg['embedId']}/?viewer_id={uuid.uuid4()}",
+                      headers={"User-Agent": UA, "Accept": "application/json", "Referer": norm_u, "Origin": v_org, "X-Embed-Opening": cfg["opening"]}, timeout=12).json()
                   uid = rv["items"][0]["asset"]["uid"]
-                  rp = requests.post("https://app.videas.com/api/visitor/playback/info/",
+                  rp = requests.post(f"{v_org}/api/visitor/playback/info/",
                       json={"asset_id": uid, "playback_token": rv["playback_token"], "session_id": rv["session_id"]},
-                      headers={"User-Agent": UA, "Referer": url, "Origin": "https://app.videas.com"}, timeout=12).json()
-                  m3u8 = urljoin("https://app.videas.com", rp["hls_url"]["url"])
-                  ok, code, head = probe_media(m3u8, {"Referer": "https://app.videas.com/"}, is_m3u8=True)
-                  return f"Videas[{q}] -> {ok} (HTTP {code}, {head[:25]})"
+                      headers={"User-Agent": UA, "Referer": norm_u, "Origin": v_org}, timeout=12).json()
+                  m3u8 = urljoin(v_org, rp["hls_url"]["url"])
+                  ok, code, head = probe_media(m3u8, {"Referer": v_org + "/"}, is_m3u8=True)
+                  return f"Videas[{q}] ({p_u.netloc}) -> {ok} (HTTP {code}, {head[:25]})"
 
               if "videa.hu" in low:
                   vid = parse_qs(urlparse(url).query)["v"][0]
@@ -305,12 +308,17 @@ jobs:
                   return f"Mp4Upload[{q}] -> {ok} (HTTP {code}, {head[:20]})"
 
               if "ok.ru" in low:
-                  ro = requests.get(url, headers={"User-Agent": UA, "Referer": "https://ok.ru/"}, timeout=12).text
+                  ro = requests.get(url.replace("/video/", "/videoembed/"), headers={"User-Agent": UA, "Referer": "https://ok.ru/"}, timeout=12).text
                   opts = json.loads(BeautifulSoup(ro, "html.parser").select_one("[data-options]")["data-options"])
-                  meta = json.loads(opts["flashvars"]["metadata"])
-                  vids = meta.get("videos", [])
-                  ok, code, head = probe_media(vids[-1]["url"], {"Referer": "https://ok.ru/"})
-                  return f"OkRu[{q}] ({[v['name'] for v in vids]}) -> {ok} (HTTP {code})"
+                  raw_m = opts["flashvars"]["metadata"]
+                  meta = raw_m if isinstance(raw_m, dict) else json.loads(raw_m)
+                  vids = [v for v in meta.get("videos", []) if not v.get("disallowed")]
+                  if vids:
+                      ok, code, head = probe_media(vids[-1]["url"], {"Referer": "https://ok.ru/"})
+                      return f"OkRu[{q}] ({[v['name'] for v in vids]}) -> {ok} (HTTP {code})"
+                  hls = meta.get("ondemandHls") or meta.get("hlsManifestUrl")
+                  ok, code, head = probe_media(hls, {"Referer": "https://ok.ru/"}, is_m3u8=True)
+                  return f"OkRu[{q}] (HLS) -> {ok} (HTTP {code})"
 
               if "4shared.com" in low:
                   fid = re.search(r'4shared\.com/(?:web/embed/file|embed|video|file|s)/([A-Za-z0-9_-]+)', url).group(1)
@@ -352,29 +360,42 @@ jobs:
 
               if "gofile.io" in low:
                   cid = url.rstrip("/").split("/")[-1]
-                  tok = requests.post("https://api.gofile.io/accounts", json={}, headers={"User-Agent": UA}, timeout=12).json()["data"]["token"]
-                  wt_js = requests.get("https://gofile.io/dist/js/config.js", headers={"User-Agent": UA}, timeout=12).text
-                  wt = re.search(r'appdata\.wt\s*=\s*["\']([^"\']+)["\']', wt_js).group(1)
-                  rc = requests.get(f"https://api.gofile.io/contents/{cid}?wt={wt}", headers={"User-Agent": UA, "Authorization": f"Bearer {tok}"}, timeout=12).json()
-                  ch = list(rc["data"]["children"].values())[0]
-                  if ch["name"].lower().endswith(".zip"):
+                  tok = requests.post("https://api.gofile.io/accounts", json={}, headers={"User-Agent": UA, "Origin": "https://gofile.io"}, timeout=12).json()["data"]["token"]
+                  bucket = int(time.time()) // 14400
+                  wt = hashlib.sha256(f"{UA}::ar::{tok}::{bucket}::12af056dacea0b".encode()).hexdigest()
+                  rc = requests.get(
+                      f"https://api.gofile.io/contents/{cid}?page=1&pageSize=100&sortField=name&sortDirection=1",
+                      headers={"User-Agent": UA, "Authorization": f"Bearer {tok}", "X-Website-Token": wt, "X-BL": "ar", "Origin": "https://gofile.io"},
+                      timeout=12
+                  ).json()
+                  d_obj = rc["data"]
+                  entries = [d_obj] if d_obj.get("type") == "file" else list((d_obj.get("children") or {}).values())
+                  ch = entries[0]
+                  if ch["name"].lower().endswith((".zip", ".rar", ".7z")):
                       return f"GoFile[{q}] -> SKIPPED_ARCHIVE ({ch['name']})"
                   ok, code, head = probe_media(ch["link"], {"Referer": "https://gofile.io/", "Cookie": f"accountToken={tok}"})
-                  return f"GoFile[{q}] ({ch['name']}) -> {ok} (HTTP {code})"
+                  return f"GoFile[{q}] ({ch['name']}) -> {ok} (HTTP {code}, {head[:20]})"
 
               if "workupload.com" in low:
                   fid = url.rstrip("/").split("/")[-1]
                   sw = requests.Session(); sw.headers.update({"User-Agent": UA})
                   rh = sw.get(url, timeout=12).text
                   if "solvePuzzle" in rh:
-                      pz = sw.get("https://workupload.com/puzzle", headers={"Accept": "application/json", "Referer": url}, timeout=12).json()["data"]
-                      sol = next(g for g in range(pz["range"]) if hashlib.sha256(f"0:{pz['puzzle']}:{g}".encode()).hexdigest().startswith("0"*pz["zeros"]))
-                      sw.post("https://workupload.com/captcha", data={"captcha": f"0:{pz['puzzle']}:{sol}"}, headers={"Referer": url}, timeout=12)
+                      pz = sw.get("https://workupload.com/puzzle", headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest", "Referer": url}, timeout=12).json()["data"]
+                      find_set = set(pz["find"])
+                      sols = []
+                      for i in range(pz["range"]):
+                          if hashlib.sha256((pz["puzzle"] + str(i)).encode()).hexdigest() in find_set:
+                              sols.append(str(i))
+                              if len(sols) >= len(find_set): break
+                      sw.post("https://workupload.com/captcha", data={"captcha": " ".join(sols) + " "}, headers={"X-Requested-With": "XMLHttpRequest", "Referer": url}, timeout=12)
                       rh = sw.get(url, headers={"Referer": url}, timeout=12).text
-                  if ".zip" in BeautifulSoup(rh, "html.parser").title.string.lower():
-                      return f"WorkUpload[{q}] -> SKIPPED_ARCHIVE"
-                  sw.get(f"https://workupload.com/start/{fid}", headers={"Referer": url}, timeout=12)
-                  dl = sw.get(f"https://workupload.com/api/file/getDownloadServer/{fid}", headers={"Referer": url, "X-Requested-With": "XMLHttpRequest"}, timeout=12).json()["data"]["url"]
+                  t_el = BeautifulSoup(rh, "html.parser").title
+                  if t_el and ".zip" in t_el.get_text().lower():
+                      return f"WorkUpload[{q}] -> SKIPPED_ARCHIVE ({t_el.get_text().strip()})"
+                  start_u = f"https://workupload.com/start/{fid}"
+                  sw.get(start_u, headers={"Referer": url}, timeout=12)
+                  dl = sw.get(f"https://workupload.com/api/file/getDownloadServer/{fid}", headers={"Referer": start_u, "X-Requested-With": "XMLHttpRequest"}, timeout=12).json()["data"]["url"]
                   ck = "; ".join(f"{k}={v}" for k, v in sw.cookies.get_dict().items())
                   ok, code, head = probe_media(dl, {"Referer": "https://workupload.com/", "Cookie": ck})
                   return f"WorkUpload[{q}] -> {ok} (HTTP {code}, {head[:20]})"

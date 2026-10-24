@@ -364,7 +364,7 @@ object WitAnimeExtractors {
         }
     }
 
-    // ── 1. Videas (`app.videas.com`) ─────────────────────────────────────────
+    // ── 1. Videas (`app.videas.com` & `app.videas.fr`) ───────────────────────
 
     suspend fun extractVideas(
         url: String,
@@ -374,8 +374,9 @@ object WitAnimeExtractors {
         callback: (ExtractorLink) -> Unit
     ) {
         val origin = originOf(url).ifBlank { "https://app.videas.com" }
-        val (_, html) = WitAnimeNetwork.httpGet(url, referer = "${WitAnimeNetwork.mainUrl}/") ?: return
-        val doc = Jsoup.parse(html, url)
+        val normalizedUrl = url.replace("/embed/media/", "/embed/")
+        val (_, html) = WitAnimeNetwork.httpGet(normalizedUrl, referer = "${WitAnimeNetwork.mainUrl}/") ?: return
+        val doc = Jsoup.parse(html, normalizedUrl)
 
         var embedId = ""
         var opening = ""
@@ -387,7 +388,7 @@ object WitAnimeExtractors {
             }
         }
         if (embedId.isEmpty()) {
-            embedId = Regex("""/embed/([0-9a-fA-F-]{20,})""").find(url)?.groupValues?.get(1).orEmpty()
+            embedId = Regex("""/embed/(?:media/)?([0-9a-fA-F-]{20,})""").find(url)?.groupValues?.get(1).orEmpty()
         }
         if (embedId.isEmpty()) return
 
@@ -964,9 +965,12 @@ object WitAnimeExtractors {
         if (optionsRaw.isBlank()) return
 
         val optionsJson = runCatching { JSONObject(optionsRaw) }.getOrNull() ?: return
-        val metadataStr = optionsJson.optJSONObject("flashvars")?.optString("metadata").orEmpty()
-        if (metadataStr.isBlank()) return
-        val meta = runCatching { JSONObject(metadataStr) }.getOrNull() ?: return
+        val flashvars = optionsJson.optJSONObject("flashvars") ?: return
+        val meta = flashvars.optJSONObject("metadata")
+            ?: flashvars.optString("metadata").takeIf { it.isNotBlank() }?.let { raw ->
+                runCatching { JSONObject(raw) }.getOrNull()
+            }
+            ?: return
 
         var emittedAny = false
         val videos = meta.optJSONArray("videos")
@@ -1044,7 +1048,14 @@ object WitAnimeExtractors {
         )
     }
 
-    // ── 9. GoFile (`gofile.io` — rejects `.zip` / `.rar` archives) ───────────
+    // ── 9. GoFile (`gofile.io` 2026 `X-Website-Token` + `.zip` filter) ───────
+
+    private fun generateGoFileWebsiteToken(accountToken: String, lang: String = "ar"): String {
+        val bucket = (System.currentTimeMillis() / 1000L) / 14_400L
+        val payload = "${WitAnimeNetwork.userAgent}::$lang::$accountToken::$bucket::12af056dacea0b"
+        val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(StandardCharsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 
     suspend fun extractGoFile(
         url: String,
@@ -1066,29 +1077,42 @@ object WitAnimeExtractors {
         }.getOrDefault("")
         if (token.isBlank()) return
 
-        val wt = runCatching {
-            val (_, js) = WitAnimeNetwork.httpGet("https://gofile.io/dist/js/config.js", referer = "https://gofile.io/")
-                ?: (0 to "")
-            Regex("""appdata\.wt\s*=\s*["']([^"']+)["']""").find(js)?.groupValues?.get(1)
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "4fd6sg89d7s6"
-
+        val wt = generateGoFileWebsiteToken(token, "ar")
         val (_, contentRaw) = WitAnimeNetwork.httpGet(
-            url = "https://api.gofile.io/contents/$contentId?wt=$wt",
+            url = "https://api.gofile.io/contents/$contentId?page=1&pageSize=100&sortField=name&sortDirection=1",
             referer = "https://gofile.io/",
             extraHeaders = mapOf(
                 "Authorization" to "Bearer $token",
+                "X-Website-Token" to wt,
+                "X-BL" to "ar",
                 "Origin" to "https://gofile.io"
             )
         ) ?: return
 
-        val children = runCatching {
-            JSONObject(contentRaw).optJSONObject("data")?.optJSONObject("children")
+        val dataObj = runCatching {
+            JSONObject(contentRaw).optJSONObject("data")
         }.getOrNull() ?: return
 
+        val fileEntries = mutableListOf<JSONObject>()
+        if (dataObj.optString("type") == "file") {
+            fileEntries.add(dataObj)
+        } else {
+            dataObj.optJSONObject("children")?.let { ch ->
+                val keys = ch.keys()
+                while (keys.hasNext()) {
+                    ch.optJSONObject(keys.next())?.let { fileEntries.add(it) }
+                }
+            }
+            dataObj.optJSONArray("children")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.let { fileEntries.add(it) }
+                }
+            }
+        }
+        if (fileEntries.isEmpty()) return
+
         val cookieHeader = "accountToken=$token"
-        val keys = children.keys()
-        while (keys.hasNext()) {
-            val child = children.optJSONObject(keys.next()) ?: continue
+        for (child in fileEntries) {
             val name = child.optString("name").lowercase()
             val link = child.optString("link").trim()
             val mimetype = child.optString("mimetype").lowercase()
@@ -1138,49 +1162,45 @@ object WitAnimeExtractors {
         val pageUrl = "https://workupload.com/file/$fileId"
         var (_, pageHtml) = WitAnimeNetwork.httpGet(pageUrl, clientOverride = wuClient) ?: return@withContext
 
-        // Solve WorkUpload SHA-256 Proof-of-Work challenge if prompted
+        // Solve WorkUpload SHA-256 Proof-of-Work (`data.puzzle` + `data.find` + `data.range`)
         if (pageHtml.contains("solvePuzzle") || pageHtml.contains("/puzzle")) {
             val (_, puzRaw) = WitAnimeNetwork.httpGet(
                 url = "https://workupload.com/puzzle",
                 referer = pageUrl,
-                extraHeaders = mapOf("Accept" to "application/json"),
+                extraHeaders = mapOf(
+                    "Accept" to "application/json",
+                    "X-Requested-With" to "XMLHttpRequest"
+                ),
                 clientOverride = wuClient
             ) ?: return@withContext
 
             val puzData = runCatching { JSONObject(puzRaw).optJSONObject("data") }.getOrNull() ?: return@withContext
             val puzzle = puzData.optString("puzzle")
             val range = puzData.optInt("range", 50_000).coerceAtMost(250_000)
-            val zeros = puzData.optInt("zeros", 3)
-            val prefix = "0".repeat(zeros)
+            val findArr = puzData.optJSONArray("find")
 
-            if (puzzle.isNotEmpty()) {
+            if (puzzle.isNotEmpty() && findArr != null && findArr.length() > 0) {
+                val findSet = HashSet<String>(findArr.length())
+                for (i in 0 until findArr.length()) {
+                    val target = findArr.optString(i).lowercase().trim()
+                    if (target.isNotEmpty()) findSet.add(target)
+                }
                 val md = MessageDigest.getInstance("SHA-256")
-                var solution: Int? = null
-                for (g in 0..range) {
-                    val digest = md.digest("0:$puzzle:$g".toByteArray(StandardCharsets.UTF_8))
-                    // Quick check on leading hex nibbles before formatting full hex string
-                    var ok = true
-                    for (z in 0 until zeros) {
-                        val b = digest[z / 2].toInt() and 0xFF
-                        val nibble = if (z % 2 == 0) (b ushr 4) else (b and 0x0F)
-                        if (nibble != 0) {
-                            ok = false
-                            break
-                        }
-                    }
-                    if (ok) {
-                        val hex = digest.joinToString("") { "%02x".format(it) }
-                        if (hex.startsWith(prefix)) {
-                            solution = g
-                            break
-                        }
+                val solutions = ArrayList<String>(findSet.size)
+                for (i in 0 until range) {
+                    val digest = md.digest((puzzle + i.toString()).toByteArray(StandardCharsets.UTF_8))
+                    val hex = digest.joinToString("") { "%02x".format(it) }
+                    if (hex in findSet) {
+                        solutions.add(i.toString())
+                        if (solutions.size >= findSet.size) break
                     }
                 }
-                if (solution != null) {
+                if (solutions.isNotEmpty()) {
                     WitAnimeNetwork.httpPostForm(
                         url = "https://workupload.com/captcha",
-                        fields = mapOf("captcha" to "0:$puzzle:$solution"),
+                        fields = mapOf("captcha" to (solutions.joinToString(" ") + " ")),
                         referer = pageUrl,
+                        extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
                         clientOverride = wuClient
                     )
                     pageHtml = WitAnimeNetwork.httpGet(pageUrl, referer = pageUrl, clientOverride = wuClient)?.second.orEmpty()
@@ -1195,10 +1215,11 @@ object WitAnimeExtractors {
             return@withContext
         }
 
-        WitAnimeNetwork.httpGet("https://workupload.com/start/$fileId", referer = pageUrl, clientOverride = wuClient)
+        val startUrl = "https://workupload.com/start/$fileId"
+        WitAnimeNetwork.httpGet(startUrl, referer = pageUrl, clientOverride = wuClient)
         val (_, srvRaw) = WitAnimeNetwork.httpGet(
             url = "https://workupload.com/api/file/getDownloadServer/$fileId",
-            referer = pageUrl,
+            referer = startUrl,
             extraHeaders = mapOf(
                 "Accept" to "application/json",
                 "X-Requested-With" to "XMLHttpRequest"
@@ -1335,7 +1356,7 @@ object WitAnimeExtractors {
 
 // ── Standalone CloudStream ExtractorApi Registrations ────────────────────────
 
-class WitAnimeVideasExtractor : ExtractorApi() {
+open class WitAnimeVideasExtractor : ExtractorApi() {
     override val name = "Videas"
     override val mainUrl = "https://app.videas.com"
     override val requiresReferer = false
@@ -1348,6 +1369,11 @@ class WitAnimeVideasExtractor : ExtractorApi() {
     ) {
         WitAnimeExtractors.extractVideas(url, subtitleCallback = subtitleCallback, callback = callback)
     }
+}
+
+class WitAnimeVideasFrExtractor : WitAnimeVideasExtractor() {
+    override val name = "VideasFr"
+    override val mainUrl = "https://app.videas.fr"
 }
 
 class WitAnimeVideaExtractor : ExtractorApi() {
