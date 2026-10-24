@@ -7,8 +7,9 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class AnimeDayPlugin : Plugin() {
     override fun load(context: Context) {
-        AnimeDay.appContext = context.applicationContext ?: context
         registerMainAPI(AnimeDay())
-        registerExtractorAPI(GooglePhotosExtractor())
+        registerExtractorAPI(AnimeDayGooglePhotosExtractor())
+        registerExtractorAPI(AnimeDayVidaraExtractor())
+        registerExtractorAPI(AnimeDayCloudWorkerExtractor())
     }
 }

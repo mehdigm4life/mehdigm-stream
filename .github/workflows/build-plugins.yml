@@ -3,6 +3,8 @@ name: Build Plugins
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - 'arena/d5505930-mehdigm-stream'
     paths:
       - 'CimaCloud/**'
       - 'AnimeDay/**'
