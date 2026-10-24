@@ -1,4 +1,4 @@
-Found 19 verified 2-step proxies: ['http://103.180.126.90:8080', 'socks5h://178.252.74.29:1081', 'socks5h://45.74.31.41:10520', 'socks5h://45.74.31.46:9589', 'socks5h://171.245.71.144:1028', 'socks4://105.214.90.100:5678']
+Found 13 verified 2-step proxies: ['http://175.184.236.2:1111', 'socks4://203.77.239.219:50574', 'http://200.110.218.11:999', 'socks5h://171.245.71.217:1105', 'socks5h://72.255.38.180:1080', 'socks5h://45.74.31.42:7995']
 
 === TEST 1: Catalog, Pagination & Search ===
 Home /: status=200, latest_ep_cards=12
@@ -18,6 +18,6 @@ Movie detail watch link: https://witanime.site/watch/movie/boku-no-kokoro-no-yab
 
 === USER PRIMARY TARGET: Tokyo Revengers Santen Sensou-hen Ep 4 (https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4) ===
 Traceback (most recent call last):
-  File "<stdin>", line 385, in <module>
-  File "<stdin>", line 156, in resolve_all_gates
+  File "<stdin>", line 395, in <module>
+  File "<stdin>", line 166, in resolve_all_gates
 AssertionError: Could not open watch session for https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4
