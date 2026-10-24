@@ -1,0 +1,1094 @@
+{
+  "config": {
+    "data": [
+      {
+        "cimacloud": "https://www.cima-cloud.com",
+        "cloudday": "https://1654865.xyz",
+        "splash_screen": "",
+        "update_title": "يتوفر تحديث جديد لي سيما كلاود والذي يوفر العديد من الميزات الجديدة *ملاحظة: - التحميل من الموقع الرسمي",
+        "update": "",
+        "ads_link": "https://t.me/cimacloudcontent",
+        "ads_image": "8",
+        "btn_txt": "تابعنا",
+        "txt_ads": "اشترك في قناتنا على تيليجرام لتصلك آخر التحديثات، الإضافات الجديدة، والتنبيهات المهمة أولاً بأول.",
+        "alert_text": "انضم إلينا على تيليجرام",
+        "show_dialog": "show",
+        "animeday": "https://anime-day.com",
+        "telegram": "https://t.me/cimacloudcontent",
+        "youtube": "https://youtube.com/@cimacloudcontent",
+        "email": "cimacloudcontact@gmail.com",
+        "appkey_applovin": "674fe61dc1806951",
+        "checkadsvideo": "",
+        "ad_interval_minutes": "15",
+        "packageName": "com.video.power",
+        "action_video": "video.power",
+        "name_video": "Video Power",
+        "check_video": "2",
+        "check_ads": "",
+        "tv_free_watch": "free",
+        "check_install_source": "show",
+        "no_play_store_internal": "show",
+        "extractorUrl": "https://cloud-day.online/cimacloud/extractor.php",
+        "checkads_noplay": "show",
+        "checkadsvideo_noplay": "show",
+        "htmlExtractorUrl": "https://cloud-day.online/cimacloud/html_extractor.php",
+        "checkads_ep_nav": "",
+        "advancedExtractorUrl": "https://cloud-day.online/cimacloud/advanced_extractor.php",
+        "original_app_url": "https://www.cima-cloud.com",
+        "unity_game_id": "5850762",
+        "unity_placement_id": "Interstitial_Android",
+        "unity_test_mode": "",
+        "ads_priority": "applovin",
+        "check_applovin": "",
+        "check_unity": "",
+        "player_version_code": "28",
+        "player_force_update": ""
+      }
+    ]
+  },
+  "api_base": "https://1654865.xyz/v1.3/api",
+  "search_probes": {
+    "search_star_one": {
+      "http": 200,
+      "total": 2,
+      "total_pages": 1,
+      "has_more": false,
+      "count": 2,
+      "sample": [
+        {
+          "id": "27295",
+          "type": "movie",
+          "name": "Star One",
+          "dub": false,
+          "categories": [
+            {
+              "id": 4,
+              "name": "أفلام أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 5,
+              "name": "حركة"
+            },
+            {
+              "id": 12,
+              "name": "خيال علمي"
+            }
+          ]
+        },
+        {
+          "id": "26969",
+          "type": "movie",
+          "name": "Rogue One: A Star Wars Story",
+          "dub": false,
+          "categories": [
+            {
+              "id": 4,
+              "name": "أفلام أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 5,
+              "name": "حركة"
+            },
+            {
+              "id": 12,
+              "name": "خيال علمي"
+            },
+            {
+              "id": 30,
+              "name": "مغامرات"
+            }
+          ]
+        }
+      ]
+    },
+    "search_phony": {
+      "http": 200,
+      "total": 9,
+      "total_pages": 1,
+      "has_more": false,
+      "count": 9,
+      "sample": [
+        {
+          "id": "12827",
+          "type": "series",
+          "name": "Phony",
+          "dub": false,
+          "categories": [
+            {
+              "id": 3,
+              "name": "مسلسلات أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 1,
+              "name": "كوميديا"
+            },
+            {
+              "id": 2,
+              "name": "دراما"
+            },
+            {
+              "id": 7,
+              "name": "غموض"
+            }
+          ]
+        },
+        {
+          "id": "19923",
+          "type": "movie",
+          "name": "Sinphony: A Clubhouse Horror Anthology 2022",
+          "dub": false,
+          "categories": [
+            {
+              "id": 4,
+              "name": "أفلام أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 25,
+              "name": "رعب"
+            }
+          ]
+        },
+        {
+          "id": "19589",
+          "type": "movie",
+          "name": "American Symphony",
+          "dub": false,
+          "categories": [
+            {
+              "id": 4,
+              "name": "أفلام أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 10,
+              "name": "وثائقي"
+            },
+            {
+              "id": 119,
+              "name": "موسيقى"
+            }
+          ]
+        }
+      ]
+    },
+    "empty_type0_p1": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "empty_type1_p1": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "empty_type2_p1": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "empty_type3_p1": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat5_category": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat5_category_id": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat5_categories": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat6_category": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat6_categories": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat1_turkish_series": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat2_turkish_movies": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat3_foreign_series": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat4_foreign_movies": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat7_korean_series": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat8_korean_movies": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat9_indian_series": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat10_indian_movies": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat11_asian_series": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat12_asian_movies": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat13_probe": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat14_probe": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat15_probe": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "cat16_probe": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "genre16_animation": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "genres16_animation": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "dub_1": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "sort_2": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "sort_3": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    },
+    "sort_4": {
+      "http": 200,
+      "total": null,
+      "total_pages": null,
+      "has_more": null,
+      "count": 0,
+      "sample": []
+    }
+  },
+  "get_probes": {
+    "GET /movies?page=2": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "results",
+          "count",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "has_more"
+        ],
+        "total": 27261,
+        "count": 10,
+        "first": {
+          "id": "27295",
+          "type": "movie",
+          "name": "Star One",
+          "poster": "https://image.tmdb.org/t/p/w500/mLAxffrOZkghXrmf98MZniy5prL.jpg",
+          "backdrop": "https://image.tmdb.org/t/p/w780/vvewgbvvGRdyAObIt7COfdd48I4.jpg",
+          "overview": "يتحدى طاقم جريء على متن السفينة الأسطورية Star One النظام القمعي في قصة شاملة عن التمرد والاكتشاف والكفاح من أجل الحرية عبر النجوم.",
+          "release_date": "2026-07-03",
+          "year": 2026,
+          "vote_average": "0.0",
+          "created_at": "2026-10-23 22:26:38",
+          "dub": false,
+          "categories": [
+            {
+              "id": 4,
+              "name": "أفلام أجنبية"
+            }
+          ],
+          "genres": [
+            {
+              "id": 5,
+              "name": "حركة"
+            },
+            {
+              "id": 12,
+              "name": "خيال علمي"
+            }
+          ],
+          "is_favorite": false
+        }
+      },
+      "preview": null
+    },
+    "GET /series?page=2": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "results",
+          "count",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "has_more"
+        ],
+        "total": 12788,
+        "count": 10,
+        "first": {
+          "id": "12830",
+          "type": "series",
+          "name": "كايجودو: نهضة أسياد المبارزة",
+          "poster": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+          "backdrop": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+          "overview": "Kaijudo هي قصة رايدن بيرس أوكاموتو، المعروف أيضًا باسم راي، وهو صبي موهوب يبلغ من العمر 14 عامًا، والعالمين اللذين يعيش فيهما. أحدهما هو العالم الحقيقي الذي يشبه إلى حد كبير عالمنا، والآخر هو عالم خيالي من المخلوقات، عالم موازٍ يتكون من خمس حضارات، لا يمكن رؤيتها إلا لقلة مختارة...",
+          "release_date": "2012-06-02",
+          "year": 2012,
+          "vote_average": "7.4",
+          "created_at": "2026-10-23 23:45:27",
+          "dub": false,
+          "categories": [
+            {
+              "id": 5,
+              "name": "مسلسلات أنمي وكرتون"
+            }
+          ],
+          "genres": [
+            {
+              "id": 16,
+              "name": "رسوم متحركة"
+            },
+            {
+              "id": 217,
+              "name": "خيال علمي وفانتازيا"
+            },
+            {
+              "id": 390,
+              "name": "حركة ومغامرة"
+            },
+            {
+              "id": 408,
+              "name": "أطفال"
+            }
+          ],
+          "is_favorite": false
+        }
+      },
+      "preview": null
+    },
+    "POST /movies": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "results",
+          "count",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "has_more"
+        ],
+        "total": 3017,
+        "count": 10,
+        "first": {
+          "id": "27291",
+          "type": "movie",
+          "name": "Hunter × Hunter Pilot",
+          "poster": "https://image.tmdb.org/t/p/w500/Aw4XNtFlLS3DbirjjG7gycBUQLv.jpg",
+          "backdrop": "https://image.tmdb.org/t/p/w780/y1jw0NR5vjQVmZon0N1BIV8FXIH.jpg",
+          "overview": "غون فريكس فتى صغير يعيش في جزيرة الحوت ويحلم بأن يصبح «هانتر» مثل والده الشهير الذي غاب منذ زمن. تعارض عمته ميتو هذا القرار، لكنها تعده بأنها ستسمح له بتقديم طلبه لامتحان الهانتر إذا تمكن من اصطياد السمكة الأسطورية العملاقة المعروفة باسم «سيد المستنقع».\r\n\r\nينجح غون أخيراً في صيدها ويعود بها إلى ميتو فتفي بوعدها على مضض. بعد وداعها ووداع صديقه من الثعالب-الدببة «كون»، يركب سفينة متجهة إلى البر الرئيسي حيث يخوض أول اختبار تمهيدي ينظمه قبطان السفينة. وخلال الرحلة يلتقي بمرشحين آخرين للامتحان هما ليوريو وكورابيكا، ويقاتل معهم وحوشاً بحرية ضخمة تهاجم السفينة، لتكون هذه البداية لأولى الصعوبات العديدة التي سيواجهها في الامتحان الخطير الذي يمنح الناجحين امتيازات وفرص سفر لا يحظى بها إلا القليلون.",
+          "release_date": "1998-07-26",
+          "year": 1998,
+          "vote_average": "8.4",
+          "created_at": "2026-10-21 01:34:15",
+          "dub": false,
+          "categories": [
+            {
+              "id": 6,
+              "name": "أفلام أنمي وكرتون"
+            }
+          ],
+          "genres": [
+            {
+              "id": 5,
+              "name": "حركة"
+            },
+            {
+              "id": 16,
+              "name": "رسوم متحركة"
+            },
+            {
+              "id": 409,
+              "name": "فانتازيا"
+            },
+            {
+              "id": 410,
+              "name": "مغامرة"
+            }
+          ],
+          "is_favorite": false
+        }
+      },
+      "preview": null
+    },
+    "POST /series": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "results",
+          "count",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "has_more"
+        ],
+        "total": 5015,
+        "count": 10,
+        "first": {
+          "id": "12830",
+          "type": "series",
+          "name": "كايجودو: نهضة أسياد المبارزة",
+          "poster": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+          "backdrop": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+          "overview": "Kaijudo هي قصة رايدن بيرس أوكاموتو، المعروف أيضًا باسم راي، وهو صبي موهوب يبلغ من العمر 14 عامًا، والعالمين اللذين يعيش فيهما. أحدهما هو العالم الحقيقي الذي يشبه إلى حد كبير عالمنا، والآخر هو عالم خيالي من المخلوقات، عالم موازٍ يتكون من خمس حضارات، لا يمكن رؤيتها إلا لقلة مختارة...",
+          "release_date": "2012-06-02",
+          "year": 2012,
+          "vote_average": "7.4",
+          "created_at": "2026-10-23 23:45:27",
+          "dub": false,
+          "categories": [
+            {
+              "id": 5,
+              "name": "مسلسلات أنمي وكرتون"
+            }
+          ],
+          "genres": [
+            {
+              "id": 16,
+              "name": "رسوم متحركة"
+            },
+            {
+              "id": 217,
+              "name": "خيال علمي وفانتازيا"
+            },
+            {
+              "id": 390,
+              "name": "حركة ومغامرة"
+            },
+            {
+              "id": 408,
+              "name": "أطفال"
+            }
+          ],
+          "is_favorite": false
+        }
+      },
+      "preview": null
+    },
+    "GET /anime?page=1": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "GET /cartoon?page=1": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "GET /genres": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "GET /list": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "POST /filter": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "GET /section/3?page=1": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "section_id",
+          "section_name",
+          "section_type",
+          "page",
+          "per_page",
+          "has_more",
+          "section_items"
+        ],
+        "total": null,
+        "count": 0,
+        "first": null
+      },
+      "preview": null
+    },
+    "GET /sections/3?page=1": {
+      "http": 404,
+      "parsed": null,
+      "preview": "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    },
+    "GET /home?page=2": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "sections"
+        ],
+        "total": null,
+        "count": 0,
+        "first": null
+      },
+      "preview": null
+    },
+    "GET /series/12819/episodes": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "seasons"
+        ],
+        "total": null,
+        "count": 1,
+        "first": {
+          "id": "1",
+          "season_number": "1",
+          "title": "الموسم 1",
+          "episodes": [
+            {
+              "id": "369392",
+              "title": "الحلقة 1",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "369393",
+              "title": "الحلقة 2",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "369394",
+              "title": "الحلقة 3",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "369395",
+              "title": "الحلقة 4",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "369396",
+              "title": "الحلقة 5",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "369397",
+              "title": "الحلقة 6",
+              "name": "فريرن: ما وراء نهاية الرحلة",
+              "cover": "https://image.tmdb.org/t/p/original/cHhJzdUGcEBq6av4wr9jsIvUITH.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/rBOnrVlck7BIlGeWVlzYiZeg4l2.jpg",
+              "filer": false,
+              "watched": false
+            }
+          ]
+        }
+      },
+      "preview": null
+    },
+    "GET /series/12830/episodes": {
+      "http": 200,
+      "parsed": {
+        "keys": [
+          "status",
+          "auth",
+          "version",
+          "force_update",
+          "name",
+          "email",
+          "photo_url",
+          "is_subscribed",
+          "created_date",
+          "data",
+          "seasons"
+        ],
+        "total": null,
+        "count": 2,
+        "first": {
+          "id": "1",
+          "season_number": "1",
+          "title": "الموسم 1",
+          "episodes": [
+            {
+              "id": "370424",
+              "title": "الحلقة 1",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370425",
+              "title": "الحلقة 2",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370426",
+              "title": "الحلقة 3",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370427",
+              "title": "الحلقة 4",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370428",
+              "title": "الحلقة 5",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370429",
+              "title": "الحلقة 6",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370430",
+              "title": "الحلقة 7",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370431",
+              "title": "الحلقة 8",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370432",
+              "title": "الحلقة 9",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370433",
+              "title": "الحلقة 10",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370434",
+              "title": "الحلقة 11",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370435",
+              "title": "الحلقة 12",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370436",
+              "title": "الحلقة 13",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370437",
+              "title": "الحلقة 14",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370438",
+              "title": "الحلقة 15",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370439",
+              "title": "الحلقة 16",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370440",
+              "title": "الحلقة 17",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370441",
+              "title": "الحلقة 18",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370442",
+              "title": "الحلقة 19",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370443",
+              "title": "الحلقة 20",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370444",
+              "title": "الحلقة 21",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370445",
+              "title": "الحلقة 22",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370446",
+              "title": "الحلقة 23",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370447",
+              "title": "الحلقة 24",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370448",
+              "title": "الحلقة 25",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            },
+            {
+              "id": "370449",
+              "title": "الحلقة 26",
+              "name": "كايجودو: نهضة أسياد المبارزة",
+              "cover": "https://image.tmdb.org/t/p/w500/7PEMnnNh8oyciyvffMoxNwNcMjG.jpg",
+              "image": "https://image.tmdb.org/t/p/w780/oDeNcoMVQF0w5lZZyvRvhF0BQ3g.jpg",
+              "filer": false,
+              "watched": false
+            }
+          ]
+        }
+      },
+      "preview": null
+    }
+  }
+}
