@@ -1,181 +1,41 @@
 {
   "proxies": [
-    "socks5://199.66.182.243:4145",
+    "socks5://193.25.215.182:22222",
     "socks5://199.66.182.232:4145",
-    "socks5://184.178.172.5:15303",
-    "socks5://184.178.172.25:15291",
+    "socks5://199.66.182.243:4145",
     "socks5://184.178.172.18:15280",
-    "socks5://70.166.167.38:57728",
+    "socks5://184.178.172.5:15303",
     "socks5://72.195.34.42:4145",
+    "socks5://184.178.172.25:15291",
+    "socks5://70.166.167.38:57728",
     "socks5://72.195.34.35:27360",
     "socks5://70.166.65.160:4145",
-    "socks5://193.25.215.182:22222",
     "socks5://66.42.224.229:41679",
     "socks5://69.61.200.104:36181",
     "socks5://208.102.51.6:58208",
-    "socks5://45.74.31.46:8557"
+    "socks5://45.74.31.42:7744",
+    "socks5://45.74.31.46:8257"
   ],
-  "jetloadTest": {
-    "neededWait": true,
-    "gl0Body": "Access Denied: Please wait for the countdown to finish.",
-    "finalUrl": "https://cdn1.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-1080p.mp4?t=94656ab91badd7dcce784b85b22ab96cccd3578f2ff69fe6ba4dcf8f72a90cf2",
-    "withRef": {
-      "status": 206,
-      "ct": "application/octet-stream"
-    },
-    "noRef": {
-      "status": 206,
-      "ct": "application/octet-stream"
-    }
-  },
   "items": {
-    "ForeignMovie_Fall2": {
-      "ok": true,
-      "proxy": "socks5://199.66.182.243:4145",
-      "coreToken": "d224f3b047d641a53111e7a19b7091c688038510dbfeca943dbe964114b13c25",
-      "initialEmbed": "https://vkvideo.ru/video_ext.php?oid=-241538668&id=456239113",
-      "serverEmbeds": [
-        {
-          "name": "Upnshare",
-          "index": "66",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "https://cimanow.upns.online/#otni3k",
-          "rawSample": "<iframe id=\"cn_fr_02bd5628\" src=\"about:blank\" data-cnk=\"633637376630323664653663303836346663363863613432\" data-cna=\"12.86.98.105.46.66.72.123.104.112.210.148.253.231.252.208.196.247.169.181.70.22.127.108.53.20.11.126.54."
-        },
-        {
-          "name": "Filemoon",
-          "index": "32",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "https://bysetayico.com/e/7qblfeeagurb",
-          "rawSample": "<iframe id=\"cn_fr_1c1f1ecc\" src=\"about:blank\" data-cnk=\"383538306231643863363364396236346662623734623465\" data-cna=\"87.85.109.110.42.67.30.117.110.51.201.151.238.179.242.151.210.233.189.170.80.23.62.50.40.78.16.52.125.21"
-        },
-        {
-          "name": "OK",
-          "index": "7",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "//ok.ru/videoembed/16926417947330",
-          "rawSample": "<iframe id=\"cn_fr_724af754\" src=\"about:blank\" data-cnk=\"366364346634396533343333396565643233396161616239\" data-cna=\"30.88.42.113.115.14.25.40.42.33.222.192.245.176.181.204.128.179.231.174.92.64.117.61.61.30.10.107.33.131"
-        },
-        {
-          "name": "VK",
-          "index": "30",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "https://vkvideo.ru/video_ext.php?oid=-241538668&id=456239113",
-          "rawSample": "<iframe id=\"cn_fr_497ccf62\" src=\"about:blank\" data-cnk=\"623139393436363961613639326432313036396165636435\" data-cna=\"13.81.108.103.124.68.76.116.120.118.201.198.245.177.224.213.149.167.231.233.7.31.36.104.2.24.24.43.105.1"
-        },
-        {
-          "name": "Uqload",
-          "index": "12",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "https://uqload.is/embed-t7di87nyb0c8.html",
-          "rawSample": "<iframe id=\"cn_fr_c7b18092\" src=\"about:blank\" data-cnk=\"653961613038323331653738386666616432623530643730\" data-cna=\"10.89.52.63.120.74.72.126.43.104.210.193.250.178.245.194.192.249.246.166.89.25.118.47.46.66.92.110.123.1"
-        },
-        {
-          "name": "Save Files",
-          "index": "91",
-          "id": "139241",
-          "status": 200,
-          "embedUrl": "https://streamhls.to/e/z4xjptsb7a38",
-          "rawSample": "<iframe id=\"cn_fr_f20a5017\" src=\"about:blank\" data-cnk=\"623062366464643838356334633765313266643739653766\" data-cna=\"13.80.55.104.44.22.30.117.36.61.152.199.161.234.176.151.150.172.225.166.29.24.61.46.105.4.81.32.99.151.1"
-        }
-      ],
-      "allDownloads": [
-        {
-          "href": "https://jetload.top/Jetloadon4/?link=aHR0cHM6Ly9jZG4xLmpldGxvYWQudG9wLyU1QkNpbWEtTm93LkNvTSU1RCUyMEZhbGwuMi5EZWFkcG9pbnQuMjAyNi5IRC0xMDgwcC5tcDQ=",
-          "text": "1080p 2.00 جيجا"
-        },
-        {
-          "href": "https://jetload.top/Jetloadon4/?link=aHR0cHM6Ly9jZG4xLmpldGxvYWQudG9wLyU1QkNpbWEtTm93LkNvTSU1RCUyMEZhbGwuMi5EZWFkcG9pbnQuMjAyNi5IRC03MjBwLm1wNA==",
-          "text": "720p 1.22 جيجا"
-        },
-        {
-          "href": "https://jetload.top/Jetloadon4/?link=aHR0cHM6Ly9jZG4zLmpldGxvYWQudG9wLyU1QkNpbWEtTm93LkNvTSU1RCUyMEZhbGwuMi5EZWFkcG9pbnQuMjAyNi5IRC00ODBwLm1wNA==",
-          "text": "480p 827.33 ميجا"
-        },
-        {
-          "href": "https://jetload.top/Jetloadon4/?link=aHR0cHM6Ly9jZG40LmpldGxvYWQudG9wLyU1QkNpbWEtTm93LkNvTSU1RCUyMEZhbGwuMi5EZWFkcG9pbnQuMjAyNi5IRC0zNjBwLm1wNA==",
-          "text": "360p 551.78 ميجا"
-        },
-        {
-          "href": "https://vk.com/doc1100703376_709597266",
-          "text": "1080p 2.00 جيجا"
-        },
-        {
-          "href": "https://vk.com/doc1100704408_708544332",
-          "text": "720p 1.22 جيجا"
-        },
-        {
-          "href": "https://vk.com/doc792310950_704418271",
-          "text": "480p 827.33 ميجا"
-        },
-        {
-          "href": "https://vk.com/doc1100452376_709597757",
-          "text": "360p 551.78 ميجا"
-        },
-        {
-          "href": "https://href.li/?https://forafile.com/g6fstftoqb2r/%5BCima-Now.CoM%5D_Fall.2.Deadpoint.2026.HD-1080p.mp4.html",
-          "text": "1080p 2.00 جيجا"
-        },
-        {
-          "href": "https://href.li/?https://forafile.com/n4zcdwrwmfy1/%5BCima-Now.CoM%5D_Fall.2.Deadpoint.2026.HD-720p.mp4.html",
-          "text": "720p 1.22 جيجا"
-        },
-        {
-          "href": "https://href.li/?https://forafile.com/rbcs299d7pgn/%5BCima-Now.CoM%5D_Fall.2.Deadpoint.2026.HD-480p.mp4.html",
-          "text": "480p 827.33 ميجا"
-        },
-        {
-          "href": "https://href.li/?https://forafile.com/53nw1mcm3s5r/%5BCima-Now.CoM%5D_Fall.2.Deadpoint.2026.HD-360p.mp4.html",
-          "text": "360p 551.78 ميجا"
-        },
-        {
-          "href": "https://frdl.my/omk9n57k0flh/%5BCima-Now.CoM%5D+Fall.2.Deadpoint.2026.HD-1080p.mp4",
-          "text": "1080p 2.00 جيجا"
-        },
-        {
-          "href": "https://frdl.my/8eolgnnxymz0/%5BCima-Now.CoM%5D+Fall.2.Deadpoint.2026.HD-720p.mp4",
-          "text": "720p 1.22 جيجا"
-        },
-        {
-          "href": "https://frdl.my/r5g4xrqycpfu/%5BCima-Now.CoM%5D+Fall.2.Deadpoint.2026.HD-480p.mp4",
-          "text": "480p 827.33 ميجا"
-        },
-        {
-          "href": "https://frdl.my/qt6wcl7qgn3h/%5BCima-Now.CoM%5D+Fall.2.Deadpoint.2026.HD-360p.mp4",
-          "text": "360p 551.78 ميجا"
-        },
-        {
-          "href": "https://frdl.my/omk9n57k0flh/%5BCima-Now.CoM%5D+Fall.2.Deadpoint.2026.HD-1080p.mp4",
-          "text": "Frdl"
-        },
-        {
-          "href": "https://href.li/?https://forafile.com/g6fstftoqb2r/%5BCima-Now.CoM%5D_Fall.2.Deadpoint.2026.HD-1080p.mp4.html",
-          "text": "Forafile"
-        },
-        {
-          "href": "https://cimanow.upns.online/#otni3k&dl=1",
-          "text": "Upns"
-        },
-        {
-          "href": "https://bysetayico.com/download/7qblfeeagurb",
-          "text": "Bysetayico"
-        },
-        {
-          "href": "https://streamhls.to/d/z4xjptsb7a38",
-          "text": "Streamhls"
-        }
+    "ArabicMovie_BeitElRuby": {
+      "ok": false,
+      "errors": [
+        "socks5://193.25.215.182:22222: EXC Cannot read properties of null (reading '1')",
+        "socks5://199.66.182.232:4145: EXC Command failed: curl -sS -k --compressed --max-time 15 --connect-timeout 7 -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 M",
+        "socks5://199.66.182.243:4145: EXC Command failed: curl -sS -k --compressed --max-time 15 --connect-timeout 7 -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 M",
+        "socks5://184.178.172.18:15280: EXC Cannot read properties of null (reading '1')",
+        "socks5://184.178.172.5:15303: EXC Cannot read properties of null (reading '1')"
       ]
     },
-    "ArabicMovie_BeitElRuby": {
-      "ok": false
-    },
     "ForeignEpisode_LupinS4E1": {
-      "ok": false
+      "ok": false,
+      "errors": [
+        "socks5://193.25.215.182:22222: EXC Cannot read properties of null (reading '1')",
+        "socks5://199.66.182.232:4145: EXC Command failed: curl -sS -k --compressed --max-time 15 --connect-timeout 7 -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 M",
+        "socks5://199.66.182.243:4145: EXC Command failed: curl -sS -k --compressed --max-time 15 --connect-timeout 7 -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 M",
+        "socks5://184.178.172.18:15280: EXC Cannot read properties of null (reading '1')",
+        "socks5://184.178.172.5:15303: EXC Cannot read properties of null (reading '1')"
+      ]
     }
   }
 }
