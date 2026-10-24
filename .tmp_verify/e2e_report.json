@@ -1,0 +1,180 @@
+{
+  "cs3_artifact": {
+    "exists": true,
+    "file_size": 101927,
+    "entries": [
+      "manifest.json",
+      "classes.dex"
+    ],
+    "manifest": {
+      "requiresResources": false,
+      "version": 35,
+      "pluginClassName": "com.cimacloud.CimaCloudPlugin",
+      "name": "CimaCloud"
+    },
+    "dex_size": 244964,
+    "native_so_files": []
+  },
+  "catalog_verification": {
+    "home_sections_count": 10,
+    "latest_series_page1_count": 30,
+    "latest_series_page2_count": 30,
+    "latest_movies_page1_count": 30,
+    "latest_anime_cartoon_page1_count": 30,
+    "anime_cartoon_series_total": null,
+    "anime_cartoon_movies_total": null,
+    "search_phony_hits": 9,
+    "search_star_one_hits": 2,
+    "found_phony_in_latest_series": {
+      "id": "12827",
+      "name": "Phony",
+      "poster": "https://image.tmdb.org/t/p/w500/iCyQc8cSSHkxUHbkvzbC77owALt.jpg",
+      "type": "serie",
+      "status": "مستمر",
+      "release_date": "2026-10-20",
+      "vote_average": "7.2",
+      "categories": [
+        {
+          "id": 3,
+          "name": "مسلسلات أجنبية"
+        }
+      ],
+      "genres": [
+        {
+          "id": 1,
+          "name": "كوميديا"
+        },
+        {
+          "id": 2,
+          "name": "دراما"
+        },
+        {
+          "id": 7,
+          "name": "غموض"
+        }
+      ],
+      "is_favorite": false
+    },
+    "found_star_one_in_latest_movies": {
+      "id": "27295",
+      "name": "Star One",
+      "poster": "https://image.tmdb.org/t/p/w500/mLAxffrOZkghXrmf98MZniy5prL.jpg",
+      "type": "movie",
+      "status": "مستمر",
+      "release_date": "2026-07-03",
+      "vote_average": "0.0",
+      "categories": [
+        {
+          "id": 4,
+          "name": "أفلام أجنبية"
+        }
+      ],
+      "genres": [
+        {
+          "id": 5,
+          "name": "حركة"
+        },
+        {
+          "id": 12,
+          "name": "خيال علمي"
+        }
+      ],
+      "is_favorite": false
+    }
+  },
+  "phony_detail": {
+    "id": "12827",
+    "name": null,
+    "seasons": 1,
+    "episodes": [
+      {
+        "id": "370096",
+        "name": "Phony",
+        "ep": null
+      },
+      {
+        "id": "370097",
+        "name": "Phony",
+        "ep": null
+      }
+    ]
+  },
+  "star_one_detail": {
+    "id": "27295",
+    "name": null,
+    "release_date": null,
+    "runtime": null
+  },
+  "extractions": [
+    {
+      "label": "Phony - Phony (ep_id=370096)",
+      "servers_api_path": "episode/370096/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Phony - Phony (ep_id=370097)",
+      "servers_api_path": "episode/370097/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Star One (movie_id=27295)",
+      "servers_api_path": "movie/27295/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Anime Series: Frieren S2 Ep 1 (ep_id=369392)",
+      "servers_api_path": "episode/369392/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Anime Movie: Hunter x Hunter Pilot (movie_id=27291)",
+      "servers_api_path": "movie/27291/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Cartoon Series: Kaijudo Ep 1 (ep_id=370424)",
+      "servers_api_path": "episode/370424/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    },
+    {
+      "label": "Cartoon Movie: Toy Story 5 Dubbed (movie_id=27040)",
+      "servers_api_path": "movie/27040/servers",
+      "total_embed_servers": 0,
+      "working_servers_count": 0,
+      "total_playable_streams": 0,
+      "qualities_extracted": [],
+      "stream_types": [],
+      "servers_detail": []
+    }
+  ]
+}

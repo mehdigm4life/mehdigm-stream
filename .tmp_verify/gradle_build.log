@@ -1,0 +1,39 @@
+Downloading https://services.gradle.org/distributions/gradle-8.12-bin.zip
+.............10%.............20%.............30%.............40%.............50%.............60%.............70%.............80%.............90%.............100%
+
+Welcome to Gradle 8.12!
+
+Here are the highlights of this release:
+ - Enhanced error and warning reporting with the Problems API
+ - File-system watching support on Alpine Linux
+ - Build and test Swift 6 libraries and apps
+
+For more details see https://docs.gradle.org/8.12/release-notes.html
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.12/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :Anime3rb
+Fetching JAR: cloudstream.jar
+
+> Task :CimaCloud:clean UP-TO-DATE
+> Task :CimaCloud:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :CimaCloud:preBuild UP-TO-DATE
+> Task :CimaCloud:preDebugBuild UP-TO-DATE
+> Task :CimaCloud:generateDebugResValues
+> Task :CimaCloud:generateDebugResources
+> Task :CimaCloud:packageDebugResources
+> Task :CimaCloud:parseDebugLocalResources
+> Task :CimaCloud:generateDebugRFile
+> Task :CimaCloud:compileDebugKotlin
+
+> Task :CimaCloud:compileDex
+Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/CimaCloud/build/intermediates/classes.dex
+
+> Task :CimaCloud:generateManifest
+
+> Task :CimaCloud:make
+Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/CimaCloud/build/CimaCloud.cs3
+
+BUILD SUCCESSFUL in 1m 41s
+10 actionable tasks: 9 executed, 1 up-to-date

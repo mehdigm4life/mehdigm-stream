@@ -1,0 +1,11 @@
+CS3 Artifact: {"exists": true, "file_size": 101927, "entries": ["manifest.json", "classes.dex"], "manifest": {"requiresResources": false, "version": 35, "pluginClassName": "com.cimacloud.CimaCloudPlugin", "name": "CimaCloud"}, "dex_size": 244964, "native_so_files": []}
+Phony located in أحدث المسلسلات: 12827 Phony
+Star One located in أحدث الأفلام: 27295 Star One
+[E2E] Phony - Phony (ep_id=370096): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Phony - Phony (ep_id=370097): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Star One (movie_id=27295): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Anime Series: Frieren S2 Ep 1 (ep_id=369392): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Anime Movie: Hunter x Hunter Pilot (movie_id=27291): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Cartoon Series: Kaijudo Ep 1 (ep_id=370424): 0/0 servers -> 0 playable streams across qualities [] ([])
+[E2E] Cartoon Movie: Toy Story 5 Dubbed (movie_id=27040): 0/0 servers -> 0 playable streams across qualities [] ([])
+E2E verification report written to .tmp_verify/e2e_report.json
