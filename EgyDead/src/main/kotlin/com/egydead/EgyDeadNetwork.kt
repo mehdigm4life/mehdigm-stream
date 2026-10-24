@@ -1,21 +1,14 @@
 package com.egydead
 
+import android.app.Activity
 import android.util.Log
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
+import android.webkit.CookieManager
+import com.lagradost.cloudstream3.CommonActivity
+import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.ConnectionPool
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Dns
@@ -32,11 +25,11 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
+import java.net.URL
 import java.net.UnknownHostException
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLContext
@@ -44,18 +37,9 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
 /**
- * Live-verified zero-timeout transport, DoH DNS, and domain-discovery engine for EgyDead v19.
- *
- * Transport Pipeline (budgeted so CloudStream's 120s timeout is NEVER reached):
- * - Tier 1A: Persistent WebView `window.fetch()` fast-path (`~375-670ms`, same BoringSSL TLS +
- *   `CookieManager` `cf_clearance`) once Turnstile has been solved in this session.
- * - Tier 1B: Fast direct `siteClient` (`4s` connect / `6s` read + Cloudflare/Google DoH) with
- *   persisted `cf_clearance` cookies & consistent native browser headers.
- * - Tier 2: Single-flight `CloudflareSolver` (`cfMutex` + `cfSolveEpoch` deduplication):
- *   - 2A: Silent `(0, 0)` software-rendered WebView with `dir`-aware Turnstile checkbox auto-tap (`22s` max, solves live in `~5-14s`).
- *   - 2B: Rate-limited 1-tap interactive Turnstile fallback dialog (`45s` max, `60s` cooldown).
- * - Tier 3 (Headless / no-Activity fallback only): Sticky proxy session pool (`4s` connect, single batch) +
- *   15s negative failure cooldown so queued shelves fail fast instead of hanging.
+ * Network & Cloudflare transport layer for EgyDead (v20), restored to use the proven
+ * pre-rewrite [CloudflareSolver] + `app.get` / `app.post` (`cfGet` / `cfPost`) cookie-hunting
+ * flow with 7-day `cf_clearance` persistence via [EgyDeadPrefsEncoder].
  */
 object EgyDeadNetwork {
     private const val TAG = "EgyDeadNet"
@@ -63,39 +47,24 @@ object EgyDeadNetwork {
     const val DEFAULT_BASE_URL = "https://tv10.egydead.live"
     const val HOME_LANDING_PATH = "/h3/"
 
-    private val REDIRECT_BEACONS = listOf(
-        "https://egydead.live",
-        "https://egydead.fyi"
-    )
-
     const val DEFAULT_USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 
     private const val HOME_DOC_TTL_MS = 90_000L
-    private const val FAILURE_COOLDOWN_MS = 15_000L
-
-    private val PROXY_LIST_SOURCES = listOf(
-        "socks5" to "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-        "socks5" to "https://raw.githubusercontent.com/Roosterkid/openproxylist/main/SOCKS5_RAW.txt",
-        "socks5" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
-        "https" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/https.txt",
-        "https" to "https://raw.githubusercontent.com/Roosterkid/openproxylist/main/HTTPS_RAW.txt"
-    )
+    private const val FAILED_SOLVE_COOLDOWN_MS = 30_000L
 
     @Volatile
     private var activeBaseUrl: String? = null
 
     @Volatile
-    private var preferWebViewTransport: Boolean = false
+    private var savedCookies: String? = null
 
     @Volatile
-    private var lastAllTiersFailedAtMs: Long = 0L
+    private var lastFailedSolveAtMs: Long = 0L
 
     private val cfSolveEpoch = AtomicLong(0L)
     private val cfMutex = Mutex()
-    private val beaconMutex = Mutex()
     private val homeDocMutex = Mutex()
-    private val proxyHarvestMutex = Mutex()
 
     @Volatile
     private var cachedHomeDoc: Document? = null
@@ -104,7 +73,7 @@ object EgyDeadNetwork {
     private var cachedHomeDocAtMs: Long = 0L
 
     val currentUserAgent: String
-        get() = EgyDeadPrefs.savedUserAgent?.takeIf { it.isNotBlank() } ?: DEFAULT_USER_AGENT
+        get() = DEFAULT_USER_AGENT
 
     data class RawResponse(
         val code: Int,
@@ -114,38 +83,22 @@ object EgyDeadNetwork {
     )
 
     // =========================================================================
-    // Sticky Cookie Jar (Bridges OkHttp, SharedPreferences & Android WebView)
+    // Sticky Cookie Jar (for OkHttp extractor client)
     // =========================================================================
 
     object StickyCookieJar : CookieJar {
         private val store = ConcurrentHashMap<String, ConcurrentHashMap<String, String>>()
 
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            val key = baseHostKey(url.host)
-            val hostMap = store.getOrPut(key) { ConcurrentHashMap() }
+            val hostMap = store.getOrPut(url.host.lowercase()) { ConcurrentHashMap() }
             for (c in cookies) {
                 hostMap[c.name] = c.value
-                if (c.name == "cf_clearance" && c.value.isNotBlank()) {
-                    EgyDeadPrefs.cfClearance = c.value
-                }
-            }
-            if (key == "egydead" && hostMap.isNotEmpty()) {
-                EgyDeadPrefs.savedCookieHeader = hostMap.entries.joinToString("; ") { "${it.key}=${it.value}" }
             }
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val key = baseHostKey(url.host)
-            val merged = LinkedHashMap<String, String>()
-            if (key == "egydead") {
-                EgyDeadPrefs.savedCookieHeader?.let { hdr ->
-                    CloudflareSolver.parseCookieHeader(hdr).forEach { (k, v) -> merged[k] = v }
-                }
-                EgyDeadPrefs.cfClearance?.takeIf { it.isNotBlank() }?.let { merged["cf_clearance"] = it }
-                CloudflareSolver.readCookiesFromWebView(url.toString()).forEach { (k, v) -> merged[k] = v }
-            }
-            store[key]?.forEach { (k, v) -> merged[k] = v }
-            return merged.mapNotNull { (name, value) ->
+            val hostMap = store[url.host.lowercase()] ?: return emptyList()
+            return hostMap.mapNotNull { (name, value) ->
                 runCatching {
                     Cookie.Builder()
                         .name(name)
@@ -157,36 +110,13 @@ object EgyDeadNetwork {
             }
         }
 
-        fun importCookies(urlOrHost: String, cookies: Map<String, String>) {
-            if (cookies.isEmpty()) return
-            val host = runCatching {
-                if (urlOrHost.contains("://")) URI(encodeUrl(urlOrHost)).host ?: urlOrHost else urlOrHost
-            }.getOrDefault(urlOrHost)
-            val key = baseHostKey(host)
-            val hostMap = store.getOrPut(key) { ConcurrentHashMap() }
-            for ((k, v) in cookies) {
-                if (k.isNotBlank() && v.isNotBlank()) {
-                    hostMap[k] = v
-                    if (k == "cf_clearance") EgyDeadPrefs.cfClearance = v
-                }
-            }
-            if (key == "egydead" && hostMap.isNotEmpty()) {
-                EgyDeadPrefs.savedCookieHeader = hostMap.entries.joinToString("; ") { "${it.key}=${it.value}" }
-            }
-        }
-
         fun clear() {
             store.clear()
-        }
-
-        private fun baseHostKey(host: String): String {
-            val lower = host.lowercase()
-            return if (lower.contains("egydead")) "egydead" else lower
         }
     }
 
     // =========================================================================
-    // DNS-over-HTTPS (Cloudflare + Google fallback when system DNS is ISP-blocked)
+    // DNS-over-HTTPS + OkHttp Client (used by external video host extractors)
     // =========================================================================
 
     private val bootstrapClient: OkHttpClient by lazy {
@@ -237,10 +167,6 @@ object EgyDeadNetwork {
         }
     }
 
-    // =========================================================================
-    // OkHttp Clients (Extractor Client + Fast Site Client + Sticky Proxy Pool)
-    // =========================================================================
-
     private val permissiveTrustManager: X509TrustManager = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
         override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -256,9 +182,6 @@ object EgyDeadNetwork {
 
     @Volatile
     private var cachedClient: OkHttpClient? = null
-
-    @Volatile
-    private var cachedSiteClient: OkHttpClient? = null
 
     private fun parseCustomProxy(spec: String?): Proxy? {
         if (spec.isNullOrBlank()) return null
@@ -292,8 +215,8 @@ object EgyDeadNetwork {
                 val builder = OkHttpClient.Builder()
                     .cookieJar(StickyCookieJar)
                     .dns(SmartDohDns)
-                    .connectTimeout(12, TimeUnit.SECONDS)
-                    .readTimeout(18, TimeUnit.SECONDS)
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(20, TimeUnit.SECONDS)
                     .writeTimeout(15, TimeUnit.SECONDS)
                     .followRedirects(true)
                     .followSslRedirects(true)
@@ -306,99 +229,35 @@ object EgyDeadNetwork {
 
                 val built = builder.build()
                 cachedClient = built
-                cachedSiteClient = built.newBuilder()
-                    .connectTimeout(4, TimeUnit.SECONDS)
-                    .readTimeout(6, TimeUnit.SECONDS)
-                    .writeTimeout(5, TimeUnit.SECONDS)
-                    .callTimeout(8, TimeUnit.SECONDS)
-                    .build()
                 cachedClientKey = key
                 return built
             }
         }
 
-    private val siteClient: OkHttpClient
-        get() {
-            httpClient
-            return cachedSiteClient ?: httpClient
-        }
-
-    private val sharedProxyPool = ConnectionPool(16, 2, TimeUnit.MINUTES)
-    private val workingProxies = CopyOnWriteArrayList<String>()
-    private val deadProxies = ConcurrentHashMap.newKeySet<String>()
-    private val proxySessions = ConcurrentHashMap<String, ProxySession>()
-
-    @Volatile
-    private var savedProxiesSeeded = false
-
-    private class ProxySession(val spec: String) {
-        val client: OkHttpClient = OkHttpClient.Builder()
-            .proxy(buildProxy(spec))
-            .connectionPool(sharedProxyPool)
-            .cookieJar(StickyCookieJar)
-            .connectTimeout(4, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .callTimeout(6, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .retryOnConnectionFailure(false)
-            .sslSocketFactory(permissiveSslSocketFactory, permissiveTrustManager)
-            .hostnameVerifier { _, _ -> true }
-            .build()
-
-        private fun buildProxy(spec: String): Proxy {
-            val scheme = spec.substringBefore("://").lowercase()
-            val hostPort = spec.substringAfter("://")
-            val host = hostPort.substringBeforeLast(':').trim()
-            val port = hostPort.substringAfterLast(':').toIntOrNull()
-                ?: error("Invalid port in $spec")
-            require(port in 1..65535)
-            val addr = if (scheme == "socks5") {
-                InetSocketAddress(InetAddress.getByName(host), port)
-            } else {
-                InetSocketAddress(host, port)
-            }
-            return Proxy(if (scheme == "socks5") Proxy.Type.SOCKS else Proxy.Type.HTTP, addr)
-        }
-    }
-
     // =========================================================================
-    // URL Normalization, Validation & Domain Management
+    // URL Normalization & Domain Helpers
     // =========================================================================
 
     fun invalidateDomainCache() {
         activeBaseUrl = null
-        preferWebViewTransport = false
-        lastAllTiersFailedAtMs = 0L
+        savedCookies = null
+        lastFailedSolveAtMs = 0L
         cachedHomeDoc = null
         cachedHomeDocAtMs = 0L
         cachedClientKey = null
         cachedClient = null
-        cachedSiteClient = null
-        workingProxies.clear()
-        deadProxies.clear()
-        proxySessions.clear()
-        savedProxiesSeeded = false
         StickyCookieJar.clear()
-        CloudflareSolver.resetPersistentWebView()
     }
-
-    fun activeTransportSummary(): String =
-        "base=${getBaseUrl()}, preferWebView=$preferWebViewTransport, testBridge=${CloudflareSolver.jvmTestFetchBridge != null}, workingProxies=${workingProxies.take(3)}"
 
     fun getImageHeaders(): Map<String, String> {
         val base = getBaseUrl()
         val map = LinkedHashMap<String, String>()
-        map["User-Agent"] = currentUserAgent
+        map["User-Agent"] = DEFAULT_USER_AGENT
         map["Referer"] = "$base/"
-        buildCookieHeader(base)?.let { map["Cookie"] = it }
+        resolveStoredCookieHeader()?.let { map["Cookie"] = it }
         return map
     }
 
-    /**
-     * Safely percent-encodes raw UTF-8 characters (Arabic slugs, spaces) while preserving
-     * already-encoded `%XX` sequences so URLs are never double-encoded.
-     */
     fun encodeUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
         if (trimmed.isEmpty()) return trimmed
@@ -483,34 +342,22 @@ object EgyDeadNetwork {
 
     private fun updateActiveDomainFromUrl(landedUrl: String) {
         if (!EgyDeadPrefs.customDomain.isNullOrBlank()) return
-        val origin = originOf(landedUrl) ?: return
-        val host = origin.substringAfter("://").lowercase()
-        if (host.contains("egydead.") && host != "egydead.live" && host != "www.egydead.live" &&
-            host != "egydead.fyi" && host != "www.egydead.fyi"
-        ) {
-            if (activeBaseUrl != origin) {
-                activeBaseUrl = origin
-                EgyDeadPrefs.discoveredDomain = origin
+        try {
+            val nh = URL(landedUrl).host
+            if (nh.isNotBlank() && nh.contains("egydead.", ignoreCase = true) &&
+                !nh.equals("egydead.live", ignoreCase = true) &&
+                !nh.equals("www.egydead.live", ignoreCase = true)
+            ) {
+                val newOrigin = "https://$nh"
+                activeBaseUrl = newOrigin
+                EgyDeadPrefs.discoveredDomain = newOrigin
             }
+        } catch (_: Exception) {
         }
-    }
-
-    private suspend fun discoverDomainFromBeacons(): String? = beaconMutex.withLock {
-        for (beacon in REDIRECT_BEACONS) {
-            val probe = executeRawGet(beacon, referer = "$beacon/", client = siteClient) ?: continue
-            val landedOrigin = originOf(probe.finalUrl) ?: continue
-            val host = landedOrigin.substringAfter("://").lowercase()
-            if (host.contains("egydead.") && host != "egydead.live" && host != "egydead.fyi") {
-                activeBaseUrl = landedOrigin
-                EgyDeadPrefs.discoveredDomain = landedOrigin
-                return@withLock landedOrigin
-            }
-        }
-        null
     }
 
     // =========================================================================
-    // Cloudflare & EgyDead HTML Validation
+    // Cloudflare Detection & HTML Validation
     // =========================================================================
 
     fun isCloudflareBlock(code: Int, body: String): Boolean {
@@ -520,21 +367,10 @@ object EgyDeadNetwork {
             body.contains("ServersList") ||
             body.contains("EpsList")
         if (code in 200..299 && hasPositiveDom) return false
-        if (code == 403 || code == 503 || code == 429) {
-            if (body.contains("Just a moment", ignoreCase = true) ||
-                body.contains("لحظة") ||
-                body.contains("Attention Required", ignoreCase = true) ||
-                body.contains("cf-browser-verification", ignoreCase = true) ||
-                body.contains("challenges.cloudflare.com", ignoreCase = true) ||
-                body.contains("_cf_chl_", ignoreCase = true) ||
-                body.contains("cloudflare", ignoreCase = true) ||
-                body.length < 12_000
-            ) {
-                return true
-            }
-        }
+        if (code in listOf(403, 503, 429)) return true
         return !hasPositiveDom && (
-            body.contains("<title>Just a moment", ignoreCase = true) ||
+            body.contains("Just a moment", ignoreCase = true) ||
+                body.contains("Attention Required", ignoreCase = true) ||
                 body.contains("<title>لحظة") ||
                 (body.contains("cf-turnstile", ignoreCase = true) && body.contains("_cf_chl_", ignoreCase = true))
             )
@@ -556,17 +392,33 @@ object EgyDeadNetwork {
     }
 
     // =========================================================================
-    // HTTP Execution + Live-Verified Anti-Cloudflare Transport
+    // Raw OkHttp Helpers (used by external video extractors)
     // =========================================================================
 
-    private fun buildCookieHeader(url: String): String? {
-        val savedFull = EgyDeadPrefs.savedCookieHeader?.trim()?.takeIf { it.isNotBlank() }
-        if (savedFull != null) return savedFull
-        val cf = EgyDeadPrefs.cfClearance?.trim()?.takeIf { it.isNotBlank() }
-        if (cf != null && url.contains("egydead", ignoreCase = true)) {
-            return "cf_clearance=$cf"
+    private fun resolveStoredCookieHeader(): String? {
+        savedCookies?.takeIf { it.isNotBlank() }?.let { return it }
+        EgyDeadPrefsEncoder.loadCookies()?.takeIf { it.isNotBlank() }?.let {
+            savedCookies = it
+            return it
         }
+        EgyDeadPrefs.savedCookieHeader?.takeIf { it.isNotBlank() }?.let { return it }
+        EgyDeadPrefs.cfClearance?.takeIf { it.isNotBlank() }?.let { return "cf_clearance=$it" }
         return null
+    }
+
+    private fun buildSiteHeaders(
+        referer: String?,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): MutableMap<String, String> {
+        val base = getBaseUrl()
+        val headers = mutableMapOf(
+            "User-Agent" to DEFAULT_USER_AGENT,
+            "Referer" to encodeUrl(referer ?: base),
+            "Accept-Language" to "ar,en-US;q=0.9"
+        )
+        resolveStoredCookieHeader()?.let { headers["Cookie"] = it }
+        headers.putAll(extraHeaders)
+        return headers
     }
 
     fun executeRawGet(
@@ -579,33 +431,29 @@ object EgyDeadNetwork {
         val reqBuilder = Request.Builder()
             .url(safeUrl)
             .get()
-            .header("User-Agent", extraHeaders["User-Agent"] ?: currentUserAgent)
+            .header("User-Agent", extraHeaders["User-Agent"] ?: DEFAULT_USER_AGENT)
             .header(
                 "Accept",
                 extraHeaders["Accept"]
                     ?: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
             )
-            .header("Accept-Language", extraHeaders["Accept-Language"] ?: "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7")
-            .header("Upgrade-Insecure-Requests", "1")
+            .header("Accept-Language", extraHeaders["Accept-Language"] ?: "ar,en-US;q=0.9,en;q=0.8")
 
         if (!referer.isNullOrBlank()) {
             reqBuilder.header("Referer", encodeUrl(referer))
         }
-
-        if (!extraHeaders.containsKey("Cookie")) {
-            buildCookieHeader(safeUrl)?.let { reqBuilder.header("Cookie", it) }
+        if (!extraHeaders.containsKey("Cookie") && safeUrl.contains("egydead", ignoreCase = true)) {
+            resolveStoredCookieHeader()?.let { reqBuilder.header("Cookie", it) }
         }
-
         for ((k, v) in extraHeaders) {
             reqBuilder.header(k, v)
         }
 
         return try {
             client.newCall(reqBuilder.build()).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
                 RawResponse(
                     code = resp.code,
-                    body = text,
+                    body = resp.body?.string().orEmpty(),
                     finalUrl = resp.request.url.toString(),
                     headers = resp.headers
                 )
@@ -632,34 +480,31 @@ object EgyDeadNetwork {
         val reqBuilder = Request.Builder()
             .url(safeUrl)
             .post(formBuilder.build())
-            .header("User-Agent", extraHeaders["User-Agent"] ?: currentUserAgent)
+            .header("User-Agent", extraHeaders["User-Agent"] ?: DEFAULT_USER_AGENT)
             .header(
                 "Accept",
                 extraHeaders["Accept"]
                     ?: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
             )
-            .header("Accept-Language", extraHeaders["Accept-Language"] ?: "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7")
+            .header("Accept-Language", extraHeaders["Accept-Language"] ?: "ar,en-US;q=0.9,en;q=0.8")
 
         if (!referer.isNullOrBlank()) {
             val safeRef = encodeUrl(referer)
             reqBuilder.header("Referer", safeRef)
             originOf(safeRef)?.let { reqBuilder.header("Origin", it) }
         }
-
-        if (!extraHeaders.containsKey("Cookie")) {
-            buildCookieHeader(safeUrl)?.let { reqBuilder.header("Cookie", it) }
+        if (!extraHeaders.containsKey("Cookie") && safeUrl.contains("egydead", ignoreCase = true)) {
+            resolveStoredCookieHeader()?.let { reqBuilder.header("Cookie", it) }
         }
-
         for ((k, v) in extraHeaders) {
             reqBuilder.header(k, v)
         }
 
         return try {
             client.newCall(reqBuilder.build()).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
                 RawResponse(
                     code = resp.code,
-                    body = text,
+                    body = resp.body?.string().orEmpty(),
                     finalUrl = resp.request.url.toString(),
                     headers = resp.headers
                 )
@@ -670,10 +515,52 @@ object EgyDeadNetwork {
         }
     }
 
-    /**
-     * Shared 90-second cached fetch of `https://tv10.egydead.live/h3/` so multiple home shelves
-     * (`المواضيع المميزة`, `المضاف حديثاً`) render from ONE single HTTP/WebView request.
-     */
+    // =========================================================================
+    // Pre-Rewrite cfGet / cfPost Flow (app.get / app.post + CloudflareSolver)
+    // =========================================================================
+
+    private suspend fun runSingleFlightSolverIfNeeded(initialUrl: String, epochBefore: Long): String {
+        var updatedUrl = initialUrl
+        cfMutex.withLock {
+            if (cfSolveEpoch.get() != epochBefore) {
+                updatedUrl = rewriteToActiveBase(updatedUrl)
+                return@withLock
+            }
+            val cmCookie = runCatching { CookieManager.getInstance()?.getCookie(updatedUrl) }.getOrNull()
+            if (cmCookie != null && cmCookie != savedCookies && cmCookie.contains("cf_clearance")) {
+                savedCookies = cmCookie
+                EgyDeadPrefsEncoder.saveCookies(cmCookie)
+                cfSolveEpoch.incrementAndGet()
+                return@withLock
+            }
+            val now = System.currentTimeMillis()
+            if (lastFailedSolveAtMs > 0L && now - lastFailedSolveAtMs < FAILED_SOLVE_COOLDOWN_MS) {
+                return@withLock
+            }
+            val activity = CommonActivity.activity ?: (EgyDeadPrefs.appContext as? Activity)
+            if (activity != null && !activity.isFinishing) {
+                val solver = CloudflareSolver.solve(activity, updatedUrl, DEFAULT_USER_AGENT)
+                if (solver != null) {
+                    if (!solver.cookies.isNullOrEmpty() && solver.cookies.contains("cf_clearance")) {
+                        savedCookies = solver.cookies
+                        EgyDeadPrefsEncoder.saveCookies(solver.cookies)
+                        lastFailedSolveAtMs = 0L
+                        cfSolveEpoch.incrementAndGet()
+                    } else {
+                        lastFailedSolveAtMs = System.currentTimeMillis()
+                    }
+                    if (solver.finalUrl.isNotBlank() && solver.finalUrl != updatedUrl) {
+                        updateActiveDomainFromUrl(solver.finalUrl)
+                        updatedUrl = solver.finalUrl
+                    }
+                } else {
+                    lastFailedSolveAtMs = System.currentTimeMillis()
+                }
+            }
+        }
+        return updatedUrl
+    }
+
     suspend fun getHomeLandingDocument(forceRefresh: Boolean = false): Document? = homeDocMutex.withLock {
         val now = System.currentTimeMillis()
         val existing = cachedHomeDoc
@@ -696,11 +583,10 @@ object EgyDeadNetwork {
         headers: Map<String, String> = emptyMap()
     ): Document? = withContext(Dispatchers.IO) {
         val isSiteUrl = url.contains("egydead.", ignoreCase = true) || url.startsWith("/")
-        val targetUrl = if (isSiteUrl) rewriteToActiveBase(url) else encodeUrl(url)
-        val effectiveReferer = referer ?: "${getBaseUrl()}$HOME_LANDING_PATH"
+        var currentUrl = if (isSiteUrl) rewriteToActiveBase(url) else encodeUrl(url)
 
         if (!isSiteUrl) {
-            val ext = executeRawGet(targetUrl, referer = effectiveReferer, extraHeaders = headers)
+            val ext = executeRawGet(currentUrl, referer = referer, extraHeaders = headers)
             return@withContext if (ext != null && ext.body.isNotBlank() && !isCloudflareBlock(ext.code, ext.body)) {
                 Jsoup.parse(ext.body, ext.finalUrl)
             } else {
@@ -708,105 +594,25 @@ object EgyDeadNetwork {
             }
         }
 
-        // Test-only JVM Live E2E bridge (null in production Android APK)
-        CloudflareSolver.jvmTestFetchBridge?.let { bridge ->
-            val bridged = runCatching { bridge(targetUrl, effectiveReferer, "GET", null) }.getOrNull()
-            if (bridged != null && isValidEgyDeadHtml(bridged.first, bridged.second)) {
-                return@withContext Jsoup.parse(bridged.second, targetUrl)
+        try {
+            var reqHeaders = buildSiteHeaders(referer, headers)
+            var res = app.get(currentUrl, headers = reqHeaders, timeout = 30)
+            if (isCloudflareBlock(res.code, res.text)) {
+                val epochBefore = cfSolveEpoch.get()
+                currentUrl = runSingleFlightSolverIfNeeded(currentUrl, epochBefore)
+                reqHeaders = buildSiteHeaders(referer, headers)
+                res = app.get(currentUrl, headers = reqHeaders, timeout = 30)
             }
+            if (res.text.isNotBlank() && !isCloudflareBlock(res.code, res.text)) {
+                updateActiveDomainFromUrl(res.url)
+                res.document
+            } else {
+                null
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "cfGet failed for $currentUrl: ${t.message}")
+            null
         }
-
-        // Negative-cache guard: fail fast if all tiers recently failed so queued shelves never hit 120s timeout
-        val sinceLastFail = System.currentTimeMillis() - lastAllTiersFailedAtMs
-        if (lastAllTiersFailedAtMs > 0L && sinceLastFail in 0 until FAILURE_COOLDOWN_MS) {
-            Log.d(TAG, "Fast-failing $targetUrl during ${FAILURE_COOLDOWN_MS}ms negative cooldown")
-            return@withContext null
-        }
-
-        // Tier 1A: Persistent WebView `window.fetch` fast-path (~375-670ms once Turnstile solved)
-        if (preferWebViewTransport || CloudflareSolver.hasValidClearance(targetUrl)) {
-            val wvFast = CloudflareSolver.fetchViaPersistentWebView(
-                url = targetUrl,
-                referer = effectiveReferer,
-                method = "GET"
-            )
-            if (wvFast != null && isValidEgyDeadHtml(wvFast.status, wvFast.body)) {
-                preferWebViewTransport = true
-                updateActiveDomainFromUrl(wvFast.finalUrl)
-                return@withContext Jsoup.parse(wvFast.body, wvFast.finalUrl)
-            }
-        }
-
-        // Tier 1B: Fast direct OkHttp request (`siteClient` 4s connect / 6s read)
-        val direct = executeRawGet(targetUrl, referer = effectiveReferer, extraHeaders = headers, client = siteClient)
-        if (direct != null && isValidEgyDeadHtml(direct.code, direct.body)) {
-            updateActiveDomainFromUrl(direct.finalUrl)
-            return@withContext Jsoup.parse(direct.body, direct.finalUrl)
-        }
-
-        // Genuine TCP/DNS failure -> check redirect beacons (`egydead.live` / `egydead.fyi`)
-        if (direct == null && EgyDeadPrefs.customDomain.isNullOrBlank()) {
-            val newDomain = discoverDomainFromBeacons()
-            if (newDomain != null) {
-                val relocated = rewriteToActiveBase(url)
-                val retry = executeRawGet(relocated, referer = "$newDomain/", extraHeaders = headers, client = siteClient)
-                if (retry != null && isValidEgyDeadHtml(retry.code, retry.body)) {
-                    return@withContext Jsoup.parse(retry.body, retry.finalUrl)
-                }
-            }
-        }
-
-        // Tier 2: Single-flight Android WebView Turnstile solver (primary bypass when Activity present!)
-        if (CloudflareSolver.currentActivity() != null) {
-            val epochBefore = cfSolveEpoch.get()
-            val solvedInMutex = cfMutex.withLock {
-                if (cfSolveEpoch.get() != epochBefore) {
-                    null
-                } else {
-                    val silent = CloudflareSolver.solveSilently(targetUrl)
-                    val win = silent ?: CloudflareSolver.solveInteractiveDialog(targetUrl)
-                    if (win != null) {
-                        recordSolvedSession(win)
-                        cfSolveEpoch.incrementAndGet()
-                    }
-                    win
-                }
-            }
-
-            if (solvedInMutex != null && isValidEgyDeadHtml(200, solvedInMutex.html)) {
-                updateActiveDomainFromUrl(solvedInMutex.finalUrl)
-                return@withContext Jsoup.parse(solvedInMutex.html, solvedInMutex.finalUrl)
-            }
-
-            if (cfSolveEpoch.get() != epochBefore) {
-                val wvAfterPeer = CloudflareSolver.fetchViaPersistentWebView(
-                    url = targetUrl,
-                    referer = effectiveReferer,
-                    method = "GET"
-                )
-                if (wvAfterPeer != null && isValidEgyDeadHtml(wvAfterPeer.status, wvAfterPeer.body)) {
-                    updateActiveDomainFromUrl(wvAfterPeer.finalUrl)
-                    return@withContext Jsoup.parse(wvAfterPeer.body, wvAfterPeer.finalUrl)
-                }
-                val directAfterPeer = executeRawGet(targetUrl, referer = effectiveReferer, extraHeaders = headers, client = siteClient)
-                if (directAfterPeer != null && isValidEgyDeadHtml(directAfterPeer.code, directAfterPeer.body)) {
-                    updateActiveDomainFromUrl(directAfterPeer.finalUrl)
-                    return@withContext Jsoup.parse(directAfterPeer.body, directAfterPeer.finalUrl)
-                }
-            }
-        } else {
-            // Tier 3 (Headless / no-Activity fallback ONLY): quick single-batch sticky proxy probe
-            seedSavedProxiesOnce()
-            tryWorkingStickyProxies(targetUrl, effectiveReferer, headers)?.let {
-                return@withContext Jsoup.parse(it.body, it.finalUrl)
-            }
-            discoverStickyProxySingleBatch(targetUrl, effectiveReferer, headers)?.let {
-                return@withContext Jsoup.parse(it.body, it.finalUrl)
-            }
-        }
-
-        lastAllTiersFailedAtMs = System.currentTimeMillis()
-        null
     }
 
     suspend fun postDocument(
@@ -816,216 +622,39 @@ object EgyDeadNetwork {
         headers: Map<String, String> = emptyMap()
     ): Document? = withContext(Dispatchers.IO) {
         val isSiteUrl = url.contains("egydead.", ignoreCase = true) || url.startsWith("/")
-        val targetUrl = if (isSiteUrl) rewriteToActiveBase(url) else encodeUrl(url)
-        val effectiveReferer = referer ?: targetUrl
+        var currentUrl = if (isSiteUrl) rewriteToActiveBase(url) else encodeUrl(url)
 
-        // Test-only JVM Live E2E bridge (null in production Android APK)
-        if (isSiteUrl) {
-            CloudflareSolver.jvmTestFetchBridge?.let { bridge ->
-                val bridged = runCatching { bridge(targetUrl, effectiveReferer, "POST", formParams) }.getOrNull()
-                if (bridged != null && bridged.second.isNotBlank() && !isCloudflareBlock(bridged.first, bridged.second)) {
-                    return@withContext Jsoup.parse(bridged.second, targetUrl)
-                }
+        if (!isSiteUrl) {
+            val ext = executeRawPostForm(currentUrl, formParams, referer = referer, extraHeaders = headers)
+            return@withContext if (ext != null && ext.body.isNotBlank() && !isCloudflareBlock(ext.code, ext.body)) {
+                Jsoup.parse(ext.body, ext.finalUrl)
+            } else {
+                null
             }
         }
 
-        // 1. Persistent WebView POST fast-path (`View=1` watch unlock)
-        if (isSiteUrl && (preferWebViewTransport || CloudflareSolver.hasValidClearance(targetUrl))) {
-            val wvPost = CloudflareSolver.fetchViaPersistentWebView(
-                url = targetUrl,
-                referer = effectiveReferer,
-                method = "POST",
-                formBody = formParams
-            )
-            if (wvPost != null && wvPost.body.isNotBlank() && !isCloudflareBlock(wvPost.status, wvPost.body)) {
-                preferWebViewTransport = true
-                updateActiveDomainFromUrl(wvPost.finalUrl)
-                return@withContext Jsoup.parse(wvPost.body, wvPost.finalUrl)
+        try {
+            val postExtra = LinkedHashMap<String, String>().apply {
+                put("X-Requested-With", "XMLHttpRequest")
+                putAll(headers)
             }
-        }
-
-        // 2. Direct OkHttp POST
-        val direct = executeRawPostForm(targetUrl, formParams, referer = effectiveReferer, extraHeaders = headers, client = siteClient)
-        if (direct != null && direct.body.isNotBlank() && !isCloudflareBlock(direct.code, direct.body)) {
-            updateActiveDomainFromUrl(direct.finalUrl)
-            return@withContext Jsoup.parse(direct.body, direct.finalUrl)
-        }
-
-        // 3. Single-flight WebView recovery + retry POST
-        if (isSiteUrl && CloudflareSolver.currentActivity() != null) {
-            val epochBefore = cfSolveEpoch.get()
-            cfMutex.withLock {
-                if (cfSolveEpoch.get() == epochBefore) {
-                    val homeUrl = "${getBaseUrl().trimEnd('/')}$HOME_LANDING_PATH"
-                    val solved = CloudflareSolver.solveSilently(homeUrl)
-                        ?: CloudflareSolver.solveInteractiveDialog(homeUrl)
-                    if (solved != null) {
-                        recordSolvedSession(solved)
-                        cfSolveEpoch.incrementAndGet()
-                    }
-                }
+            var reqHeaders = buildSiteHeaders(referer ?: currentUrl, postExtra)
+            var res = app.post(currentUrl, data = formParams, headers = reqHeaders, timeout = 30)
+            if (isCloudflareBlock(res.code, res.text)) {
+                val epochBefore = cfSolveEpoch.get()
+                currentUrl = runSingleFlightSolverIfNeeded(currentUrl, epochBefore)
+                reqHeaders = buildSiteHeaders(referer ?: currentUrl, postExtra)
+                res = app.post(currentUrl, data = formParams, headers = reqHeaders, timeout = 30)
             }
-            val wvRetry = CloudflareSolver.fetchViaPersistentWebView(
-                url = targetUrl,
-                referer = effectiveReferer,
-                method = "POST",
-                formBody = formParams
-            )
-            if (wvRetry != null && wvRetry.body.isNotBlank() && !isCloudflareBlock(wvRetry.status, wvRetry.body)) {
-                updateActiveDomainFromUrl(wvRetry.finalUrl)
-                return@withContext Jsoup.parse(wvRetry.body, wvRetry.finalUrl)
+            if (res.text.isNotBlank() && !isCloudflareBlock(res.code, res.text)) {
+                updateActiveDomainFromUrl(res.url)
+                res.document
+            } else {
+                null
             }
-            val directRetry = executeRawPostForm(targetUrl, formParams, referer = effectiveReferer, extraHeaders = headers, client = siteClient)
-            if (directRetry != null && directRetry.body.isNotBlank() && !isCloudflareBlock(directRetry.code, directRetry.body)) {
-                updateActiveDomainFromUrl(directRetry.finalUrl)
-                return@withContext Jsoup.parse(directRetry.body, directRetry.finalUrl)
-            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "cfPost failed for $currentUrl: ${t.message}")
+            null
         }
-
-        null
-    }
-
-    private fun recordSolvedSession(solved: CloudflareSolver.SolveResult) {
-        if (solved.userAgent.isNotBlank()) {
-            EgyDeadPrefs.savedUserAgent = solved.userAgent
-        }
-        if (solved.cookies.isNotEmpty()) {
-            StickyCookieJar.importCookies(solved.finalUrl, solved.cookies)
-        }
-        preferWebViewTransport = true
-        lastAllTiersFailedAtMs = 0L
-        updateActiveDomainFromUrl(solved.finalUrl)
-        if (solved.finalUrl.contains("/h3") && solved.html.contains("movieItem")) {
-            runCatching {
-                val doc = Jsoup.parse(solved.html, solved.finalUrl)
-                if (doc.select("li.movieItem").isNotEmpty()) {
-                    cachedHomeDoc = doc
-                    cachedHomeDocAtMs = System.currentTimeMillis()
-                }
-            }
-        }
-    }
-
-    private fun seedSavedProxiesOnce() {
-        if (savedProxiesSeeded) return
-        savedProxiesSeeded = true
-        for (spec in EgyDeadPrefs.savedWorkingProxies) {
-            if (spec.isNotBlank() && !workingProxies.contains(spec)) {
-                workingProxies.add(spec)
-            }
-        }
-    }
-
-    private fun sessionFor(spec: String): ProxySession? = runCatching {
-        proxySessions.getOrPut(spec) { ProxySession(spec) }
-    }.getOrElse {
-        deadProxies.add(spec)
-        workingProxies.remove(spec)
-        null
-    }
-
-    private fun tryWorkingStickyProxies(
-        url: String,
-        referer: String,
-        headers: Map<String, String>
-    ): RawResponse? {
-        for (spec in workingProxies.toList()) {
-            val session = sessionFor(spec) ?: continue
-            val res = executeRawGet(url, referer = referer, extraHeaders = headers, client = session.client)
-            if (res != null && isValidEgyDeadHtml(res.code, res.body)) {
-                updateActiveDomainFromUrl(res.finalUrl)
-                return res
-            }
-        }
-        return null
-    }
-
-    private suspend fun discoverStickyProxySingleBatch(
-        url: String,
-        referer: String,
-        headers: Map<String, String>
-    ): RawResponse? = proxyHarvestMutex.withLock {
-        tryWorkingStickyProxies(url, referer, headers)?.let { return@withLock it }
-
-        val feeds = coroutineScope {
-            PROXY_LIST_SOURCES.map { (scheme, feedUrl) ->
-                async(Dispatchers.IO) {
-                    withTimeoutOrNull(3_000L) {
-                        runCatching {
-                            val req = Request.Builder()
-                                .url(feedUrl)
-                                .header("User-Agent", DEFAULT_USER_AGENT)
-                                .build()
-                            siteClient.newCall(req).execute().use { r ->
-                                if (!r.isSuccessful) emptyList()
-                                else r.body?.string().orEmpty()
-                                    .lineSequence()
-                                    .map { it.trim() }
-                                    .filter { line ->
-                                        line.isNotEmpty() && !line.startsWith("#") &&
-                                            line.count { ch -> ch == ':' } == 1
-                                    }
-                                    .map { "$scheme://$it" }
-                                    .take(25)
-                                    .toList()
-                            }
-                        }.getOrDefault(emptyList())
-                    } ?: emptyList()
-                }
-            }.awaitAll()
-        }
-
-        val candidates = ArrayList<String>(40)
-        val seen = HashSet<String>()
-        val maxLen = feeds.maxOfOrNull { it.size } ?: 0
-        for (idx in 0 until maxLen) {
-            for (feed in feeds) {
-                if (idx < feed.size) {
-                    val spec = feed[idx]
-                    if (spec !in deadProxies && seen.add(spec)) {
-                        candidates.add(spec)
-                        if (candidates.size >= 36) break
-                    }
-                }
-            }
-            if (candidates.size >= 36) break
-        }
-        if (candidates.isEmpty()) return@withLock null
-
-        val winner = CompletableDeferred<Pair<String, RawResponse>?>()
-        val raceJob = SupervisorJob()
-        val raceScope = CoroutineScope(Dispatchers.IO + raceJob)
-        val sem = Semaphore(24)
-
-        val jobs = candidates.map { spec ->
-            raceScope.launch {
-                sem.withPermit {
-                    if (winner.isCompleted) return@withPermit
-                    val session = sessionFor(spec) ?: return@withPermit
-                    val res = executeRawGet(url, referer = referer, extraHeaders = headers, client = session.client)
-                    if (res != null && isValidEgyDeadHtml(res.code, res.body)) {
-                        winner.complete(spec to res)
-                    } else {
-                        deadProxies.add(spec)
-                        proxySessions.remove(spec)
-                    }
-                }
-            }
-        }
-        raceScope.launch {
-            jobs.forEach { it.join() }
-            winner.complete(null)
-        }
-        val found = withTimeoutOrNull(4_500L) { winner.await() }
-        raceJob.cancel()
-
-        if (found != null) {
-            val (spec, res) = found
-            workingProxies.add(0, spec)
-            EgyDeadPrefs.savedWorkingProxies = workingProxies.distinct().take(6)
-            updateActiveDomainFromUrl(res.finalUrl)
-            return@withLock res
-        }
-        null
     }
 }

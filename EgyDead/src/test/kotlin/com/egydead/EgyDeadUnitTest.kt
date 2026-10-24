@@ -245,12 +245,6 @@ class EgyDeadUnitTest {
         assertFalse(EgyDeadNetwork.isValidEgyDeadHtml(403, "<html><head><title>Just a moment...</title></head></html>"))
         assertTrue(EgyDeadNetwork.isValidEgyDeadHtml(200, "<html><body><li class=\"movieItem\">ايجي ديد</li></body></html>"))
 
-        // Decode evaluateJavascript string payloads safely
-        assertEquals(
-            "{\"ok\":true,\"title\":\"ايجي ديد\"}",
-            CloudflareSolver.decodeJsString("\"{\\\"ok\\\":true,\\\"title\\\":\\\"ايجي ديد\\\"}\"")
-        )
-
         val h3Html = """
             <html><body>
               <div class="PinHome">

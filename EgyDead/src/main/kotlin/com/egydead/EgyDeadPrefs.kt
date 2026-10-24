@@ -142,5 +142,6 @@ object EgyDeadPrefs {
         savedCookieHeader = null
         savedUserAgent = null
         savedWorkingProxies = emptyList()
+        EgyDeadPrefsEncoder.clear()
     }
 }
