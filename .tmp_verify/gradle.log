@@ -24,10 +24,7 @@ Fetching JAR: cloudstream.jar
 > Task :WitAnime:packageDebugResources
 > Task :WitAnime:parseDebugLocalResources
 > Task :WitAnime:generateDebugRFile
-
 > Task :WitAnime:compileDebugKotlin
-w: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeExtractors.kt:424:42 'constructor(lang: String, url: String): SubtitleFile' is deprecated. Use newSubtitleFile method.
-w: file:///home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/src/main/kotlin/com/witanime/WitAnimeNetwork.kt:463:13 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
 
 > Task :WitAnime:compileDex
 Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/build/intermediates/classes.dex
@@ -37,6 +34,6 @@ Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/build/i
 > Task :WitAnime:make
 Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/WitAnime/build/WitAnime.cs3
 
-BUILD SUCCESSFUL in 1m 45s
+BUILD SUCCESSFUL in 1m 44s
 9 actionable tasks: 9 executed
-WitAnime.cs3 size=137811
+WitAnime.cs3 size=138352
