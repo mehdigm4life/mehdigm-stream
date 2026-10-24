@@ -3,18 +3,15 @@ name: Inspect TimeMovies Temp
 on:
   push:
     branches:
-      - 'arena/5a5a9059-mehdigm-stream'
-    paths:
-      - '.github/workflows/re-timemovies-temp.yml'
-
-permissions:
-  contents: read
-  checks: write
+      - "arena/**"
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      checks: write
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,75 +19,55 @@ jobs:
       - name: Set up JDK 17 & Python tools
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Install jadx, pillow, androguard, cryptography & download APKs
+      - name: Install jadx, pillow, androguard & download TimeMovies 1092 APK
         run: |
-          set -e
-          pip install -q pillow pyelftools capstone androguard cryptography
-          mkdir -p /tmp/re/jadx /tmp/re/out /tmp/re/report/icons
-          curl -sSL https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip -o /tmp/re/jadx.zip
+          pip3 install -q pillow androguard
+          mkdir -p /tmp/re/apks /tmp/re/report/icons
+          curl -fsSL "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip" -o /tmp/re/jadx.zip
           unzip -q /tmp/re/jadx.zip -d /tmp/re/jadx
           chmod +x /tmp/re/jadx/bin/jadx
+          curl -fL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk" -o /tmp/re/apks/TimeMovies_1092.apk
 
-          curl -sSL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk" -o /tmp/re/TimeMovies_1092.apk
-          curl -sSL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMoviesTV.v5.0.6.1.build.1086-p1.apk" -o /tmp/re/TimeMoviesTV_1086.apk
-          curl -sSL "https://codeload.github.com/magicsol255/timefiles/zip/refs/heads/main" -o /tmp/re/timefiles_main.zip
-          unzip -q /tmp/re/timefiles_main.zip -d /tmp/re/main_repo
-          cp /tmp/re/main_repo/timefiles-main/TimeMovies.v1.0.6.3.build.1083-p1.apk /tmp/re/TimeMovies_1083.apk
-
-          # Extract icons from 1092 and 1083 + TV manifest
-          python3 - <<'PY' > /tmp/re/report/r3_static.txt 2>&1
-          import zipfile, io, os
+          python3 - <<'PY' > /tmp/re/report/icon_arsc.txt
+          import zipfile
           try:
               from loguru import logger
               logger.disable("androguard")
           except Exception:
               pass
-          from PIL import Image
-          from androguard.core.axml import AXMLPrinter, ARSCParser
+          from androguard.core.axml import ARSCParser, AXMLPrinter
 
-          for tag, p in [("1092", "/tmp/re/TimeMovies_1092.apk"), ("1083", "/tmp/re/TimeMovies_1083.apk"), ("TV1086", "/tmp/re/TimeMoviesTV_1086.apk")]:
-              z = zipfile.ZipFile(p)
-              axml = AXMLPrinter(z.read("AndroidManifest.xml")).get_xml().decode("utf-8", "replace")
-              print(f"=== {tag} MANIFEST ===")
-              for line in axml.splitlines()[:30]:
-                  print(" ", line[:220])
-              imgs = []
-              for n in z.namelist():
-                  if n.startswith("res/") and (n.endswith(".png") or n.endswith(".webp")) and not n.endswith(".9.png"):
-                      try:
-                          raw = z.read(n)
-                          im = Image.open(io.BytesIO(raw))
-                          imgs.append((im.size[0]*im.size[1], len(raw), im.size, n, im))
-                      except Exception:
-                          pass
-              imgs.sort(reverse=True, key=lambda x: (x[0], x[1]))
-              print(f"=== {tag} TOP IMAGES ===")
-              for idx, (px, bsz, sz, n, im) in enumerate(imgs[:15]):
-                  print(f"  {sz} ({bsz}B) {n}")
-                  if tag in ("1092", "1083") and idx < 8 and sz[0] == sz[1] and sz[0] >= 96:
-                      im.save(f"/tmp/re/report/icons/{tag}_{idx}_{sz[0]}x{sz[1]}_{os.path.basename(n)}.png", format="PNG")
+          z = zipfile.ZipFile("/tmp/re/apks/TimeMovies_1092.apk")
+          arsc = ARSCParser(z.read("resources.arsc"))
+          pkg = arsc.get_packages_names()[0]
+          for rid in [0x7f110000, 0x7f110001, 0x7f110002]:
+              print(f"=== {hex(rid)} ===")
               try:
-                  arsc = ARSCParser(z.read("resources.arsc"))
-                  pkg = arsc.get_packages_names()[0]
-                  print(f"=== {tag} ARSC pkg={pkg} ===")
-                  for res_id in [0x7F110002, 0x7F110000, 0x7F110001, 0x7F0E0000, 0x7F0E0001]:
-                      try:
-                          print(f"  0x{res_id:08x} ->", arsc.get_id(pkg, res_id))
-                      except Exception:
-                          pass
+                  print(arsc.get_resolved_res_configs(rid))
               except Exception as e:
-                  print("ARSC err:", e)
+                  print("err:", e)
+          for name in ["res/FG.png", "res/5c.webp", "res/iE.webp"]:
+              if name in z.namelist():
+                  with open("/tmp/re/report/icons/" + name.replace("/", "_"), "wb") as f:
+                      f.write(z.read(name))
+          for name in z.namelist():
+              if name.startswith("res/") and name.endswith(".xml"):
+                  raw = z.read(name)
+                  try:
+                      xml = AXMLPrinter(raw).get_xml().decode("utf-8", "ignore")
+                      if "adaptive-icon" in xml or "mB" in xml or "ic_launcher" in xml:
+                          print(f"=== XML {name} ===\n{xml}")
+                  except Exception:
+                      pass
           PY
-          cat /tmp/re/report/r3_static.txt
 
-      - name: Compile NDK memory DEX + TMSTRV1 dumper and prepare emulator script
+      - name: Compile NDK memory DEX dumper and prepare emulator script
         run: |
-          NDK_CC=$(find $ANDROID_HOME/ndk -name "x86_64-linux-android30-clang" | sort | tail -n 1)
           cat << 'EOF' > /tmp/re/dexdump_mem.c
-          #define _LARGEFILE64_SOURCE
+          #define _GNU_SOURCE
           #include <stdio.h>
           #include <stdlib.h>
           #include <stdint.h>
@@ -98,178 +75,91 @@ jobs:
           #include <fcntl.h>
           #include <unistd.h>
 
-          static uint32_t ru32(const uint8_t *p) {
-              return (uint32_t)p[0] | ((uint32_t)p[1]<<8) | ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
+          static int is_dex_magic(const uint8_t *p) {
+              if (memcmp(p, "dex\n0", 5) != 0 && memcmp(p, "cdex0", 5) != 0) return 0;
+              if (p[7] != 0) return 0;
+              return (p[5] >= '0' && p[5] <= '9' && p[6] >= '0' && p[6] <= '9');
           }
 
           int main(int argc, char **argv) {
               if (argc < 3) return 1;
               int pid = atoi(argv[1]);
               const char *outdir = argv[2];
-              char maps_path[128], mem_path[128];
+              char maps_path[256], mem_path[256];
               snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
               snprintf(mem_path, sizeof(mem_path), "/proc/%d/mem", pid);
               FILE *maps = fopen(maps_path, "r");
-              int mem = open(mem_path, O_RDONLY);
-              if (!maps || mem < 0) { perror("open proc"); return 2; }
+              int memfd = open(mem_path, O_RDONLY);
+              if (!maps || memfd < 0) return 1;
               char line[1024];
-              int found = 0, strfound = 0;
+              int found = 0;
               while (fgets(line, sizeof(line), maps)) {
-                  unsigned long start, end;
-                  char perms[8];
-                  if (sscanf(line, "%lx-%lx %4s", &start, &end, perms) != 3) continue;
-                  if (perms[0] != 'r') continue;
-                  if (strstr(line, "/system/") || strstr(line, "/apex/") || strstr(line, "/vendor/") || strstr(line, "/dev/")) continue;
-                  size_t region_size = end - start;
-                  if (region_size < 0x70 || region_size > 256 * 1024 * 1024) continue;
-                  uint8_t *buf = malloc(region_size);
+                  unsigned long start = 0, end = 0;
+                  char perms[8] = {0};
+                  char path[512] = {0};
+                  int n = sscanf(line, "%lx-%lx %4s %*s %*s %*s %511[^\n]", &start, &end, perms, path);
+                  if (n < 3) continue;
+                  if (perms[0] != 'r' || perms[1] != '-') continue;
+                  size_t region_sz = end - start;
+                  if (region_sz < 1024 || region_sz > (256UL * 1024 * 1024)) continue;
+                  if (strstr(path, "/system/framework/") || strstr(path, "/apex/")) continue;
+
+                  uint8_t *buf = malloc(region_sz);
                   if (!buf) continue;
-                  ssize_t n = pread64(mem, buf, region_size, (off64_t)start);
-                  if (n > 0x78) {
-                      for (size_t off = 0; off + 0x78 <= (size_t)n; off += 4) {
-                          if (memcmp(buf + off, "TMSTRV1\0", 8) == 0 && off + 116 <= (size_t)n) {
-                              uint32_t ver = ru32(buf + off + 8);
-                              uint32_t rcnt = ru32(buf + off + 112);
-                              if (ver == 2 && rcnt > 0 && rcnt < 100000) {
-                                  size_t cur = off + 116;
-                                  int ok = 1;
-                                  for (uint32_t r = 0; r < rcnt; r++) {
-                                      if (cur + 76 > (size_t)n) { ok = 0; break; }
-                                      uint32_t ctlen = ru32(buf + cur + 72);
-                                      if (ctlen > 1024 * 1024 || cur + 76 + ctlen > (size_t)n) { ok = 0; break; }
-                                      cur += 76 + ctlen;
-                                  }
-                                  if (ok) {
-                                      char outpath[512];
-                                      snprintf(outpath, sizeof(outpath), "%s/tm_strings_%d.dat", outdir, strfound++);
-                                      FILE *out = fopen(outpath, "wb");
-                                      if (out) {
-                                          fwrite(buf + off, 1, cur - off, out);
-                                          fclose(out);
-                                          printf("Dumped TMSTRV1 %s (%zu bytes, %u records)\n", outpath, cur - off, rcnt);
-                                      }
-                                  }
+                  ssize_t rd = pread(memfd, buf, region_sz, (off_t)start);
+                  if (rd > 112) {
+                      for (size_t off = 0; off + 112 <= (size_t)rd; off += 4) {
+                          const uint8_t *p = buf + off;
+                          uint32_t fsize = *(const uint32_t *)(p + 32);
+                          uint32_t hsize = *(const uint32_t *)(p + 36);
+                          uint32_t endian = *(const uint32_t *)(p + 40);
+                          if (is_dex_magic(p) && (hsize == 0x70 || hsize == 0x78) && endian == 0x12345678 && fsize > 1000 && fsize <= 64*1024*1024) {
+                              size_t avail = (size_t)rd - off;
+                              size_t to_write = fsize <= avail ? fsize : avail;
+                              char outpath[512];
+                              snprintf(outpath, sizeof(outpath), "%s/dump_%03d_%lx_%u.dex", outdir, found++, start + off, fsize);
+                              FILE *out = fopen(outpath, "wb");
+                              if (out) {
+                                  fwrite(p, 1, to_write, out);
+                                  fclose(out);
+                                  printf("Dumped %s (%zu/%u)\n", outpath, to_write, fsize);
                               }
-                          }
-                          uint32_t file_size = *(uint32_t *)(buf + off + 0x20);
-                          uint32_t header_size = *(uint32_t *)(buf + off + 0x24);
-                          uint32_t endian_tag = *(uint32_t *)(buf + off + 0x28);
-                          uint32_t string_ids_size = *(uint32_t *)(buf + off + 0x38);
-                          uint32_t class_defs_size = *(uint32_t *)(buf + off + 0x60);
-                          int is_dex = 0;
-                          if (memcmp(buf + off, "dex\n0", 5) == 0 && buf[off + 7] == 0 && (header_size == 0x70 || header_size == 0x78) && endian_tag == 0x12345678) {
-                              is_dex = 1;
-                          } else if ((header_size == 0x70 || header_size == 0x78) && endian_tag == 0x12345678 &&
-                                     file_size > 0x1000 && file_size < 80 * 1024 * 1024 &&
-                                     string_ids_size > 10 && string_ids_size < 2000000 &&
-                                     class_defs_size > 0 && class_defs_size < 500000) {
-                              is_dex = 2;
-                          }
-                          if (is_dex) {
-                              uint32_t dump_sz = file_size;
-                              if (header_size == 0x78) {
-                                  uint32_t cont_sz = *(uint32_t *)(buf + off + 0x70);
-                                  uint32_t hdr_off = *(uint32_t *)(buf + off + 0x74);
-                                  if (hdr_off == 0 && cont_sz >= file_size && cont_sz < 120 * 1024 * 1024) {
-                                      dump_sz = cont_sz;
-                                  }
-                              }
-                              if (dump_sz > 0x70 && dump_sz < 120 * 1024 * 1024) {
-                                  size_t avail = (size_t)n - off;
-                                  size_t to_write = dump_sz <= avail ? dump_sz : avail;
-                                  char outpath[512];
-                                  snprintf(outpath, sizeof(outpath), "%s/dump_%03d_%lx_%u.dex", outdir, found++, start + off, dump_sz);
-                                  FILE *out = fopen(outpath, "wb");
-                                  if (out) {
-                                      uint8_t hdr[8];
-                                      memcpy(hdr, header_size == 0x78 ? "dex\n041\0" : "dex\n039\0", 8);
-                                      if (is_dex == 2) {
-                                          fwrite(hdr, 1, 8, out);
-                                          fwrite(buf + off + 8, 1, to_write - 8, out);
-                                      } else {
-                                          fwrite(buf + off, 1, to_write, out);
-                                      }
-                                      fclose(out);
-                                      printf("Dumped %s (mode=%d, size=%zu/%u) from %s", outpath, is_dex, to_write, dump_sz, line);
-                                  }
-                                  if (header_size == 0x78 && dump_sz > file_size) {
-                                      off += ((dump_sz > 4 ? dump_sz : 4) - 4) & ~3UL;
-                                  } else if (dump_sz > 0x1000) {
-                                      off += ((file_size > 4 ? file_size : 4) - 4) & ~3UL;
-                                  }
-                              }
+                              if (fsize >= 0x70) off += ((fsize - 4) & ~3UL);
                           }
                       }
                   }
                   free(buf);
               }
               fclose(maps);
-              close(mem);
+              close(memfd);
               return 0;
           }
           EOF
-          $NDK_CC -O2 -static /tmp/re/dexdump_mem.c -o /tmp/re/dexdump_mem
+          NDK_CLANG=$(find "$ANDROID_HOME/ndk" -name "x86_64-linux-android24-clang" | sort | tail -n 1)
+          "$NDK_CLANG" -O2 -static /tmp/re/dexdump_mem.c -o /tmp/re/dexdump_mem
 
-          cat << 'EOS' > /tmp/re/run_emu.sh
+          cat << 'EMUSCRIPT' > /tmp/re/run_emu.sh
           #!/usr/bin/env bash
-          set +e
+          set -x
           exec > /tmp/re/report/emu_trace.txt 2>&1
-          echo "=== run_emu.sh started ==="
-          adb devices -l
-          adb root || true
-          sleep 2
-          adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
-          adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1083 /data/local/tmp/tm1092 /data/local/tmp/tmtv"
-
-          echo "=== 1) Unpacking TimeMovies 1083 (com.funpainty.funtime) ==="
-          adb install -r /tmp/re/TimeMovies_1083.apk
-          adb logcat -c || true
-          adb shell "tcpdump -i any -nn -s 512 -w /data/local/tmp/net1083.pcap >/dev/null 2>&1 &" || true
-          adb shell monkey -p com.funpainty.funtime -c android.intent.category.LAUNCHER 1 || true
-          sleep 10
-          PID83=$(adb shell pidof com.funpainty.funtime | tr -d '\r')
-          echo "1083 PID=$PID83"
-          if [ -n "$PID83" ]; then
-            adb shell "/data/local/tmp/dexdump_mem $PID83 /data/local/tmp/tm1083"
-            adb shell "cat /proc/$PID83/maps" > /tmp/re/report/maps_1083.txt
-            adb shell "ls -laR /data/data/com.funpainty.funtime" > /tmp/re/report/files_1083.txt
-          fi
-          adb shell "killall tcpdump" || true
-          adb logcat -d > /tmp/re/report/logcat_1083.txt
-          mkdir -p /tmp/re/dumped_1083
-          adb pull /data/local/tmp/tm1083 /tmp/re/dumped_1083/ || true
-          adb pull /data/local/tmp/net1083.pcap /tmp/re/report/net1083.pcap || true
-          adb shell am force-stop com.funpainty.funtime || true
-
-          echo "=== 2) Unpacking TimeMovies 1092 (com.extremeqr.proapps) ==="
-          # Hide su binary on userdebug image so libprotector anti_root doesn't trigger
-          adb remount || true
-          adb shell "mv /system/xbin/su /system/xbin/su.bak 2>/dev/null || true; mv /system/bin/su /system/bin/su.bak 2>/dev/null || true"
-          adb install -r /tmp/re/TimeMovies_1092.apk
-          adb logcat -c || true
-          adb shell "tcpdump -i any -nn -s 512 -w /data/local/tmp/net1092.pcap >/dev/null 2>&1 &" || true
-          adb shell am start -n com.extremeqr.proapps/com.extremeqr.proapps.ui.screens.activity.MainActivity || true
-          for step in 1 2 3 4 5; do
-            sleep 2
-            PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
-            echo "1092 step $step: PID=$PID92"
-            if [ -n "$PID92" ]; then
-              adb shell "mkdir -p /data/local/tmp/tm1092_$step && /data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092_$step"
-              adb shell "cat /proc/$PID92/maps" > /tmp/re/report/maps_1092_$step.txt
-              adb shell "ls -laR /data/data/com.extremeqr.proapps" > /tmp/re/report/files_1092.txt
-            fi
-          done
-          adb shell "killall tcpdump" || true
-          adb logcat -d > /tmp/re/report/logcat_1092.txt
           mkdir -p /tmp/re/dumped_1092
-          for step in 1 2 3 4 5; do
-            adb pull /data/local/tmp/tm1092_$step /tmp/re/dumped_1092/ || true
-          done
-          adb pull /data/local/tmp/net1092.pcap /tmp/re/report/net1092.pcap || true
-          echo "=== run_emu.sh finished ==="
-          exit 0
-          EOS
+          adb root || true
+          sleep 1
+          adb remount || true
+          adb shell "mv /system/xbin/su /system/xbin/su.bak 2>/dev/null || true; mv /system/bin/su /system/bin/su.bak 2>/dev/null || true" || true
+          adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
+          adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1092"
+          adb install -r /tmp/re/apks/TimeMovies_1092.apk
+          adb shell am start -n com.extremeqr.proapps/.ui.screens.activity.MainActivity || true
+          sleep 7
+          PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
+          echo "1092 PID=$PID92"
+          adb shell "/data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092"
+          adb pull /data/local/tmp/tm1092 /tmp/re/dumped_1092/ || true
+          echo "done"
+          EMUSCRIPT
           chmod +x /tmp/re/run_emu.sh
+          bash -n /tmp/re/run_emu.sh
 
       - name: Enable KVM
         run: |
@@ -278,149 +168,183 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run Android Emulator (API 30 default x86_64)
-        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           target: default
           arch: x86_64
-          profile: Nexus 6
-          ram-size: 4096M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -writable-system
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -writable-system
           script: bash /tmp/re/run_emu.sh
 
-      - name: Decrypt TMSTRV1, extract pcap SNIs, decompile DEXs, and publish check-runs
+      - name: Extract DEX strings, decompile app defpackage classes, and publish check-runs
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ls -laR /tmp/re/dumped_1083 /tmp/re/dumped_1092 /tmp/re/report || true
+          python3 - <<'PY' > /tmp/re/report/dex_intel.txt
+          import glob, re
+          try:
+              from loguru import logger
+              logger.disable("androguard")
+          except Exception:
+              pass
+          from androguard.core.dex import DEX
 
-          # Extract readable hostnames / SNIs from pcaps
-          for pc in /tmp/re/report/net1083.pcap /tmp/re/report/net1092.pcap; do
-            if [ -f "$pc" ]; then
-              strings -n 5 "$pc" | sort -u > "${pc}.strings.txt" || true
-              rm -f "$pc"
-            fi
-          done
+          dex_files = sorted(glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True))
+          print("DEX files:", dex_files)
+          re_hex32 = re.compile(r"^[0-9a-f]{32}$")
+          re_hex24 = re.compile(r"^[0-9a-f]{24}$")
+          keywords = (
+              "http://", "https://", "://", "apks.lol", "devmagics", "tmovies", "subtools",
+              "doomplayer", "doomvideo", "vplayer", "timesn", "timesd", "resolve-play", "resolve-download",
+              "HmacSHA", "AES/GCM", "AES/CBC", "ECDSA", "SecretKeySpec", "PBKDF2",
+              "/api/v", "/api/player", "x-t", "x-b", "x-p", "m-a", "watch_token", "prepare_token"
+          )
 
-          # Decrypt any tm_strings_*.dat files
-          python3 - <<'PY'
-          import glob, struct, json, os
-          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-          DOMAIN_STRING = b"TM_DEX_STRING_V1"
-          for idx_f, p in enumerate(sorted(glob.glob("/tmp/re/dumped_1092/**/tm_strings_*.dat", recursive=True))):
-              data = open(p, "rb").read()
-              if data[:8] != b"TMSTRV1\x00":
+          for df in dex_files:
+              if "_23436.dex" in df or "_12840.dex" in df:
                   continue
-              ver = struct.unpack_from("<I", data, 8)[0]
-              key = data[16:48]
-              pkg_hash = data[48:80]
-              cert_hash = data[80:112]
-              rcnt = struct.unpack_from("<I", data, 112)[0]
-              aes = AESGCM(key)
-              out = {}
-              off = 116
-              for _ in range(rcnt):
-                  rid = struct.unpack_from("<i", data, off)[0]
-                  owner = struct.unpack_from("<q", data, off + 4)[0]
-                  nonce = data[off + 44 : off + 56]
-                  tag = data[off + 56 : off + 72]
-                  ctlen = struct.unpack_from("<i", data, off + 72)[0]
-                  ct = data[off + 76 : off + 76 + ctlen]
-                  off += 76 + ctlen
-                  aad = bytearray(96)
-                  aad[0:16] = DOMAIN_STRING
-                  aad[16:48] = pkg_hash
-                  aad[48:80] = cert_hash
-                  struct.pack_into("<qII", aad, 80, owner, rid & 0xffffffff, ver)
-                  try:
-                      pt = aes.decrypt(nonce, ct + tag, bytes(aad)).decode("utf-8", "replace")
-                      out[str(rid)] = pt
-                  except Exception as e:
-                      out[str(rid)] = f"<ERR:{e}>"
-              out_json = f"/tmp/re/report/tm_strings_dec_{idx_f}.json"
-              json.dump(out, open(out_json, "w"), ensure_ascii=False, indent=2)
-              print(f"Decrypted {len(out)} strings from {p} -> {out_json}")
-              break
+              print(f"\n================ {df} ================")
+              d = DEX(open(df, "rb").read())
+              strs = d.get_strings()
+              print(f"Total strings: {len(strs)}")
+              hex32 = [s for s in strs if re_hex32.match(s)]
+              hex24 = [s for s in strs if re_hex24.match(s)]
+              print(f"HEX32 ({len(hex32)}):", hex32)
+              print(f"HEX24 ({len(hex24)}):", hex24)
+              hits = [s for s in strs if any(k in s for k in keywords) and len(s) < 300]
+              print(f"Keyword hits ({len(hits)}):")
+              for h in sorted(set(hits)):
+                  print("  STR:", repr(h))
           PY
 
-          mkdir -p /tmp/re/jadx_1083 /tmp/re/jadx_1092
-          # Deduplicate dumped DEXs by size before running jadx so we don't decompile 5 identical copies
-          python3 - <<'PY'
-          import glob, os, subprocess
+          mkdir -p /tmp/re/jadx_tm1092 /tmp/re/r4_defpkg
+          DEXS=$(find /tmp/re/dumped_1092 -name "dump_00[0-3]_*.dex" | sort)
+          /tmp/re/jadx/bin/jadx -j 4 -d /tmp/re/jadx_tm1092 $DEXS || true
 
-          for out_jadx, pattern in [
-              ("/tmp/re/jadx_1083", "/tmp/re/dumped_1083/**/*.dex"),
-              ("/tmp/re/jadx_1092", "/tmp/re/dumped_1092/**/*.dex"),
-          ]:
-              seen_sizes = set()
-              dexes = []
-              for d in sorted(glob.glob(pattern, recursive=True)):
-                  sz = os.path.getsize(d)
-                  if sz > 10000 and sz not in seen_sizes:
-                      seen_sizes.add(sz)
-                      dexes.append(d)
-              print(f"{out_jadx}: unique DEX files = {[(os.path.basename(x), os.path.getsize(x)) for x in dexes]}")
-              for d in dexes:
-                  subprocess.run(["/tmp/re/jadx/bin/jadx", "-j", "4", "--show-bad-code", "-d", out_jadx, d], check=False)
+          python3 - <<'PY'
+          import os, re, shutil
+
+          src_dir = "/tmp/re/jadx_tm1092/sources/defpackage"
+          out_dir = "/tmp/re/r4_defpkg"
+          os.makedirs(out_dir, exist_ok=True)
+
+          explicit = {
+              "fx", "y52", "lb9", "bb8", "q00", "de9", "ek2", "ro", "dk2", "f18",
+              "kv", "jw6", "hx6", "cw9", "dw9", "jy8", "uc1", "tc1", "g92",
+              "bj2", "dj2", "ej2", "fj2", "gj2", "hj2", "ij2", "jj2", "kj2", "lj2",
+              "mj2", "nj2", "oj2", "pj2", "qj2", "rj2", "wj2"
+          }
+
+          high_value_terms = (
+              "retrofit2.", "okhttp3.Interceptor", "CertificatePinner", "X509TrustManager",
+              "HostnameVerifier", "javax.crypto", "HmacSHA", "AES/GCM", "GCMParameterSpec",
+              "SecretKeySpec", "KeyPairGenerator", "AndroidKeyStore", "ECDSA",
+              "apks.lol", "devmagics", "tmovies", "subtools", "timesn", "timesd",
+              "doomplayer", "doomvideo", "vplayer", "resolve-play", "resolve-download",
+              "60129f", "6a5216", "hm25", "1.0.6.5", "PBKDF2", "Mac.getInstance", "Cipher.getInstance",
+              "com.protector", "VidStream", "MediaV2", "MediaGrant", "MediaQualit",
+              "FreeDownload", "WKI", "WKC", "AHMRS", "HMRS", "CategoryPageWorkList",
+              "GenrePageWorkList", "SearchTripleResponse", "ApiPageResult", "ApiWorkResult",
+              "ApiSearchPageResult", "DeviceKey", "AppData", "AST", "DWI", "EDWI", "SubtitleTrack"
+          )
+
+          selected = set()
+          core_seeds = set()
+          re_imp = re.compile(r"import defpackage\.([A-Za-z0-9_$]+);")
+
+          all_files = {}
+          if os.path.isdir(src_dir):
+              for fn in os.listdir(src_dir):
+                  if not fn.endswith(".java"):
+                      continue
+                  cls = fn[:-5]
+                  p = os.path.join(src_dir, fn)
+                  with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                      txt = f.read()
+                  all_files[cls] = txt
+
+                  if cls in explicit:
+                      selected.add(cls)
+                      core_seeds.add(cls)
+                      continue
+
+                  if any(t in txt for t in high_value_terms):
+                      # Skip pure Compose UI lambdas unless they touch player/intents/ViewModel/repo
+                      if "androidx.compose." in txt and not any(k in txt for k in (
+                          "Intent", "Uri", "times", "doom", "vplayer", "Base64", "fx", "bb8",
+                          "Interceptor", "Cipher", "Mac", "SecretKey", "HttpUrl", "Request"
+                      )):
+                          continue
+                      selected.add(cls)
+                      if any(t in txt for t in (
+                          "retrofit2.", "okhttp3.Interceptor", "javax.crypto", "HmacSHA",
+                          "AES/GCM", "GCMParameterSpec", "SecretKeySpec", "apks.lol",
+                          "devmagics", "timesn", "timesd", "doomplayer", "doomvideo", "vplayer"
+                      )):
+                          core_seeds.add(cls)
+                  elif "com.extremeqr.proapps" in txt and "androidx.compose." not in txt:
+                      selected.add(cls)
+
+          # Expand 2 hops from core_seeds (fx, bb8, q00, interceptors, crypto, network modules)
+          frontier = set(core_seeds)
+          for hop in range(2):
+              nxt = set()
+              for cls in frontier:
+                  txt = all_files.get(cls, "")
+                  for m in re_imp.finditer(txt):
+                      dep = m.group(1)
+                      if dep in all_files and dep not in selected:
+                          dtxt = all_files[dep]
+                          if "androidx.compose." not in dtxt and len(dtxt) < 120000:
+                              selected.add(dep)
+                              nxt.add(dep)
+              frontier = nxt
+
+          print(f"Selected {len(selected)} defpackage classes out of {len(all_files)}")
+          with open("/tmp/re/report/selected_defpkg.txt", "w") as f:
+              for cls in sorted(selected):
+                  f.write(cls + "\n")
+                  shutil.copy2(os.path.join(src_dir, cls + ".java"), os.path.join(out_dir, cls + ".java"))
           PY
 
+          tar -czf /tmp/re/r4_bundle.tar.gz -C /tmp/re report r4_defpkg
+          ls -lh /tmp/re/r4_bundle.tar.gz
+
           python3 - <<'PY'
-          import os, shutil, tarfile, base64, json, subprocess
+          import os, base64, json, subprocess
 
-          skip_subs = ["/R.java", "Dagger", "Hilt_", "_HiltModules", "_Factory.java", "_GeneratedInjector.java", "_MembersInjector.java", "_Impl.java", "ComposableSingletons$", "/ads/"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA"]
 
-          for tag, src_base, kws in [
-              ("tm1083", "/tmp/re/jadx_1083/sources", ["funpainty", "funtime", "vplayer", "doomvideo", "extremeqr"]),
-              ("tm1092", "/tmp/re/jadx_1092/sources", ["extremeqr", "proapps", "protector", "funpainty", "funtime", "doomvideo"]),
-          ]:
-              dst_base = f"/tmp/re/clean_{tag}"
-              os.makedirs(dst_base, exist_ok=True)
-              idx = []
-              copied = 0
-              if os.path.isdir(src_base):
-                  for root, _, files in os.walk(src_base):
-                      for f in sorted(files):
-                          if not f.endswith(".java"):
-                              continue
-                          full = os.path.join(root, f)
-                          rel = os.path.relpath(full, src_base)
-                          idx.append(rel)
-                          if any(k in rel for k in kws) and not any(s in full for s in skip_subs):
-                              out = os.path.join(dst_base, rel)
-                              os.makedirs(os.path.dirname(out), exist_ok=True)
-                              shutil.copyfile(full, out)
-                              copied += 1
-              open(f"/tmp/re/report/index_{tag}.txt", "w").write("\n".join(idx))
-              print(f"{tag}: total_classes={len(idx)}, copied_app_classes={copied}")
-
-          with tarfile.open("/tmp/re/r3_bundle.tar.gz", "w:gz") as tf:
-              tf.add("/tmp/re/report", arcname="report")
-              if os.path.isdir("/tmp/re/clean_tm1083"):
-                  tf.add("/tmp/re/clean_tm1083", arcname="clean_tm1083")
-              if os.path.isdir("/tmp/re/clean_tm1092"):
-                  tf.add("/tmp/re/clean_tm1092", arcname="clean_tm1092")
-
-          sha = os.environ.get("GITHUB_SHA")
-          repo = os.environ.get("GITHUB_REPOSITORY")
-          b64 = base64.b64encode(open("/tmp/re/r3_bundle.tar.gz", "rb").read()).decode("ascii")
-          chunk_size = 60000
-          chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
-          print(f"Uploading r3_bundle.tar.gz: {len(b64)} b64 chars in {len(chunks)} chunks")
-          for idx, ch in enumerate(chunks[:45]):
-              payload = {
-                  "name": f"r3-tm-{idx:02d}",
-                  "head_sha": sha,
-                  "status": "completed",
-                  "conclusion": "success",
-                  "output": {
-                      "title": f"r3-tm {idx+1}/{len(chunks)}",
-                      "summary": f"total={len(chunks)} size={len(b64)}",
-                      "text": ch
+          def upload_tar(path, prefix):
+              if not os.path.exists(path):
+                  return
+              with open(path, "rb") as f:
+                  b64 = base64.b64encode(f.read()).decode("ascii")
+              chunk_sz = 60000
+              chunks = [b64[i:i+chunk_sz] for i in range(0, len(b64), chunk_sz)]
+              print(f"Uploading {prefix}: {len(b64)} b64 chars in {len(chunks)} chunks")
+              for idx, ch in enumerate(chunks[:55]):
+                  payload = {
+                      "name": f"{prefix}-{idx:02d}",
+                      "head_sha": sha,
+                      "status": "completed",
+                      "conclusion": "success",
+                      "output": {
+                          "title": f"{prefix} part {idx+1}/{len(chunks)}",
+                          "summary": f"total={len(chunks)} size={len(b64)}",
+                          "text": ch
+                      }
                   }
-              }
-              open("/tmp/re/cp.json", "w").write(json.dumps(payload))
-              subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/check-runs", "--input", "/tmp/re/cp.json"], check=False)
+                  p = subprocess.run(
+                      ["gh", "api", f"repos/{repo}/check-runs", "--method", "POST", "--input", "-"],
+                      input=json.dumps(payload).encode("utf-8"),
+                      capture_output=True
+                  )
+                  if p.returncode != 0:
+                      print("ERR:", p.stderr.decode("utf-8", "ignore")[:300])
+
+          upload_tar("/tmp/re/r4_bundle.tar.gz", "r4-tm")
           PY
