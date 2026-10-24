@@ -54,37 +54,26 @@ class EgyDead : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
+        "/h3/#featured" to "المواضيع المميزة",
+        "/h3/#recent" to "المضاف حديثاً",
         "/movies/" to "أحدث الأفلام",
         "/episodes/" to "أحدث الحلقات",
         "/seasons/" to "أحدث المواسم",
-        "/Series/" to "المسلسلات الكاملة",
+        "/Series/" to "جميع المسلسلات",
         "/category/english-movies/" to "أفلام أجنبية",
         "/category/english-movies/english-movies-dubbed/" to "أفلام أجنبية مدبلجة",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/" to "أفلام عربية",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/" to "أفلام تركية",
-        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/" to "أفلام تركية مدبلجة",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/" to "أفلام آسيوية",
-        "/category/hindi-movies/" to "أفلام هندية",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/" to "أفلام أنمي",
-        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/" to "أفلام أنمي مدبلجة",
         "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/" to "أفلام كرتون",
-        "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86-%d8%af%d9%8a%d8%b2%d9%86%d9%8a-%d8%a8%d8%a7%d9%84%d9%84%d9%87%d8%ac%d8%a9-%d8%a7%d9%84%d9%85%d8%b5%d8%b1%d9%8a%d8%a9/" to "أفلام ديزني بالمصري",
         "/film-series/" to "سلاسل الأفلام",
         "/series-category/english-series/" to "مسلسلات أجنبية",
-        "/series-category/english-series-dubbed/" to "مسلسلات أجنبية مدبلجة",
         "/series-category/arabic-series/" to "مسلسلات عربية",
         "/series-category/turkish-series/" to "مسلسلات تركية",
-        "/series-category/turkish-series-dubbed/" to "مسلسلات تركية مدبلجة",
         "/series-category/asian-series/" to "مسلسلات آسيوية وكورية",
         "/series-category/anime-series/" to "مسلسلات أنمي",
-        "/series-category/anime-series-dubbed/" to "مسلسلات أنمي مدبلجة",
-        "/series-category/cartoon-series/" to "مسلسلات كرتون",
-        "/series-category/cartoon-series-dubbed/" to "مسلسلات كرتون مدبلجة",
-        "/series-category/latino-series/" to "مسلسلات لاتينية وإسبانية",
-        "/series-category/indian-series/" to "مسلسلات هندية",
-        "/series-category/documentary-series/" to "مسلسلات وثائقية",
-        "/series-category/tv-shows/" to "برامج تلفزيونية",
-        "/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%88%d8%ad%d9%81%d9%84%d8%a7%d8%aa/" to "عروض وحفلات ومصارعة"
+        "/series-category/anime-series-dubbed/" to "مسلسلات أنمي مدبلجة"
     )
 
     // =========================================================================
@@ -304,11 +293,13 @@ class EgyDead : MainAPI() {
         val yearMatch = Regex("""\b(19\d{2}|20\d{2})\b""").find(rawTitle)?.groupValues?.get(1)?.toIntOrNull()
         val sq = mapQualityBadge(qualityBadge)
 
+        val imgHeaders = EgyDeadNetwork.getImageHeaders()
         return when (tvType) {
             TvType.Anime, TvType.Cartoon, TvType.TvSeries -> {
                 if (isDub || epNum != null || tvType == TvType.Anime) {
                     newAnimeSearchResponse(title, canonicalHref, tvType) {
                         this.posterUrl = poster
+                        this.posterHeaders = imgHeaders
                         this.year = yearMatch
                         if (sq != null) this.quality = sq
                         addDubStatus(isDub, isSub, epNum, epNum)
@@ -316,6 +307,7 @@ class EgyDead : MainAPI() {
                 } else {
                     newTvSeriesSearchResponse(title, canonicalHref, tvType) {
                         this.posterUrl = poster
+                        this.posterHeaders = imgHeaders
                         this.year = yearMatch
                         if (sq != null) this.quality = sq
                     }
@@ -324,6 +316,7 @@ class EgyDead : MainAPI() {
             TvType.AnimeMovie, TvType.Movie -> {
                 newMovieSearchResponse(title, canonicalHref, tvType) {
                     this.posterUrl = poster
+                    this.posterHeaders = imgHeaders
                     this.year = yearMatch
                     if (sq != null) this.quality = sq
                 }
@@ -345,6 +338,67 @@ class EgyDead : MainAPI() {
         return out
     }
 
+    /**
+     * Parses a specific curated section (`#featured` -> `المواضيع المميزه`, `#recent` -> `المضاف حديثا`)
+     * from EgyDead's official landing page (`https://tv10.egydead.live/h3/`).
+     */
+    internal fun parseHomeLandingSection(doc: Document, sectionKey: String): List<SearchResponse> {
+        val keywords = when (sectionKey) {
+            "featured" -> listOf("المواضيع المميز", "المميزة", "المميزه", "المثبت")
+            "recent" -> listOf("المضاف حديث", "اضيف حديث", "أحدث الإضافات")
+            else -> emptyList()
+        }
+
+        if (keywords.isNotEmpty()) {
+            for (heading in doc.select("h1, h2, h3, .TitleMaster, .section-title")) {
+                val hText = heading.text().trim()
+                if (keywords.any { hText.contains(it) }) {
+                    // Check immediate sibling list or enclosing section block
+                    val siblingCards = heading.nextElementSiblings()
+                        .firstOrNull { it.selectFirst("li.movieItem") != null }
+                        ?.select("li.movieItem")
+
+                    val cards = if (!siblingCards.isNullOrEmpty()) {
+                        siblingCards
+                    } else {
+                        var parent: Element? = heading.parent()
+                        var found: List<Element> = emptyList()
+                        var depth = 0
+                        while (parent != null && depth < 3) {
+                            val candidate = parent.select("li.movieItem")
+                            // Avoid grabbing the entire page body wrapper (which has 80+ items)
+                            if (candidate.isNotEmpty() && candidate.size <= 45) {
+                                found = candidate
+                                break
+                            }
+                            parent = parent.parent()
+                            depth++
+                        }
+                        found
+                    }
+
+                    if (cards.isNotEmpty()) {
+                        val seen = HashSet<String>()
+                        val parsed = mutableListOf<SearchResponse>()
+                        for (c in cards) {
+                            val item = c.toSearchResult() ?: continue
+                            if (seen.add(item.url)) parsed.add(item)
+                        }
+                        if (parsed.isNotEmpty()) return parsed
+                    }
+                }
+            }
+        }
+
+        // Resilient fallback if section titles ever change in future theme updates
+        val all = parseCardList(doc)
+        return when (sectionKey) {
+            "featured" -> all.take(26)
+            "recent" -> if (all.size > 26) all.takeLast(26) else all
+            else -> all
+        }
+    }
+
     // =========================================================================
     // Main Page & Infinite-Scroll Search
     // =========================================================================
@@ -353,13 +407,26 @@ class EgyDead : MainAPI() {
         val base = EgyDeadNetwork.getBaseUrl()
         mainUrl = base
         val sectionPath = request.data.trim()
+
+        // Fast shared `/h3/` landing shelves (both shelves share ONE cached `/h3/` request!)
+        if (sectionPath.startsWith("/h3/#")) {
+            if (page > 1) {
+                return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
+            }
+            val sectionKey = sectionPath.substringAfter("#")
+            val homeDoc = EgyDeadNetwork.getHomeLandingDocument()
+                ?: return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
+            val items = parseHomeLandingSection(homeDoc, sectionKey)
+            return newHomePageResponse(HomePageList(request.name, items), hasNext = false)
+        }
+
         val targetUrl = if (page <= 1) {
             "$base$sectionPath"
         } else {
             "$base${sectionPath.trimEnd('/')}/page/$page/"
         }
 
-        val doc = EgyDeadNetwork.fetchDocument(targetUrl, referer = "$base/")
+        val doc = EgyDeadNetwork.fetchDocument(targetUrl, referer = "$base${EgyDeadNetwork.HOME_LANDING_PATH}")
             ?: return newHomePageResponse(HomePageList(request.name, emptyList()), hasNext = false)
 
         val items = parseCardList(doc)
@@ -371,13 +438,13 @@ class EgyDead : MainAPI() {
         return newHomePageResponse(HomePageList(request.name, items), hasNext = hasNext)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> = coroutineScope {
+    override suspend fun search(query: String): List<SearchResponse> {
         val q = query.trim()
-        if (q.isEmpty()) return@coroutineScope emptyList()
-        val pages = (1..2).map { p ->
-            async(Dispatchers.IO) { search(q, p)?.items.orEmpty() }
-        }.awaitAll().flatten()
-        pages.distinctBy { it.url }
+        if (q.isEmpty()) return emptyList()
+        val first = search(q, 1) ?: return emptyList()
+        if (!first.hasNext) return first.items.distinctBy { it.url }
+        val second = search(q, 2)?.items.orEmpty()
+        return (first.items + second).distinctBy { it.url }
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList? {
@@ -392,7 +459,7 @@ class EgyDead : MainAPI() {
             "$base/page/$page/?s=$encoded"
         }
 
-        val doc = EgyDeadNetwork.fetchDocument(searchUrl, referer = "$base/") ?: return null
+        val doc = EgyDeadNetwork.fetchDocument(searchUrl, referer = "$base${EgyDeadNetwork.HOME_LANDING_PATH}") ?: return null
         val items = parseCardList(doc)
         val hasNext = items.isNotEmpty() && (
             doc.selectFirst(".pagination a.next, a.next.page-numbers, .pagination a[href*=\"/page/${page + 1}/\"]") != null ||
@@ -726,6 +793,7 @@ class EgyDead : MainAPI() {
         val movieTitle = cleanTitle(meta.rawTitle, keepDubTag = true)
         newMovieLoadResponse(movieTitle, resolvedUrl, tvType, resolvedUrl) {
             this.posterUrl = meta.poster
+            this.posterHeaders = EgyDeadNetwork.getImageHeaders()
             this.plot = meta.plot
             this.year = meta.year
             this.duration = meta.durationMinutes
@@ -786,6 +854,7 @@ class EgyDead : MainAPI() {
         val collectionTitle = cleanTitle(meta.rawTitle, keepDubTag = false)
         return newTvSeriesLoadResponse(collectionTitle, resolvedUrl, TvType.TvSeries, episodes) {
             this.posterUrl = meta.poster
+            this.posterHeaders = EgyDeadNetwork.getImageHeaders()
             this.plot = meta.plot
             this.year = meta.year ?: movies.minOfOrNull { it.year }?.takeIf { it < 9999 }
             this.tags = meta.tags
@@ -879,6 +948,7 @@ class EgyDead : MainAPI() {
         if (tvType == TvType.Anime || (subbedList.isNotEmpty() && dubbedList.isNotEmpty())) {
             newAnimeLoadResponse(seriesTitle, resolvedUrl, tvType) {
                 this.posterUrl = meta.poster
+                this.posterHeaders = EgyDeadNetwork.getImageHeaders()
                 this.plot = meta.plot
                 this.year = meta.year
                 this.duration = meta.durationMinutes
@@ -899,6 +969,7 @@ class EgyDead : MainAPI() {
             }
             newTvSeriesLoadResponse(displayTitle, resolvedUrl, tvType, finalEpisodes) {
                 this.posterUrl = meta.poster
+                this.posterHeaders = EgyDeadNetwork.getImageHeaders()
                 this.plot = meta.plot
                 this.year = meta.year
                 this.duration = meta.durationMinutes

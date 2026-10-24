@@ -230,4 +230,62 @@ class EgyDeadUnitTest {
         }
         assertEquals(2, deduped.size)
     }
+
+    @Test
+    fun testDomainNormalizationCloudflareDetectionAndHomeH3Sections() {
+        assertEquals(
+            "https://tv10.egydead.live",
+            EgyDeadPrefs.normalizeDomainOrigin("https://tv10.egydead.live/h3/")
+        )
+        assertEquals(
+            "https://tv10.egydead.live",
+            EgyDeadPrefs.normalizeDomainOrigin("tv10.egydead.live/h3")
+        )
+        assertTrue(EgyDeadNetwork.isCloudflareBlock(403, "<html><head><title>Just a moment...</title></head><body>__cf_chl_opt</body></html>"))
+        assertFalse(EgyDeadNetwork.isValidEgyDeadHtml(403, "<html><head><title>Just a moment...</title></head></html>"))
+        assertTrue(EgyDeadNetwork.isValidEgyDeadHtml(200, "<html><body><li class=\"movieItem\">ايجي ديد</li></body></html>"))
+
+        // Decode evaluateJavascript string payloads safely
+        assertEquals(
+            "{\"ok\":true,\"title\":\"ايجي ديد\"}",
+            CloudflareSolver.decodeJsString("\"{\\\"ok\\\":true,\\\"title\\\":\\\"ايجي ديد\\\"}\"")
+        )
+
+        val h3Html = """
+            <html><body>
+              <div class="PinHome">
+                <h1>المواضيع المميزه</h1>
+                <ul class="posts-list">
+                  <li class="movieItem">
+                    <a href="https://tv10.egydead.live/episodes/black-clover-s02e04/" title="انمي Black Clover الموسم الثاني الحلقة 4 مترجمة">
+                      <img src="https://tv10.egydead.live/wp-content/uploads/2026/10/Black-Clover.jpg" />
+                      <h1 class="BottomTitle">انمي Black Clover الموسم الثاني الحلقة 4 مترجمة</h1>
+                    </a>
+                  </li>
+                </ul>
+              </div>
+              <div class="catHolder">
+                <h1>المضاف حديثا</h1>
+                <ul class="posts-list">
+                  <li class="movieItem">
+                    <a href="https://tv10.egydead.live/spider-man-brand-new-day-2026/" title="مشاهدة فيلم Spider Man Brand New Day 2026 مترجم">
+                      <img src="https://tv10.egydead.live/wp-content/uploads/2026/08/Spider-Man.jpg" />
+                      <h1 class="BottomTitle">مشاهدة فيلم Spider Man Brand New Day 2026 مترجم</h1>
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </body></html>
+        """.trimIndent()
+
+        val api = EgyDead()
+        val h3Doc = Jsoup.parse(h3Html, "https://tv10.egydead.live/h3/")
+        val featured = api.parseHomeLandingSection(h3Doc, "featured")
+        val recent = api.parseHomeLandingSection(h3Doc, "recent")
+
+        assertEquals(1, featured.size)
+        assertEquals("https://tv10.egydead.live/episodes/black-clover-s02e04/", featured[0].url)
+        assertEquals(1, recent.size)
+        assertEquals("Spider Man Brand New Day 2026", recent[0].name)
+    }
 }

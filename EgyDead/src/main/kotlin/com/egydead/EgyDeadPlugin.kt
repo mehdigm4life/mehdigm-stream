@@ -94,7 +94,7 @@ class EgyDeadPlugin : Plugin() {
 
         val activeDomainLabel = TextView(context).apply {
             val active = EgyDeadPrefs.customDomain ?: EgyDeadPrefs.discoveredDomain ?: EgyDeadNetwork.DEFAULT_BASE_URL
-            text = "الدومين النشط حالياً: $active\n(يتم اكتشاف الدومين الجديد تلقائياً مع دعم DoH)"
+            text = "الدومين النشط حالياً: $active/h3/\n(يدعم تجاوز Cloudflare تلقائياً + DoH)"
             textSize = 12f
             setTextColor(Color.parseColor("#A0A8B8"))
             gravity = Gravity.CENTER
