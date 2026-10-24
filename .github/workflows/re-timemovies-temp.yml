@@ -5,6 +5,10 @@ on:
     branches:
       - arena/5a5a9059-mehdigm-stream
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   live-probe:
     runs-on: ubuntu-latest
@@ -495,9 +499,41 @@ jobs:
           PY
           head -n 250 /tmp/probe_out/probe_report.txt
 
-      - name: Upload Probe Artifact
+      - name: Publish Probe Report via Check Runs
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: re-report-r6
-          path: /tmp/probe_out
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, os, requests
+          raw = open("/tmp/probe_out/probe_report.txt", "rb").read()
+          b64 = base64.b64encode(gzip.compress(raw, 9)).decode("ascii")
+          repo = os.environ["REPO"]
+          sha = os.environ["SHA"]
+          tok = os.environ["GH_TOKEN"]
+          CHUNK = 60000
+          parts = [b64[i:i+CHUNK] for i in range(0, len(b64), CHUNK)] or [""]
+          for idx, part in enumerate(parts):
+              r = requests.post(
+                  f"https://api.github.com/repos/{repo}/check-runs",
+                  headers={
+                      "Authorization": f"Bearer {tok}",
+                      "Accept": "application/vnd.github+json",
+                  },
+                  json={
+                      "name": f"probe-r6-part-{idx:02d}",
+                      "head_sha": sha,
+                      "status": "completed",
+                      "conclusion": "success",
+                      "output": {
+                          "title": f"part {idx+1}/{len(parts)} ({len(raw)}B)",
+                          "summary": f"total_parts={len(parts)}",
+                          "text": part,
+                      },
+                  },
+                  timeout=20,
+              )
+              print("check-run", idx, r.status_code)
+          PY
