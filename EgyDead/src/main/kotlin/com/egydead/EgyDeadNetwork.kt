@@ -2,10 +2,14 @@ package com.egydead
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -18,6 +22,7 @@ import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -54,26 +59,27 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+import kotlin.coroutines.resume
 
 /**
- * Network & Cloudflare transport layer for EgyDead (v21).
+ * Network & Cloudflare transport layer for EgyDead (v22).
  *
- * Why WebView transport is required for `egydead.*` HTML requests:
- * Cloudflare on `tv10.egydead.live` cryptographically binds `cf_clearance` to Android WebView's
- * Chromium BoringSSL JA3/JA4 TLS fingerprint + Client Hints (`Sec-CH-UA*`). Replaying a valid
- * WebView-captured `cf_clearance` cookie over OkHttp/Conscrypt TLS (`app.get` / `app.post`)
- * always receives HTTP 403 even with an identical `User-Agent`.
- *
- * Architecture:
- * 1. Keeps the proven background [CloudflareSolver] untouched (`0` modifications) to solve
- *    Turnstile and populate `CookieManager` + [EgyDeadPrefsEncoder].
- * 2. Executes all `egydead.*` GET and POST (`View=1` / AJAX) requests through a single hidden,
- *    persistent Chromium `WebView` (`window.fetch` anchored on same-origin `/__egydead_bridge__`,
- *    with automatic hidden `WebView` navigation fallback for cross-subdomain redirects), sharing
- *    the exact BoringSSL TLS stack, HTTP/2 connection pool, `User-Agent`, and `CookieManager`
- *    session as [CloudflareSolver].
- * 3. External video host extractors (`MegaMax`, `StreamHG`, `EarnVids`, `Dood`, etc.) continue
- *    using high-concurrency [httpClient] with [SmartDohDns].
+ * Root causes resolved from real-device telemetry (`WebView 150.0.7871.63`, `PowerVR Rogue GE8320`):
+ * 1. Guaranteed `HttpOnly` cookie purge ([purgeAllWebViewCookies]): Cloudflare sets `cf_clearance`
+ *    with `Max-Age=31536000; HttpOnly; Secure; SameSite=None` (1-year browser lifetime) while
+ *    expiring its server-side timestamp after ~1 hour. Non-HttpOnly `setCookie("cf_clearance=; Max-Age=0")`
+ *    cannot delete `HttpOnly` cookies in Chromium `CookieMonster`, causing `CloudflareSolver` to
+ *    see the stale `cf_clearance` and exit in ~1s without clicking Turnstile. Awaiting
+ *    `CookieManager.getInstance().removeAllCookies(callback)` on `Dispatchers.Main` purges the
+ *    expired `HttpOnly` cookie 100% before `CloudflareSolver.solve` begins.
+ * 2. Native Android Chrome Mobile User-Agent ([resolveWebViewUserAgent]): strips `; wv)` and
+ *    `Version/4.0 ` from `WebSettings.getDefaultUserAgent(ctx)` so `User-Agent` matches Chromium's
+ *    native `Sec-CH-UA` (`"Android"`, `?1`, exact WebView major version).
+ * 3. Single-WebView GPU discipline: tears down `fetchWebView` before launching `CloudflareSolver`,
+ *    combines with `sequentialMainPage = true` in [EgyDead], and serializes fallback navigation
+ *    behind [webViewNavMutex] so `PowerVR Rogue GE8320` never exceeds its 8-RTS hardware limit.
+ * 4. Keeps `CloudflareSolver.kt` 100% untouched as primary solver, with an automatic input-anchored
+ *    fallback ([fallbackTurnstileSolve]) if Cloudflare shifts its Turnstile container DOM index.
  */
 object EgyDeadNetwork {
     private const val TAG = "EgyDeadNet"
@@ -85,12 +91,13 @@ object EgyDeadNetwork {
     const val HOME_LANDING_PATH = "/h3/"
 
     const val DEFAULT_USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
 
     private const val HOME_DOC_TTL_MS = 90_000L
-    private const val FAILED_SOLVE_COOLDOWN_MS = 20_000L
-    private const val WEBVIEW_FETCH_TIMEOUT_MS = 25_000L
-    private const val WEBVIEW_NAV_TIMEOUT_MS = 20_000L
+    private const val FAILED_SOLVE_COOLDOWN_MS = 15_000L
+    private const val WEBVIEW_FETCH_TIMEOUT_MS = 22_000L
+    private const val WEBVIEW_NAV_TIMEOUT_MS = 18_000L
+    private const val FALLBACK_SOLVE_TIMEOUT_MS = 26_000L
 
     @Volatile
     private var activeBaseUrl: String? = null
@@ -99,12 +106,19 @@ object EgyDeadNetwork {
     private var savedCookies: String? = null
 
     @Volatile
+    private var cachedWebViewUa: String? = null
+
+    @Volatile
     private var lastFailedSolveAtMs: Long = 0L
+
+    @Volatile
+    private var lastDirectSolvedPage: Pair<String, String>? = null
 
     private val cfSolveEpoch = AtomicLong(0L)
     private val cfMutex = Mutex()
     private val homeDocMutex = Mutex()
     private val webViewInitMutex = Mutex()
+    private val webViewNavMutex = Mutex()
 
     @Volatile
     private var cachedHomeDoc: Document? = null
@@ -112,7 +126,7 @@ object EgyDeadNetwork {
     @Volatile
     private var cachedHomeDocAtMs: Long = 0L
 
-    // Persistent hidden Chromium bridge WebView state (guarded by webViewInitMutex + main looper)
+    // Persistent hidden Chromium bridge WebView state
     @Volatile
     private var fetchWebView: WebView? = null
 
@@ -126,10 +140,36 @@ object EgyDeadNetwork {
     private var bridgeReadyDeferred: CompletableDeferred<Boolean>? = null
 
     private val lifecycleRegistered = AtomicBoolean(false)
+    private val seededPrefsOnce = AtomicBoolean(false)
     private val jsFetchBridge = JsFetchBridge()
 
     val currentUserAgent: String
-        get() = DEFAULT_USER_AGENT
+        get() = resolveWebViewUserAgent()
+
+    internal fun cleanWebViewUserAgent(rawUa: String): String {
+        return rawUa
+            .replace("; wv)", ")")
+            .replace("Version/4.0 ", "")
+            .replace(" Version/4.0", "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    fun resolveWebViewUserAgent(context: Context? = null): String {
+        cachedWebViewUa?.let { return it }
+        val ctx = context ?: EgyDeadPrefs.appContext ?: resolveActivity()
+        if (ctx != null) {
+            val rawUa = runCatching { WebSettings.getDefaultUserAgent(ctx) }.getOrNull()
+            if (!rawUa.isNullOrBlank()) {
+                val cleaned = cleanWebViewUserAgent(rawUa)
+                if (cleaned.isNotBlank()) {
+                    cachedWebViewUa = cleaned
+                    return cleaned
+                }
+            }
+        }
+        return DEFAULT_USER_AGENT
+    }
 
     data class RawResponse(
         val code: Int,
@@ -167,6 +207,15 @@ object EgyDeadNetwork {
         @JavascriptInterface
         fun onDom(url: String, title: String, html: String) {
             onResult(url, title, html)
+        }
+    }
+
+    private class FallbackSolverBridge(
+        private val onState: (payload: String) -> Unit
+    ) {
+        @JavascriptInterface
+        fun report(payload: String) {
+            onState(payload)
         }
     }
 
@@ -330,6 +379,7 @@ object EgyDeadNetwork {
         activeBaseUrl = null
         savedCookies = null
         lastFailedSolveAtMs = 0L
+        lastDirectSolvedPage = null
         cachedHomeDoc = null
         cachedHomeDocAtMs = 0L
         cachedClientKey = null
@@ -346,7 +396,7 @@ object EgyDeadNetwork {
     fun getImageHeaders(): Map<String, String> {
         val base = getBaseUrl()
         val map = LinkedHashMap<String, String>()
-        map["User-Agent"] = DEFAULT_USER_AGENT
+        map["User-Agent"] = currentUserAgent
         map["Referer"] = "$base/"
         resolveStoredCookieHeader()?.let { map["Cookie"] = it }
         return map
@@ -520,7 +570,7 @@ object EgyDeadNetwork {
     }
 
     // =========================================================================
-    // Cookie Persistence & CookieManager Synchronization
+    // Cookie Persistence & Guaranteed HttpOnly Cookie Purge
     // =========================================================================
 
     private fun resolveStoredCookieHeader(): String? {
@@ -541,7 +591,8 @@ object EgyDeadNetwork {
         return null
     }
 
-    private fun seedCookieManagerFromPrefsIfNeeded(targetOrigin: String) {
+    private fun seedCookieManagerFromPrefsOnce(targetOrigin: String) {
+        if (!seededPrefsOnce.compareAndSet(false, true)) return
         runCatching {
             val cm = CookieManager.getInstance() ?: return
             val existing = cm.getCookie(targetOrigin)
@@ -574,46 +625,34 @@ object EgyDeadNetwork {
     }
 
     /**
-     * Called ONLY when Chromium WebView itself received a Cloudflare challenge (proving any
-     * existing `cf_clearance` in `CookieManager` is missing or genuinely expired) so that
-     * [CloudflareSolver] solves a fresh Turnstile challenge instead of returning immediately
-     * on a stale `cf_clearance` cookie.
+     * Purges ALL WebView cookies (including `HttpOnly`, `Secure`, and `Partitioned` cookies that
+     * `setCookie(..., Max-Age=0)` cannot overwrite in Chromium `CookieMonster`) when WebView
+     * receives an HTTP 403 challenge, ensuring `CloudflareSolver` starts with zero stale cookies.
      */
-    private fun clearExpiredCfClearance(targetUrl: String) {
+    private suspend fun purgeAllWebViewCookies(targetUrl: String) {
         savedCookies = null
         EgyDeadPrefs.clearCookies()
-        runCatching {
-            val cm = CookieManager.getInstance() ?: return
-            val host = runCatching { URI(targetUrl).host }.getOrNull()
-            val domains = buildList {
-                add(".egydead.live")
-                add("egydead.live")
-                if (!host.isNullOrBlank()) {
-                    add(host)
-                    add(".$host")
-                    val parts = host.split('.')
-                    if (parts.size >= 2) {
-                        val root = parts.takeLast(2).joinToString(".")
-                        add(root)
-                        add(".$root")
+        withContext(Dispatchers.Main) {
+            withTimeoutOrNull(4_000L) {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    try {
+                        val cm = CookieManager.getInstance()
+                        if (cm == null) {
+                            if (cont.isActive) cont.resume(Unit)
+                            return@suspendCancellableCoroutine
+                        }
+                        cm.removeAllCookies { removed ->
+                            runCatching { cm.flush() }
+                            val rem = runCatching { cm.getCookie(targetUrl) }.getOrNull()
+                            Log.w(TAG, "🧹 Purged WebView cookies (removed=$removed, after=${rem ?: "empty"})")
+                            if (cont.isActive) cont.resume(Unit)
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "purgeAllWebViewCookies error: ${t.message}")
+                        if (cont.isActive) cont.resume(Unit)
                     }
                 }
-            }.distinct()
-            val urls = listOfNotNull(
-                targetUrl,
-                originOf(targetUrl),
-                "https://egydead.live",
-                DEFAULT_BASE_URL
-            ).distinct()
-            for (u in urls) {
-                cm.setCookie(u, "cf_clearance=; Max-Age=0; Path=/")
-                cm.setCookie(u, "cf_clearance=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
-                for (d in domains) {
-                    cm.setCookie(u, "cf_clearance=; Max-Age=0; Domain=$d; Path=/")
-                    cm.setCookie(u, "cf_clearance=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Domain=$d; Path=/")
-                }
             }
-            cm.flush()
         }
     }
 
@@ -627,7 +666,7 @@ object EgyDeadNetwork {
     ): MutableMap<String, String> {
         val base = getBaseUrl()
         val headers = mutableMapOf(
-            "User-Agent" to DEFAULT_USER_AGENT,
+            "User-Agent" to currentUserAgent,
             "Referer" to encodeUrl(referer ?: base),
             "Accept-Language" to "ar,en-US;q=0.9"
         )
@@ -646,7 +685,7 @@ object EgyDeadNetwork {
         val reqBuilder = Request.Builder()
             .url(safeUrl)
             .get()
-            .header("User-Agent", extraHeaders["User-Agent"] ?: DEFAULT_USER_AGENT)
+            .header("User-Agent", extraHeaders["User-Agent"] ?: currentUserAgent)
             .header(
                 "Accept",
                 extraHeaders["Accept"]
@@ -695,7 +734,7 @@ object EgyDeadNetwork {
         val reqBuilder = Request.Builder()
             .url(safeUrl)
             .post(formBuilder.build())
-            .header("User-Agent", extraHeaders["User-Agent"] ?: DEFAULT_USER_AGENT)
+            .header("User-Agent", extraHeaders["User-Agent"] ?: currentUserAgent)
             .header(
                 "Accept",
                 extraHeaders["Accept"]
@@ -731,7 +770,7 @@ object EgyDeadNetwork {
     }
 
     // =========================================================================
-    // Persistent Hidden Chromium WebView Transport (`window.fetch` + Nav Fallback)
+    // Persistent Hidden Chromium WebView Transport (`window.fetch` + Serialized Nav)
     // =========================================================================
 
     private fun resolveActivity(): Activity? {
@@ -776,7 +815,7 @@ object EgyDeadNetwork {
     private suspend fun ensureFetchWebView(activity: Activity, targetOrigin: String): WebView? =
         webViewInitMutex.withLock {
             val cleanOrigin = targetOrigin.trimEnd('/')
-            seedCookieManagerFromPrefsIfNeeded(cleanOrigin)
+            seedCookieManagerFromPrefsOnce(cleanOrigin)
 
             val existing = fetchWebView
             val existingOwner = webViewOwnerActivityRef?.get()
@@ -789,6 +828,7 @@ object EgyDeadNetwork {
                 return@withLock existing
             }
 
+            val activeUa = resolveWebViewUserAgent(activity)
             val readyDef = CompletableDeferred<Boolean>()
             bridgeReadyDeferred = readyDef
 
@@ -805,8 +845,8 @@ object EgyDeadNetwork {
                     wv = WebView(activity).apply {
                         layoutParams = ViewGroup.LayoutParams(1, 1)
                         alpha = 0f
-                        translationX = 10000f
-                        translationY = 10000f
+                        translationX = 0f
+                        translationY = 0f
                         isFocusable = false
                         isFocusableInTouchMode = false
                         isClickable = false
@@ -815,9 +855,11 @@ object EgyDeadNetwork {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
-                            userAgentString = DEFAULT_USER_AGENT
+                            userAgentString = activeUa
                             useWideViewPort = true
                             loadWithOverviewMode = true
+                            javaScriptCanOpenWindowsAutomatically = false
+                            setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             loadsImagesAutomatically = false
                             blockNetworkImage = true
@@ -868,7 +910,11 @@ object EgyDeadNetwork {
                     cm.setAcceptCookie(true)
                     cm.setAcceptThirdPartyCookies(wv, true)
 
-                    rootView.addView(wv)
+                    if (rootView.childCount > 0) {
+                        rootView.addView(wv, 0)
+                    } else {
+                        rootView.addView(wv)
+                    }
                     fetchWebView = wv
                     webViewOwnerActivityRef = WeakReference(activity)
                 }
@@ -981,14 +1027,14 @@ object EgyDeadNetwork {
     }
 
     /**
-     * Hidden 1-shot document navigation fallback (`Sec-Fetch-Mode: navigate`) used when
-     * `window.fetch` hits a cross-subdomain redirect (`tv10 -> tv11`, `code == 0`) or a
-     * navigation-only WAF check while `cf_clearance` is already present.
+     * Serialized 1-shot document navigation fallback (`Sec-Fetch-Mode: navigate`) guarded by
+     * [webViewNavMutex] so multiple WebViews are never allocated concurrently.
      */
     private suspend fun loadHtmlViaWebViewNavigation(
         activity: Activity,
         targetUrl: String
-    ): SiteWebResult? {
+    ): SiteWebResult? = webViewNavMutex.withLock {
+        val activeUa = resolveWebViewUserAgent(activity)
         val resultDef = CompletableDeferred<SiteWebResult>()
         var tempWebView: WebView? = null
         var rootGroup: ViewGroup? = null
@@ -1016,8 +1062,8 @@ object EgyDeadNetwork {
             val wv = WebView(activity).apply {
                 layoutParams = ViewGroup.LayoutParams(1, 1)
                 alpha = 0f
-                translationX = 10000f
-                translationY = 10000f
+                translationX = 0f
+                translationY = 0f
                 isFocusable = false
                 isFocusableInTouchMode = false
                 isClickable = false
@@ -1026,9 +1072,11 @@ object EgyDeadNetwork {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     databaseEnabled = true
-                    userAgentString = DEFAULT_USER_AGENT
+                    userAgentString = activeUa
                     useWideViewPort = true
                     loadWithOverviewMode = true
+                    javaScriptCanOpenWindowsAutomatically = false
+                    setSupportMultipleWindows(false)
                     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     loadsImagesAutomatically = false
                     blockNetworkImage = true
@@ -1068,19 +1116,242 @@ object EgyDeadNetwork {
             cm.setAcceptThirdPartyCookies(wv, true)
 
             tempWebView = wv
-            root.addView(wv)
+            if (root.childCount > 0) root.addView(wv, 0) else root.addView(wv)
             wv.loadUrl(targetUrl)
             true
         }
 
-        if (!started) return null
+        if (!started) return@withLock null
 
-        return withTimeoutOrNull(WEBVIEW_NAV_TIMEOUT_MS) {
+        withTimeoutOrNull(WEBVIEW_NAV_TIMEOUT_MS) {
             resultDef.await()
         } ?: run {
             cleanupAndComplete(SiteWebResult(0, "", targetUrl, "nav_timeout"))
             null
         }
+    }
+
+    // =========================================================================
+    // Input-Anchored Turnstile Fallback (only used if primary CloudflareSolver times out)
+    // =========================================================================
+
+    private data class FallbackSolveOutcome(
+        val finalUrl: String,
+        val cookies: String?,
+        val html: String?
+    )
+
+    private suspend fun fallbackTurnstileSolve(
+        activity: Activity,
+        initialUrl: String,
+        userAgent: String
+    ): FallbackSolveOutcome? {
+        val deferred = CompletableDeferred<FallbackSolveOutcome?>()
+        val finished = AtomicBoolean(false)
+
+        withContext(Dispatchers.Main) {
+            if (activity.isFinishing || activity.isDestroyed) {
+                deferred.complete(null)
+                return@withContext
+            }
+            val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: run {
+                deferred.complete(null)
+                return@withContext
+            }
+
+            val handler = Handler(Looper.getMainLooper())
+            val cm = CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            var webViewRef: WebView? = null
+            var lastTapAtMs = 0L
+            var tapCount = 0
+
+            fun finish(url: String, html: String?) {
+                if (!finished.compareAndSet(false, true)) return
+                runCatching { cm.flush() }
+                val cookies = runCatching { cm.getCookie(url) ?: cm.getCookie(initialUrl) }.getOrNull()
+                runCatching {
+                    handler.removeCallbacksAndMessages(null)
+                    webViewRef?.let { wv ->
+                        wv.stopLoading()
+                        rootView.removeView(wv)
+                        wv.destroy()
+                    }
+                    webViewRef = null
+                }
+                deferred.complete(FallbackSolveOutcome(url, cookies, html))
+            }
+
+            fun tapWidget(wv: WebView, cssX: Float, cssY: Float) {
+                val density = activity.resources.displayMetrics.density.coerceAtLeast(1f)
+                val rx = (cssX * density).coerceAtLeast(6f)
+                val ry = (cssY * density).coerceAtLeast(6f)
+                val downTime = SystemClock.uptimeMillis()
+                val props = arrayOf(MotionEvent.PointerProperties().apply {
+                    id = 0
+                    toolType = MotionEvent.TOOL_TYPE_FINGER
+                })
+                val coords = arrayOf(MotionEvent.PointerCoords().apply {
+                    x = rx
+                    y = ry
+                    pressure = 0.68f
+                    size = 0.12f
+                })
+                val down = MotionEvent.obtain(
+                    downTime, downTime, MotionEvent.ACTION_DOWN, 1, props, coords,
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
+                )
+                runCatching { wv.dispatchTouchEvent(down) }
+                down.recycle()
+
+                handler.postDelayed({
+                    if (finished.get()) return@postDelayed
+                    val up = MotionEvent.obtain(
+                        downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, 1, props, coords,
+                        0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
+                    )
+                    runCatching { wv.dispatchTouchEvent(up) }
+                    up.recycle()
+                }, 65L)
+            }
+
+            val inspectJs = """
+                (function() {
+                  try {
+                    var docEl = document.documentElement;
+                    var html = docEl ? docEl.outerHTML : "";
+                    var title = document.title || "";
+                    var dir = (docEl && docEl.dir ? docEl.dir : "").toLowerCase();
+                    var inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
+                    var tok = (inp && inp.value) ? inp.value.length : 0;
+                    var hasDom = html.indexOf("movieItem") !== -1 || html.indexOf("singleTitle") !== -1 || html.indexOf("serversList") !== -1 || html.indexOf("EpsList") !== -1;
+                    var stillCf = !hasDom && (!!inp || title.toLowerCase().indexOf("just a moment") !== -1 || title.indexOf("لحظة") !== -1);
+                    var rectObj = null;
+                    if (stillCf && inp) {
+                      var el = inp.parentElement;
+                      while (el && el !== document.body) {
+                        var r = el.getBoundingClientRect();
+                        if (r.width >= 180 && r.height >= 40 && r.height <= 130) {
+                          rectObj = { left: r.left, right: r.right, top: r.top, height: r.height };
+                          break;
+                        }
+                        el = el.parentElement;
+                      }
+                    }
+                    EgyFallbackSolver.report(JSON.stringify({
+                      url: location.href || "",
+                      ready: document.readyState || "",
+                      dir: dir,
+                      stillCf: stillCf,
+                      hasDom: hasDom,
+                      tok: tok,
+                      rect: rectObj,
+                      html: (!stillCf && html.length > 1200) ? html : ""
+                    }));
+                  } catch (e) {}
+                })();
+            """.trimIndent()
+
+            val bridge = FallbackSolverBridge { raw ->
+                handler.post {
+                    if (finished.get()) return@post
+                    val wv = webViewRef ?: return@post
+                    val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return@post
+                    val liveUrl = obj.optString("url").ifBlank { wv.url ?: initialUrl }
+                    val ready = obj.optString("ready")
+                    val stillCf = obj.optBoolean("stillCf", true)
+                    val hasDom = obj.optBoolean("hasDom", false)
+                    val tok = obj.optInt("tok", 0)
+                    val html = obj.optString("html")
+                    val ck = runCatching { cm.getCookie(liveUrl) }.getOrNull()
+
+                    if (!stillCf && (ready == "complete" || ready == "interactive") &&
+                        (hasDom || (ck?.contains("cf_clearance") == true && html.length > 1500))
+                    ) {
+                        finish(liveUrl, html)
+                        return@post
+                    }
+
+                    val rect = obj.optJSONObject("rect")
+                    val now = SystemClock.uptimeMillis()
+                    if (stillCf && rect != null && tok == 0 && (now - lastTapAtMs) >= 3_400L) {
+                        lastTapAtMs = now
+                        tapCount++
+                        val left = rect.optDouble("left", 0.0).toFloat()
+                        val right = rect.optDouble("right", 0.0).toFloat()
+                        val top = rect.optDouble("top", 0.0).toFloat()
+                        val height = rect.optDouble("height", 65.0).toFloat()
+                        val cy = top + height * 0.5f
+                        val isRtl = obj.optString("dir") == "rtl"
+                        val cx = if (tapCount % 2 == 1) {
+                            if (isRtl) (right - 28f) else (left + 28f)
+                        } else {
+                            if (isRtl) (left + 28f) else (right - 28f)
+                        }
+                        tapWidget(wv, cx, cy)
+                    }
+                }
+            }
+
+            val wv = runCatching { WebView(activity) }.getOrNull() ?: run {
+                deferred.complete(null)
+                return@withContext
+            }
+            webViewRef = wv
+
+            wv.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            wv.alpha = 0.01f
+            wv.translationX = 0f
+            wv.translationY = 0f
+            wv.isFocusable = false
+            wv.isFocusableInTouchMode = false
+            wv.isClickable = false
+            wv.settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                databaseEnabled = true
+                userAgentString = userAgent
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                javaScriptCanOpenWindowsAutomatically = false
+                setSupportMultipleWindows(false)
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                loadsImagesAutomatically = false
+                blockNetworkImage = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+            }
+            cm.setAcceptThirdPartyCookies(wv, true)
+            wv.addJavascriptInterface(bridge, "EgyFallbackSolver")
+
+            val poll = object : Runnable {
+                override fun run() {
+                    if (finished.get()) return
+                    webViewRef?.evaluateJavascript(inspectJs, null)
+                    handler.postDelayed(this, 1_500L)
+                }
+            }
+
+            wv.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    if (request?.isForMainFrame == true &&
+                        request.url?.host?.lowercase()?.contains("cloudflare.com") == true
+                    ) {
+                        return true
+                    }
+                    return false
+                }
+            }
+
+            handler.postDelayed({ finish(wv.url ?: initialUrl, null) }, FALLBACK_SOLVE_TIMEOUT_MS)
+            if (rootView.childCount > 0) rootView.addView(wv, 0) else rootView.addView(wv)
+            wv.loadUrl(initialUrl)
+            handler.postDelayed(poll, 2_000L)
+        }
+
+        return withTimeoutOrNull(FALLBACK_SOLVE_TIMEOUT_MS + 2_000L) { deferred.await() }
     }
 
     // =========================================================================
@@ -1090,15 +1361,21 @@ object EgyDeadNetwork {
     private suspend fun runSingleFlightSolverIfNeeded(
         activity: Activity,
         initialUrl: String,
-        epochBefore: Long,
-        clearStaleCookie: Boolean
-    ): String {
+        epochBefore: Long
+    ): Pair<String, String?> {
         var updatedUrl = initialUrl
+        var directHtml: String? = null
+
         cfMutex.withLock {
             if (cfSolveEpoch.get() != epochBefore) {
                 updatedUrl = rewriteToActiveBase(updatedUrl)
+                val cachedPair = lastDirectSolvedPage
+                if (cachedPair != null && cachedPair.first.trimEnd('/').equals(updatedUrl.trimEnd('/'), ignoreCase = true)) {
+                    directHtml = cachedPair.second
+                }
                 return@withLock
             }
+
             val now = System.currentTimeMillis()
             if (lastFailedSolveAtMs > 0L && now - lastFailedSolveAtMs < FAILED_SOLVE_COOLDOWN_MS) {
                 return@withLock
@@ -1107,35 +1384,64 @@ object EgyDeadNetwork {
                 return@withLock
             }
 
-            if (clearStaleCookie) {
-                clearExpiredCfClearance(updatedUrl)
+            // Tear down bridge WebView first so CloudflareSolver is the ONLY WebView on the GPU
+            webViewInitMutex.withLock {
+                withContext(Dispatchers.Main) {
+                    destroyFetchWebViewMainThread()
+                }
             }
 
-            Log.w(TAG, "🛡️ Cloudflare challenge active on WebView, invoking CloudflareSolver for $updatedUrl")
-            val solver = CloudflareSolver.solve(activity, updatedUrl, DEFAULT_USER_AGENT)
-            if (solver != null) {
+            // Guarantee 100% purge of any expired HttpOnly/Partitioned cf_clearance cookie
+            purgeAllWebViewCookies(updatedUrl)
+
+            val activeUa = resolveWebViewUserAgent(activity)
+            Log.w(TAG, "🛡️ Invoking CloudflareSolver for $updatedUrl (UA=${activeUa.take(72)}...)")
+            val solver = CloudflareSolver.solve(activity, updatedUrl, activeUa)
+            val primaryGotCookie = solver != null &&
+                !solver.cookies.isNullOrEmpty() &&
+                solver.cookies.contains("cf_clearance")
+
+            if (primaryGotCookie && solver != null) {
                 if (solver.finalUrl.isNotBlank() && solver.finalUrl != updatedUrl) {
                     updateActiveDomainFromUrl(solver.finalUrl)
                     updatedUrl = rewriteToActiveBase(updatedUrl)
                 }
-                if (!solver.cookies.isNullOrEmpty() && solver.cookies.contains("cf_clearance")) {
-                    savedCookies = solver.cookies
-                    EgyDeadPrefsEncoder.saveCookies(solver.cookies)
-                    lastFailedSolveAtMs = 0L
-                    cfSolveEpoch.incrementAndGet()
-                } else {
-                    lastFailedSolveAtMs = System.currentTimeMillis()
+                savedCookies = solver.cookies
+                EgyDeadPrefsEncoder.saveCookies(solver.cookies!!)
+                lastFailedSolveAtMs = 0L
+                cfSolveEpoch.incrementAndGet()
+                return@withLock
+            }
+
+            // Primary solver timed out without cf_clearance (e.g., Turnstile container DOM index shifted)
+            Log.w(TAG, "🔄 Primary solver returned no cf_clearance; trying input-anchored fallback")
+            purgeAllWebViewCookies(updatedUrl)
+            val fb = fallbackTurnstileSolve(activity, updatedUrl, activeUa)
+            val fbCookieValid = !fb?.cookies.isNullOrEmpty() && fb?.cookies?.contains("cf_clearance") == true
+            val fbHtmlValid = !fb?.html.isNullOrBlank() && !isCloudflareBlock(200, fb?.html.orEmpty())
+
+            if (fb != null && (fbCookieValid || fbHtmlValid)) {
+                if (fb.finalUrl.isNotBlank() && fb.finalUrl != updatedUrl) {
+                    updateActiveDomainFromUrl(fb.finalUrl)
+                    updatedUrl = rewriteToActiveBase(updatedUrl)
                 }
+                if (fbCookieValid) {
+                    savedCookies = fb.cookies
+                    EgyDeadPrefsEncoder.saveCookies(fb.cookies!!)
+                }
+                if (fbHtmlValid) {
+                    directHtml = fb.html
+                    lastDirectSolvedPage = fb.finalUrl.ifBlank { updatedUrl } to fb.html!!
+                }
+                lastFailedSolveAtMs = 0L
+                cfSolveEpoch.incrementAndGet()
             } else {
                 lastFailedSolveAtMs = System.currentTimeMillis()
             }
         }
-        return updatedUrl
-    }
 
-    private fun hasCookieManagerClearance(url: String): Boolean = runCatching {
-        CookieManager.getInstance()?.getCookie(url)?.contains("cf_clearance") == true
-    }.getOrDefault(false)
+        return updatedUrl to directHtml
+    }
 
     private suspend fun executeSiteRequestOnAndroid(
         activity: Activity,
@@ -1152,9 +1458,8 @@ object EgyDeadNetwork {
         // 1. Primary fast path: persistent Chromium WebView `window.fetch` (BoringSSL + HTTP/2)
         var res = executeWebViewFetch(activity, method, currentUrl, formParams, referer, headers)
 
-        // 2. If `window.fetch` hit a cross-subdomain redirect (`code == 0`) or a navigation-only
-        //    WAF check while `cf_clearance` is already present, try 1-shot WebView navigation.
-        if (isGet && (res == null || res.code == 0 || (isCloudflareBlock(res.code, res.body) && hasCookieManagerClearance(currentUrl)))) {
+        // 2. Cross-subdomain redirect (`code == 0`) fallback via serialized WebView navigation
+        if (isGet && (res == null || res.code == 0)) {
             val navRes = loadHtmlViaWebViewNavigation(activity, currentUrl)
             if (navRes != null && navRes.code != 0) {
                 res = navRes
@@ -1162,16 +1467,19 @@ object EgyDeadNetwork {
             }
         }
 
-        // 3. If WebView itself received a Cloudflare challenge (cold start or expired cookie),
-        //    clear any stale `cf_clearance`, run single-flight `CloudflareSolver`, and retry.
+        // 3. Cloudflare challenge active -> purge stale HttpOnly cookie + run single-flight solver
         if (res == null || res.code == 0 || isCloudflareBlock(res.code, res.body)) {
-            val hadClearanceBefore = hasCookieManagerClearance(currentUrl)
-            currentUrl = runSingleFlightSolverIfNeeded(
+            val (postSolveUrl, directHtml) = runSingleFlightSolverIfNeeded(
                 activity = activity,
                 initialUrl = currentUrl,
-                epochBefore = epochBefore,
-                clearStaleCookie = hadClearanceBefore
+                epochBefore = epochBefore
             )
+            currentUrl = postSolveUrl
+
+            if (isGet && !directHtml.isNullOrBlank() && !isCloudflareBlock(200, directHtml)) {
+                return Jsoup.parse(directHtml, currentUrl)
+            }
+
             res = executeWebViewFetch(activity, method, currentUrl, formParams, referer, headers)
             if (isGet && (res == null || res.code == 0 || isCloudflareBlock(res.code, res.body))) {
                 val navRetry = loadHtmlViaWebViewNavigation(activity, currentUrl)

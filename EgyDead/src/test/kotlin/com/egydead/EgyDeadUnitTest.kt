@@ -359,4 +359,22 @@ class EgyDeadUnitTest {
         EgyDeadNetwork.invalidateDomainCache()
         assertNotNull(EgyDeadNetwork.getImageHeaders()["User-Agent"])
     }
+
+    @Test
+    fun testV22NativeWebViewUaAndSequentialMainPage() {
+        val rawAndroidWvUa =
+            "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.63 Mobile Safari/537.36"
+        val cleaned = EgyDeadNetwork.cleanWebViewUserAgent(rawAndroidWvUa)
+        assertEquals(
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.63 Mobile Safari/537.36",
+            cleaned
+        )
+        assertFalse(cleaned.contains("; wv"))
+        assertFalse(cleaned.contains("Version/4.0"))
+        assertTrue(EgyDeadNetwork.DEFAULT_USER_AGENT.contains("Android"))
+
+        val provider = EgyDead()
+        assertTrue("Homepage shelves must load sequentially to avoid WebView GPU stampede", provider.sequentialMainPage)
+        assertTrue(provider.mainPage.first().data.startsWith("/h3/"))
+    }
 }

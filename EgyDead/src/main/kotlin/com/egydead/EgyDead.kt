@@ -45,6 +45,8 @@ class EgyDead : MainAPI() {
     override var name = "إيجي ديد (EgyDead)"
     override val hasMainPage = true
     override var lang = "ar"
+    override var sequentialMainPage = true
+    override var sequentialMainPageDelay = 40L
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries,
