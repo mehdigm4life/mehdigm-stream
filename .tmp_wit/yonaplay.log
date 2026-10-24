@@ -1,0 +1,50 @@
+=== RAW embed.js ===
+(function(){
+"use strict";
+var E=window._E||{},api=E.a;
+var code,token,pageKey;
+try{delete window._E}catch(e){window._E=void 0}
+var panel=document.getElementById("panel"),qTabs=document.getElementById("qTabs"),servers=document.getElementById("servers"),viewport=document.getElementById("viewport"),backBtn=document.getElementById("backBtn"),vpTouch=document.getElementById("vpTouch"),loadFs=document.getElementById("loadFs"),errFs=document.getElementById("errFs"),errMsg=document.getElementById("errMsg"),errBack=document.getElementById("errBack"),pTitle=document.getElementById("pTitle");
+var sourceData=null,activeQ=null,qualOrder=["4k","fhd","hd","sd"];
+var qConf={"4k":{label:"4K",color:"#a78bfa"},"fhd":{label:"FHD",color:"#60a5fa"},"hd":{label:"HD",color:"#4ade80"},"sd":{label:"SD",color:"#fbbf24"}};
+var chevron='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
+function isSafari(){var u=navigator.userAgent;return u.indexOf("Safari")>-1&&u.indexOf("Chrome")===-1&&u.indexOf("Chromium")===-1&&u.indexOf("Edge")===-1}
+function post(url,body){var h={"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest","Accept":"application/json"};if(isSafari()&&token)h["X-Embed-Token"]=token;return fetch(url,{method:"POST",headers:h,body:JSON.stringify(body),credentials:"include"}).then(function(r){if(!r.ok)return r.json().catch(function(){return{}}).then(function(d){throw new Error(d.error||"Request failed")});return r.json()})}
+function b64ToBytes(b64){var bin=atob(b64),arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr}
+function decryptAES(b64Data,key){var raw=b64ToBytes(b64Data);var iv=raw.slice(0,12);var tag=raw.slice(12,28);var ct=raw.slice(28);var combined=new Uint8Array(ct.length+tag.length);combined.set(ct);combined.set(tag,ct.length);var enc=new TextEncoder();return crypto.subtle.digest("SHA-256",enc.encode(key)).then(function(kb){return crypto.subtle.importKey("raw",kb,"AES-GCM",false,["decrypt"])}).then(function(ck){return crypto.subtle.decrypt({name:"AES-GCM",iv:iv},ck,combined)}).then(function(dec){return new TextDecoder().decode(dec)})}
+function esc(s){var d=document.createElement("div");d.appendChild(document.createTextNode(s));return d.innerHTML}
+function renderTabs(qs){qTabs.innerHTML="";var keys=[];qualOrder.forEach(function(k){if(qs[k])keys.push(k)});Object.keys(qs).forEach(function(k){if(keys.indexOf(k)===-1)keys.push(k)});keys.forEach(function(k){var meta=qConf[k]||{label:k.toUpperCase(),color:"#8a8a9a"};var btn=document.createElement("button");btn.className="tab";btn.setAttribute("role","tab");btn.setAttribute("data-q",k);btn.innerHTML='<span class="tab-dot" style="background:'+meta.color+'"></span>'+meta.label+'<span class="tab-count">'+qs[k].servers.length+'</span>';btn.addEventListener("click",function(){selectQuality(k)});qTabs.appendChild(btn)});if(keys.length)selectQuality(keys[0])}
+function selectQuality(qKey){if(activeQ===qKey)return;activeQ=qKey;var btns=qTabs.querySelectorAll(".tab");for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].getAttribute("data-q")===qKey);renderServers(sourceData.qualities[qKey],qKey)}
+function renderServers(group,qKey){var meta=qConf[qKey]||{label:qKey.toUpperCase(),color:"#8a8a9a"};servers.innerHTML="";if(!group||!group.servers.length){servers.innerHTML='<div class="empty"><div class="empty-mark">—</div><div class="empty-msg">No servers</div></div>';return}group.servers.forEach(function(srv,idx){var el=document.createElement("div");el.className="srv";el.style.setProperty("--q-color",meta.color);el.setAttribute("role","button");el.setAttribute("tabindex","0");el.innerHTML='<span class="srv-dot" style="background:'+meta.color+';box-shadow:0 0 6px '+meta.color+'"></span><div class="srv-body"><div class="srv-name">'+esc(srv.name)+'</div><div class="srv-sub">Server '+(idx+1)+'</div></div><span class="srv-go">'+chevron+'</span>';el.addEventListener("click",function(){resolve(srv.token)});el.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();resolve(srv.token)}});servers.appendChild(el)})}
+function resolve(serverToken){showLoad();var sendRef=false;post(api+"/api.php",{code:code,token:serverToken,key:pageKey}).then(function(d){if(!d.success||!d.d)throw new Error("Failed to load source");sendRef=!!d.r;return decryptAES(d.d,pageKey)}).then(function(url){if(!url||url.indexOf("http")!==0)throw new Error("Invalid source");loadPlayer(url,sendRef)}).catch(function(err){showErr(err.message||"Failed to load")})}
+function loadPlayer(url,sendRef){var old=viewport.querySelector("iframe");if(old)old.remove();var f=document.createElement("iframe");f.allowFullscreen=true;f.allow="autoplay; encrypted-media; picture-in-picture; fullscreen";f.referrerPolicy=sendRef?"origin":"no-referrer";f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-popups allow-presentation");f.onload=function(){hideLoad();panel.classList.add("hide");viewport.classList.add("on");backBtn.classList.add("on");backBtn.classList.remove("hidden");vpTouch.classList.remove("catching");startHideTimer()};f.onerror=function(){showErr("Player failed to load")};f.src=url;viewport.appendChild(f)}
+function backToList(){var f=viewport.querySelector("iframe");if(f)f.remove();viewport.classList.remove("on");backBtn.classList.remove("on","hidden");vpTouch.classList.remove("catching");clearTimeout(hideTimer);hideLoad();hideErr();panel.classList.remove("out","hide")}
+backBtn.addEventListener("click",backToList);errBack.addEventListener("click",backToList);
+var hideTimer=null;
+function startHideTimer(){clearTimeout(hideTimer);hideTimer=setTimeout(function(){backBtn.classList.add("hidden");vpTouch.classList.add("catching")},2500)}
+function revealBack(){backBtn.classList.remove("hidden");vpTouch.classList.remove("catching");startHideTimer()}
+vpTouch.addEventListener("touchstart",function(){revealBack()},{passive:true});
+vpTouch.addEventListener("touchend",function(){revealBack()},{passive:true});
+vpTouch.addEventListener("touchmove",function(){revealBack()},{passive:true});
+vpTouch.addEventListener("pointerdown",function(){revealBack()});
+vpTouch.addEventListener("mousemove",function(){revealBack()});
+vpTouch.addEventListener("click",function(){revealBack()});
+backBtn.addEventListener("mouseenter",function(){clearTimeout(hideTimer);backBtn.classList.remove("hidden");vpTouch.classList.remove("catching")});
+backBtn.addEventListener("mouseleave",function(){startHideTimer()});
+function showLoad(){panel.classList.add("out");setTimeout(function(){panel.classList.add("hide")},250);loadFs.classList.add("on");errFs.classList.remove("on")}
+function hideLoad(){loadFs.classList.remove("on")}
+function showErr(m){hideLoad();panel.classList.add("hide");errMsg.textContent=m;errFs.classList.add("on")}
+function hideErr(){errFs.classList.remove("on")}
+function initFromVars(){code=E.c;token=E.t;pageKey=E.k;return Promise.resolve()}
+function initFromSession(){return post(api+"/init-session.php",{}).then(function(d){if(!d.success)throw new Error(d.error||"Init failed");code=d.c;token=d.t;pageKey=d.k})}
+function loadSources(){return post(api+"/sources.php",{code:code}).then(function(d){if(!d.success)throw new Error(d.error||"Unavailable");sourceData=d;if(d.title)pTitle.textContent=d.title;renderTabs(d.qualities)})}
+(isSafari()&&E.c?initFromVars():initFromSession()).then(loadSources).catch(function(err){
+servers.innerHTML='<div class="empty"><div class="empty-mark">!</div><div class="empty-msg">'+esc(err.message)+'</div></div>';
+})
+})();
+
+=== TESTING LIVE YONAPLAY API ===
+init-session: {'success': True, 'c': '7b80c24b3fb699b0', 't': 'N2I4MGMyNGIzZmI2OTliMHwxNzkyODA1NzY0fGE4ZjEzMzgwNTVlODMyZjQwYzUyYjhlYTc4NGZkNmNlNDM0ZDZjNmVkM2FlMTZiZjAxMTk1NjYxNGVhNzgxYjE=', 'k': 'b9a3b62d9c75cfcf284492077e80e5cb'}
+sources: {'success': True, 'title': 'Black Clover 2nd Season EP 3', 'qualities': {'fhd': {'label': 'Full HD 1080p', 'servers': [{'name': 'Dotplay', 'token': 'zeHbnjMPHhClRkblXy0T2ZOygrGL7EGaa6AehIM08gz4Kw9mmFCS6KSK263vjKvBDDQifYYP7QMm-LdjiYXfGJc3u_Zet3sNOkSKtajE-iFl-t4vhC0r0pyl9-nCg88Om5wHlTiNEv-ovChfUCtdW0bcoC_y8XnJdC6FxyWaI0grb-FWLW8BVotBnCS5XnKlDQ'}]}, 'hd': {'label': 'HD 720p', 'servers': [{'name': 'Dotplay', 'token': 'iSNzp_6cN4GcBFCo_zQQRPA_uddZX0Hvz6juRKO1dKmtl1OM6byF9dfpwX1pDHzPlsUzUPh0qde6gXk161h52b5FMjxpauDOWvDVm0S8M6YIeMtGtOFel4qwJn9PeT8C0Ss04PQ-QmxbwOem2BDuo692BxxNYwXAvQsnvRSHLqO45-gDBaRAT8LqMfSypRhv'}]}}}
+  [fhd] Dotplay -> {'success': True, 'd': 'GL+d9SmZEIkbpgAHr901wKY6sz9I+p6zMiMqWmJfiy9aFmtTGExxj91IZNpsfrVMePTyFOoiyhazIJWJFw68k3Duz7OIuCLSvAWpC2BitXShSLmPus0=', 'r': 1}
+  [hd] Dotplay -> {'success': True, 'd': 'ZXLktmpXSAAF9i1USUHyn0aVPJ4VacEG9duyXegwmTanrcVIT+dbq1UWbSO5nlm5KY5lPVIINWaQgyIqux1LIfdyc+vlKNo09vRwiv3e33/fPhYe+Wg=', 'r': 1}
