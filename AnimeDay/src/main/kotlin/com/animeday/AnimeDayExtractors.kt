@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -194,8 +195,8 @@ internal object AnimeDayExtractors {
                     extractGooglePhotos(url, countingCallback)
                 }
 
-                // 2. Direct progressive MP4 / MKV / WEBM, DASH .mpd, or direct .m3u8 URL
-                isDirectMediaUrl(url) -> {
+                // 2. Direct progressive MP4 / MKV / WEBM, DASH .mpd, or direct .m3u8 URL (excluding HTML embed hosts with `.mp4` slugs)
+                isDirectMediaUrl(url, host) -> {
                     emitDirectMedia(url, referer, hintLabel, hintHeight, countingCallback)
                 }
 
@@ -204,9 +205,9 @@ internal object AnimeDayExtractors {
                     extractFaselHd(url, depth, subtitleCallback, countingCallback)
                 }
 
-                // 4. DeveloperPro CloudWorker (`*.developer-pro.workers.dev/video?url=...`)
+                // 4. DeveloperPro CloudWorker (`*.developer-pro.workers.dev/video?url=...` & `/get-links?id=...`)
                 host.contains("developer-pro.workers.dev") -> {
-                    extractDeveloperProWorker(url, countingCallback)
+                    extractDeveloperProWorker(url, depth, subtitleCallback, countingCallback)
                 }
 
                 // 5. PixelDrain (`pixeldrain.com/u/{id}`)
@@ -214,13 +215,28 @@ internal object AnimeDayExtractors {
                     extractPixelDrain(url, countingCallback)
                 }
 
-                // 6. MediaFire (`mediafire.com/file/...`)
+                // 6. MediaFire (`mediafire.com/file/...` & `file_premium/...`)
                 host.contains("mediafire.com") -> {
                     extractMediaFire(url, subtitleCallback, countingCallback)
                 }
 
-                // 7. VidTube (`down.vidtube.one`, `vidtube.*`) — Cloudflare-gated on direct GET,
-                //    resolved cleanly into multi-quality HLS variants via remote extractor.php
+                // 7. UpnShare / P2PStream SPA (`*.upns.one/#id`, `*.p2pstream.vip/#id`, `upnshare.*`)
+                host.contains("upns.") || host.contains("p2pstream.") || host.contains("upnshare.") || host.contains("uns.bio") -> {
+                    extractUpnShare(url, countingCallback)
+                }
+
+                // 8. MegaMax / MegaTukTuk Inertia multi-mirror (`megamax.me/iframe/...`, `megatuktuk.store/iframe/...`)
+                host.contains("megamax.") || host.contains("megatuktuk.") -> {
+                    extractMegaMaxInertia(url, depth, subtitleCallback, countingCallback)
+                }
+
+                // 9. StreamTape (`streamtape.com`, `streamtape.cc`, `streamtape.to`, `strcloud.in`)
+                host.contains("streamtape.") || host.contains("strcloud.") -> {
+                    extractStreamTape(url, countingCallback)
+                }
+
+                // 10. VidTube (`down.vidtube.one`, `vidtube.*`) — Cloudflare-gated on direct GET,
+                //     resolved cleanly into multi-quality HLS variants via remote extractor.php
                 host.contains("vidtube.") -> {
                     extractViaRemotePhpChain(url, "VidTube", countingCallback)
                     if (localCount.get() == 0) {
@@ -228,51 +244,51 @@ internal object AnimeDayExtractors {
                     }
                 }
 
-                // 8. Vidara (`vidaraa.cc`, `vidara.so`, `vidara.*`)
+                // 11. Vidara (`vidaraa.cc`, `vidara.so`, `vidara.*`)
                 host.contains("vidara") -> {
                     extractVidara(url, subtitleCallback, countingCallback)
                 }
 
-                // 9. Byse (`bysesukior.com`, `bysezejataos.com`, `byse*`)
+                // 12. Byse (`bysesukior.com`, `byseqekaho.com`, `bysezejataos.com`, `byse*`)
                 host.startsWith("byse") || host.contains(".byse") -> {
                     extractByse(url, referer, subtitleCallback, countingCallback)
                 }
 
-                // 10. VOE (`voe.sx` + dynamic mirror redirect + 7-step HLS + direct MP4 decoder)
+                // 13. VOE (`voe.sx` + dynamic mirror redirect + 7-step HLS + direct MP4 decoder)
                 host == "voe.sx" || host.endsWith(".voe.sx") || isKnownVoeHost(host) -> {
                     extractVoe(url, referer, subtitleCallback, countingCallback)
                 }
 
-                // 11. MixDrop (`mixdrop.*`, `miixdrop.*`, `mxdrop.*`)
+                // 14. MixDrop (`mixdrop.*`, `miixdrop.*`, `mxdrop.*`)
                 host.contains("mixdrop") || host.contains("miixdrop") || host.contains("mxdrop") -> {
                     extractMixDrop(url, countingCallback)
                 }
 
-                // 12. Ok.ru (`ok.ru`, `odnoklassniki.ru`) — 144p..2160p MP4 + HLS
+                // 15. Ok.ru (`ok.ru`, `odnoklassniki.ru`) — 144p..2160p MP4 + HLS
                 host == "ok.ru" || host.endsWith(".ok.ru") || host.contains("odnoklassniki.ru") -> {
                     extractOkRu(url, countingCallback)
                 }
 
-                // 13. VK (`vk.ru`, `vk.com`, `vkvideo.ru`) — 144p..2160p MP4 + HLS
+                // 16. VK (`vk.ru`, `vk.com`, `vkvideo.ru`) — 144p..2160p MP4 + HLS
                 host == "vk.ru" || host.endsWith(".vk.ru") ||
                     host == "vk.com" || host.endsWith(".vk.com") ||
                     host.contains("vkvideo.ru") -> {
                     extractVk(url, countingCallback)
                 }
 
-                // 14. HGCloud / StreamHG stub mirrors (`hgcloud.to`, `hglink.to`, `dumbalag.com`, `uasopt.com`)
+                // 17. HGCloud / StreamHG stub mirrors (`hgcloud.to`, `hglink.to`, `dumbalag.com`, `uasopt.com`)
                 host.contains("hgcloud.") || host.contains("hglink.") ||
                     host.contains("dumbalag.") || host.contains("uasopt.") ||
                     host.contains("dhcplay.") -> {
                     extractStreamHgMirror(url, subtitleCallback, countingCallback)
                 }
 
-                // 15. HyperWatching multi-server aggregator (`v2.hyperwatching.com/watch/{hashid}`)
+                // 18. HyperWatching multi-server aggregator (`v2.hyperwatching.com/watch/{hashid}`)
                 host.contains("hyperwatching.") -> {
                     extractHyperWatching(url, depth, subtitleCallback, countingCallback)
                 }
 
-                // 16. Known HTML / JWPlayer / P.A.C.K.E.R. / MP4 hosts
+                // 19. Known HTML / JWPlayer / P.A.C.K.E.R. / MP4 hosts
                 isPackerOrDirectHtmlHost(host) -> {
                     val label = prettyProviderName(host)
                     extractPackerAndHtmlEmbed(url, label, subtitleCallback, countingCallback)
@@ -512,13 +528,27 @@ internal object AnimeDayExtractors {
 
     // ── 2. Direct Progressive (.mp4 / .mkv) & Adaptive (.m3u8 / .mpd) ────────
 
-    private fun isDirectMediaUrl(url: String): Boolean {
+    private fun isDirectMediaUrl(url: String, host: String): Boolean {
         val cleanPath = url.substringBefore('?').substringBefore('#').lowercase()
-        return cleanPath.endsWith(".mp4") ||
-            cleanPath.endsWith(".mkv") ||
-            cleanPath.endsWith(".webm") ||
-            cleanPath.endsWith(".m3u8") ||
-            cleanPath.endsWith(".mpd")
+        if (cleanPath.endsWith(".m3u8") || cleanPath.endsWith(".mpd")) return true
+        if (!cleanPath.endsWith(".mp4") && !cleanPath.endsWith(".mkv") && !cleanPath.endsWith(".webm")) {
+            return false
+        }
+        // Exclude HTML embed hosts whose page URL appends a cosmetic filename ending in `.mp4`
+        // (e.g. `bysesukior.com/e/<code>/Title.mp4`, `streamtape.com/v/<code>/Title.mp4`)
+        if (host.startsWith("byse") || host.contains(".byse") ||
+            host.contains("streamtape.") || host.contains("strcloud.") ||
+            host.contains("mediafire.com") || host.contains("pixeldrain.") ||
+            host.contains("mixdrop") || host.contains("miixdrop") || host.contains("mxdrop") ||
+            host.contains("dood") || host.contains("voe.") ||
+            host.contains("luluvdo") || host.contains("lulustream") ||
+            host.contains("uqload.") || host.contains("mp4upload.") ||
+            host.contains("vidmoly.") || host.contains("vidspeed.") ||
+            host.contains("vidtube.") || host.contains("savefiles.")
+        ) {
+            return false
+        }
+        return true
     }
 
     private suspend fun emitDirectMedia(
@@ -683,18 +713,23 @@ internal object AnimeDayExtractors {
         String(Base64.decode(mapped.toString(), Base64.DEFAULT), Charsets.UTF_8)
     }.getOrNull()
 
-    // ── 4. DeveloperPro CloudWorker (`*.developer-pro.workers.dev/video?url=...`)
+    // ── 4. DeveloperPro CloudWorker (`*.developer-pro.workers.dev/video?url=...` & `/get-links?id=...`)
 
     internal suspend fun extractDeveloperProWorker(
         url: String,
+        depth: Int = 0,
+        subtitleCallback: (SubtitleFile) -> Unit = {},
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val text = fetchText(url, headers = mapOf("User-Agent" to DESKTOP_UA, "Accept" to "application/json,*/*"))
             ?: return@withContext
-        val json = AnimeDayCrypto.safeJsonObject(text) ?: return@withContext
-        val arr = json.optJSONArray("availableQualities")
-            ?: json.optJSONArray("sources")
-            ?: json.optJSONArray("links")
+        val json = AnimeDayCrypto.safeJsonObject(text)
+        val arr = json?.optJSONArray("availableQualities")
+            ?: json?.optJSONArray("sources")
+            ?: json?.optJSONArray("links")
+            ?: json?.optJSONArray("downloads")
+            ?: json?.optJSONArray("data")
+            ?: AnimeDayCrypto.safeJsonArray(text)
             ?: return@withContext
 
         val origin = originOf(url)
@@ -702,23 +737,42 @@ internal object AnimeDayExtractors {
 
         for (i in 0 until arr.length()) {
             val item = arr.optJSONObject(i) ?: continue
-            val mediaUrl = item.optString("url").ifBlank { item.optString("file") }.trim()
+            val mediaUrl = item.optString("url")
+                .ifBlank { item.optString("file") }
+                .ifBlank { item.optString("link") }
+                .trim()
             if (!mediaUrl.startsWith("http")) continue
-            val qStr = item.optString("quality").ifBlank { item.optString("label") }
+            val qStr = item.optString("quality")
+                .ifBlank { item.optString("label") }
+                .ifBlank { item.optString("name") }
             val qual = detectQualityInt(qStr)
-            val isM3u8 = mediaUrl.contains(".m3u8", ignoreCase = true)
-            callback(
-                newExtractorLink(
-                    "CloudWorker",
-                    "CloudStream Direct [MP4]",
-                    mediaUrl,
-                    if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
-                ) {
-                    this.referer = "$origin/"
-                    this.quality = qual
-                    this.headers = headers
-                },
-            )
+            val mHost = hostOf(mediaUrl)
+
+            if (isDirectMediaUrl(mediaUrl, mHost) || mHost.contains("workers.dev") || mHost.contains("googleusercontent")) {
+                val isM3u8 = mediaUrl.contains(".m3u8", ignoreCase = true)
+                callback(
+                    newExtractorLink(
+                        "CloudWorker",
+                        "CloudStream Direct [MP4]",
+                        mediaUrl,
+                        if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
+                    ) {
+                        this.referer = "$origin/"
+                        this.quality = qual
+                        this.headers = headers
+                    },
+                )
+            } else if (depth < 1) {
+                dispatchSingleUrl(
+                    rawUrl = mediaUrl,
+                    referer = "$origin/",
+                    hintLabel = qStr.ifBlank { null },
+                    hintHeight = qual.takeIf { it != Qualities.Unknown.value },
+                    depth = depth + 1,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            }
         }
     }
 
@@ -781,6 +835,200 @@ internal object AnimeDayExtractors {
             }
         }
         runCatching { loadExtractor(url, "https://www.mediafire.com/", subtitleCallback, callback) }
+    }
+
+    // ── 6b. UpnShare / P2PStream (`tuktuk.upns.one/#<id>`, `tuktuk.p2pstream.vip/#<id>`)
+
+    private val UPN_AES_KEY = "kiemtienmua911ca".toByteArray(Charsets.UTF_8)
+    private val UPN_AES_IV = "1234567890oiuytr".toByteArray(Charsets.UTF_8)
+
+    private suspend fun extractUpnShare(
+        url: String,
+        callback: (ExtractorLink) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val id = url.substringAfterLast('#', "")
+            .substringBefore('?')
+            .trim()
+            .ifBlank { url.substringBefore('?').trimEnd('/').substringAfterLast('/') }
+        if (id.isBlank()) return@withContext
+
+        val origin = originOf(url)
+        val headers = mapOf(
+            "User-Agent" to DESKTOP_UA,
+            "Accept" to "*/*",
+            "Referer" to "$origin/",
+            "Origin" to origin,
+        )
+        val hexPayload = fetchText("$origin/api/v1/video?id=$id", headers)?.trim() ?: return@withContext
+        val cleanHex = hexPayload.trim('"').trim()
+        if (cleanHex.length < 32 || cleanHex.length % 2 != 0) return@withContext
+
+        val decrypted = runCatching {
+            val data = ByteArray(cleanHex.length / 2) { i ->
+                cleanHex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+            }
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(UPN_AES_KEY, "AES"), IvParameterSpec(UPN_AES_IV))
+            String(cipher.doFinal(data), Charsets.UTF_8)
+        }.getOrNull() ?: return@withContext
+
+        val json = AnimeDayCrypto.safeJsonObject(decrypted) ?: return@withContext
+        val label = if (origin.contains("p2pstream", true)) "P2PStream" else "UpnShare"
+        val streamHeaders = mapOf(
+            "User-Agent" to DESKTOP_UA,
+            "Referer" to "$origin/",
+            "Origin" to origin,
+        )
+
+        val emitted = LinkedHashSet<String>()
+        for (key in listOf("cfNative", "source", "cf")) {
+            val rawLink = json.optString(key).trim()
+            val fullLink = resolveRelativeUrl(rawLink, origin) ?: continue
+            if (!emitted.add(fullLink)) continue
+            emitHlsVariantsOrMaster(label, fullLink, "$origin/", streamHeaders, Qualities.Unknown.value, callback)
+        }
+    }
+
+    // ── 6c. MegaMax / MegaTukTuk Inertia Multi-Mirror (`megamax.me/iframe/<id>`, `megatuktuk.store/iframe/<id>`)
+
+    private suspend fun extractMegaMaxInertia(
+        url: String,
+        depth: Int,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        if (depth >= 2) return@withContext
+        val hash = url.substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')
+        if (hash.isBlank()) return@withContext
+        val origin = originOf(url)
+        val downloadUrl = "$origin/download/$hash"
+
+        val pageCookies = LinkedHashMap<String, String>()
+        val html = runCatching {
+            val req = Request.Builder()
+                .url(downloadUrl)
+                .header("User-Agent", DESKTOP_UA)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Referer", "$origin/")
+                .build()
+            AnimeDayCrypto.httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching null
+                for (cookieLine in resp.headers("Set-Cookie")) {
+                    val pair = cookieLine.substringBefore(';')
+                    val k = pair.substringBefore('=', "").trim()
+                    val v = pair.substringAfter('=', "").trim()
+                    if (k.isNotEmpty() && v.isNotEmpty()) pageCookies[k] = v
+                }
+                resp.body?.string()
+            }
+        }.getOrNull() ?: return@withContext
+
+        val dataPageRaw = Regex("""data-page=["']([^"']+)["']""").find(html)?.groupValues?.get(1)
+            ?.let { Parser.unescapeEntities(it, false) }
+            ?: return@withContext
+        val root = AnimeDayCrypto.safeJsonObject(dataPageRaw) ?: return@withContext
+        val attachments = root.optJSONObject("props")?.optJSONArray("attachments") ?: return@withContext
+        val version = root.optString("version")
+
+        val xsrf = pageCookies["XSRF-TOKEN"]?.let { raw ->
+            if (raw.contains('%')) runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw) else raw
+        }
+        val cookieHeader = pageCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+        for (i in 0 until attachments.length()) {
+            val att = attachments.optJSONObject(i) ?: continue
+            val attId = att.optString("hashId").ifBlank { continue }
+            val label = att.optString("label").ifBlank { att.optString("resolution") }
+            val quality = detectQualityInt("${att.optString("resolution")} $label")
+
+            val mirrors = runCatching {
+                val postBody = JSONObject().put("attach", attId).toString().toRequestBody(JSON_MEDIA_TYPE)
+                val reqBuilder = Request.Builder()
+                    .url(downloadUrl)
+                    .post(postBody)
+                    .header("User-Agent", DESKTOP_UA)
+                    .header("Accept", "text/html, application/xhtml+xml")
+                    .header("Content-Type", "application/json")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("X-Inertia", "true")
+                    .header("X-Inertia-Partial-Component", "files/mirror/download")
+                    .header("X-Inertia-Partial-Data", "download")
+                    .header("Origin", origin)
+                    .header("Referer", downloadUrl)
+                if (version.isNotBlank()) reqBuilder.header("X-Inertia-Version", version)
+                if (!xsrf.isNullOrBlank()) reqBuilder.header("X-XSRF-TOKEN", xsrf)
+                if (cookieHeader.isNotBlank()) reqBuilder.header("Cookie", cookieHeader)
+
+                AnimeDayCrypto.httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+                    AnimeDayCrypto.safeJsonObject(resp.body?.string())
+                        ?.optJSONObject("props")?.optJSONObject("download")
+                        ?.optJSONObject("data")?.optJSONArray("mirrors")
+                }
+            }.getOrNull() ?: continue
+
+            var resolvedFromAttachment = 0
+            for (j in 0 until mirrors.length()) {
+                if (resolvedFromAttachment >= 2) break
+                val mirror = mirrors.optJSONObject(j) ?: continue
+                val rawLink = mirror.optString("link").trim()
+                val mirrorUrl = resolveRelativeUrl(rawLink, origin) ?: continue
+                val localCount = AtomicInteger(0)
+                withTimeoutOrNull(7_000L) {
+                    dispatchSingleUrl(
+                        rawUrl = mirrorUrl,
+                        referer = "$origin/",
+                        hintLabel = label.ifBlank { null },
+                        hintHeight = quality.takeIf { it != Qualities.Unknown.value },
+                        depth = depth + 1,
+                        subtitleCallback = subtitleCallback,
+                        callback = { link ->
+                            localCount.incrementAndGet()
+                            callback(link)
+                        },
+                    )
+                }
+                if (localCount.get() > 0) resolvedFromAttachment++
+            }
+        }
+    }
+
+    // ── 6d. StreamTape (`streamtape.com`, `streamtape.cc`, `streamtape.to`) ───
+
+    private suspend fun extractStreamTape(
+        url: String,
+        callback: (ExtractorLink) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val code = Regex("""/(?:e|v)/([A-Za-z0-9_-]+)""").find(url)?.groupValues?.get(1) ?: return@withContext
+        val origin = originOf(url)
+        val embedUrl = "$origin/e/$code/"
+        val html = fetchText(embedUrl, headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to "$origin/"))
+            ?: return@withContext
+
+        // Match `document.getElementById('robotlink').innerHTML = '//streamtape.com/get_video?...' + ('xcd...').substring(N)`
+        val concatMatch = Regex(
+            """getElementById\(['"](?:robot|ideoo)link['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?(?:\.substring\((\d+)\)(?:\.substring\((\d+)\))?)?""",
+        ).findAll(html).lastOrNull()
+
+        val streamUrl = if (concatMatch != null) {
+            val prefix = concatMatch.groupValues[1]
+            var tail = concatMatch.groupValues[2]
+            concatMatch.groupValues[3].toIntOrNull()?.let { n -> if (n in 0..tail.length) tail = tail.substring(n) }
+            concatMatch.groupValues[4].toIntOrNull()?.let { n -> if (n in 0..tail.length) tail = tail.substring(n) }
+            val built = prefix + tail
+            val full = if (built.startsWith("//")) "https:$built" else resolveRelativeUrl(built, origin)
+            full?.let { if (it.contains("&stream=")) it else "$it&stream=1" }
+        } else {
+            null
+        } ?: return@withContext
+
+        val headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to embedUrl)
+        callback(
+            newExtractorLink("StreamTape", "StreamTape [MP4]", streamUrl, ExtractorLinkType.VIDEO) {
+                this.referer = embedUrl
+                this.quality = detectQualityInt(url).takeIf { it != Qualities.Unknown.value } ?: Qualities.P720.value
+                this.headers = headers
+            },
+        )
     }
 
     // ── 7. Remote AnimeDay PHP Extractor Chain (`extractor.php` / `html_extractor.php` / `advanced_extractor.php`)
@@ -998,8 +1246,10 @@ internal object AnimeDayExtractors {
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val origin = originOf(url)
-        val code = runCatching { URI(url).path }.getOrDefault("")
-            .trim('/').substringAfterLast('/').substringBefore('?').trim()
+        val path = runCatching { URI(sanitizeHttpUrl(url)).path }.getOrDefault("")
+        val code = Regex("""/(?:e|d|v|embed)/([A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+            .find(path)?.groupValues?.get(1)
+            ?: path.trim('/').substringAfterLast('/').substringBefore('?').substringBefore('.').trim()
         if (code.isBlank()) return@withContext
 
         val embedReferer = "$origin/e/$code"
@@ -1534,9 +1784,23 @@ internal object AnimeDayExtractors {
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val embedUrl = url.replace("/f/", "/e/")
-        val fetched = fetchTextWithFinalUrl(embedUrl, headers = mapOf("User-Agent" to DESKTOP_UA))
+        var fetched = fetchTextWithFinalUrl(embedUrl, headers = mapOf("User-Agent" to DESKTOP_UA))
             ?: return@withContext
-        val (finalUrl, html) = fetched
+        var (finalUrl, html) = fetched
+
+        // Follow client-side JS mirror redirects (e.g. `mixdrop.ps` -> `mxdrop.to/e/...`)
+        val jsHop = Regex("""window\.location(?:\.href)?\s*=\s*["']([^"']+)["']""")
+            .find(html)?.groupValues?.get(1)?.trim()
+        if (!jsHop.isNullOrBlank()) {
+            val nextUrl = resolveRelativeUrl(jsHop, originOf(finalUrl))
+            if (nextUrl != null && nextUrl != finalUrl) {
+                fetchTextWithFinalUrl(nextUrl, headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to finalUrl))
+                    ?.let {
+                        finalUrl = it.first
+                        html = it.second
+                    }
+            }
+        }
         val activeOrigin = originOf(finalUrl)
 
         val blob = buildString {
@@ -1781,6 +2045,7 @@ internal object AnimeDayExtractors {
         host.contains("stmruby.") ||
             host.contains("streamruby.") ||
             host.contains("rubystm.") ||
+            host.contains("rubyvid") ||
             host.contains("morencius.") ||
             host.contains("luluvdo.") ||
             host.contains("lulustream.") ||
@@ -1796,16 +2061,21 @@ internal object AnimeDayExtractors {
             host.contains("vibuxer.") ||
             host.contains("premilkyway.") ||
             host.contains("streamhg.") ||
+            host.contains("streamhls.") ||
             host.contains("vidhide") ||
             host.contains("streamwish") ||
+            host.contains("earnvids.") ||
+            host.contains("fastvid.") ||
+            host.contains("updown.") ||
+            host.contains("firestream.") ||
+            host.contains("minochinos.") ||
             host.contains("filemoon") ||
             host.contains("savefiles.") ||
             host.contains("goodstream.") ||
             host.contains("sendvid.") ||
             host.contains("videa.") ||
             host.contains("dood") ||
-            host.contains("myvidplay.") ||
-            host.contains("streamtape.")
+            host.contains("myvidplay.")
 
     private suspend fun extractPackerAndHtmlEmbed(
         url: String,
@@ -1813,7 +2083,8 @@ internal object AnimeDayExtractors {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val fetched = fetchTextWithFinalUrl(
+        val selfOrigin = originOf(url)
+        var fetched = fetchTextWithFinalUrl(
             url,
             headers = mapOf(
                 "User-Agent" to DESKTOP_UA,
@@ -1822,7 +2093,32 @@ internal object AnimeDayExtractors {
             ),
         ) ?: return@withContext
 
-        val (finalUrl, html) = fetched
+        var (finalUrl, html) = fetched
+
+        // Some multi-site hosts (e.g. `streamwish.fun`, `earnvids.xyz`) restrict embeds to the
+        // upstream partner domain or require self-origin / omitted Referer.
+        if (html.contains("Video embed restricted", ignoreCase = true) || html.length < 180) {
+            val fallbackReferers = listOf(
+                "https://tuktukcima.com/",
+                "https://animezid.net/",
+                "$selfOrigin/",
+            )
+            for (altRef in fallbackReferers) {
+                val alt = fetchTextWithFinalUrl(
+                    url,
+                    headers = mapOf(
+                        "User-Agent" to DESKTOP_UA,
+                        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Referer" to altRef,
+                    ),
+                )
+                if (alt != null && alt.second.length > 250 && !alt.second.contains("Video embed restricted", ignoreCase = true)) {
+                    finalUrl = alt.first
+                    html = alt.second
+                    break
+                }
+            }
+        }
         if (html.isBlank()) return@withContext
 
         val activeOrigin = originOf(finalUrl)
@@ -2076,7 +2372,7 @@ internal object AnimeDayExtractors {
         host.contains("googleusercontent") || host.contains("photos.google") -> "GooglePhotos"
         host.contains("fasel") -> "FaselHD"
         host.contains("vidtube") -> "VidTube"
-        host.contains("stmruby") || host.contains("streamruby") || host.contains("rubystm") -> "StreamRuby"
+        host.contains("stmruby") || host.contains("streamruby") || host.contains("rubystm") || host.contains("rubyvid") -> "StreamRuby"
         host.contains("morencius") -> "Morencius"
         host.contains("luluvdo") || host.contains("lulustream") || host.contains("lulust") -> "LuluStream"
         host.contains("1vid") -> "1Vid"
@@ -2098,6 +2394,15 @@ internal object AnimeDayExtractors {
         host.contains("flech.") -> "Flech Direct"
         host.contains("pixeldrain") -> "PixelDrain"
         host.contains("mediafire") -> "MediaFire"
+        host.contains("upns") || host.contains("upnshare") -> "UpnShare"
+        host.contains("p2pstream") -> "P2PStream"
+        host.contains("megamax") || host.contains("megatuktuk") -> "MegaMax"
+        host.contains("streamtape") || host.contains("strcloud") -> "StreamTape"
+        host.contains("streamwish") -> "StreamWish"
+        host.contains("earnvids") -> "EarnVids"
+        host.contains("fastvid") -> "FastVid"
+        host.contains("updown") -> "UpDown"
+        host.contains("firestream") -> "FireStream"
         else -> host.substringBefore('.').replaceFirstChar { it.uppercase() }.ifEmpty { "Server" }
     }
 }
@@ -2145,6 +2450,6 @@ class AnimeDayCloudWorkerExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ) {
-        AnimeDayExtractors.extractDeveloperProWorker(url, callback)
+        AnimeDayExtractors.extractDeveloperProWorker(url, 0, subtitleCallback, callback)
     }
 }

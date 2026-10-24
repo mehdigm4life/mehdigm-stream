@@ -201,7 +201,39 @@ async function probeServerUrl(rawUrl, phpEndpoints) {
       return report;
     }
 
-    if (/\.(mp4|mkv|m3u8|mpd)(\?|$)/i.test(url)) {
+    if (host.includes("upns.") || host.includes("p2pstream.")) {
+      const id = url.split("#")[1]?.split("?")[0]?.trim();
+      const origin = new URL(url).origin;
+      const r = await fetch(`${origin}/api/v1/video?id=${id}`, {
+        headers: { "User-Agent": DESKTOP_UA, Referer: `${origin}/`, Origin: origin },
+        signal: AbortSignal.timeout(10000),
+      });
+      const hex = (await r.text()).trim().replace(/^"|"$/g, "");
+      const dc = crypto.createDecipheriv("aes-128-cbc", Buffer.from("kiemtienmua911ca"), Buffer.from("1234567890oiuytr"));
+      const dec = JSON.parse(Buffer.concat([dc.update(Buffer.from(hex, "hex")), dc.final()]).toString("utf8"));
+      report.status = dec.cfNative || dec.source ? "ok_upnshare" : "upnshare_empty";
+      report.qualities = [dec.cfNative ? "cfNative_hls" : null, dec.source ? "source_hls" : null].filter(Boolean);
+      return report;
+    }
+
+    if (host.includes("vidara")) {
+      const m = url.match(/\/(?:e|d|v|embed)\/([A-Za-z0-9_-]+)/i);
+      const origin = new URL(url).origin;
+      if (m) {
+        const r = await fetch(`${origin}/api/stream`, {
+          method: "POST",
+          headers: { "User-Agent": DESKTOP_UA, "Content-Type": "application/json", Referer: `${origin}/e/${m[1]}`, Origin: origin },
+          body: JSON.stringify({ filecode: m[1], device: "web" }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const j = await r.json();
+        report.status = j.streaming_url ? "ok_vidara" : `vidara_http_${r.status}`;
+        report.qualities = j.streaming_url ? [j.title || "hls"] : [];
+        return report;
+      }
+    }
+
+    if (/\.(mp4|mkv|m3u8|mpd)(\?|$)/i.test(url) && !host.includes("byse") && !host.includes("streamtape")) {
       const r = await fetch(url, {
         headers: { "User-Agent": DESKTOP_UA, Range: "bytes=0-1023" },
         signal: AbortSignal.timeout(10000),
@@ -213,17 +245,28 @@ async function probeServerUrl(rawUrl, phpEndpoints) {
     if (host.includes("developer-pro.workers.dev")) {
       const r = await fetch(url, { headers: { "User-Agent": DESKTOP_UA }, signal: AbortSignal.timeout(10000) });
       const j = await r.json();
-      const q = (j.availableQualities || j.sources || []).map((x) => x.quality || x.label);
+      const q = (j.availableQualities || j.sources || j.links || []).map((x) => x.quality || x.label || x.name);
       report.status = q.length > 0 ? "ok_worker" : "worker_empty";
       report.qualities = q;
       return report;
     }
 
-    const r = await fetch(url, {
+    let r = await fetch(url, {
       headers: { "User-Agent": DESKTOP_UA, Referer: "https://www.anime-day.com/" },
       signal: AbortSignal.timeout(10000),
     });
-    const html = await r.text();
+    let html = await r.text();
+    if (html.includes("Video embed restricted") || html.length < 180) {
+      const r2 = await fetch(url, {
+        headers: { "User-Agent": DESKTOP_UA, Referer: "https://tuktukcima.com/" },
+        signal: AbortSignal.timeout(10000),
+      });
+      const h2 = await r2.text();
+      if (h2.length > 250 && !h2.includes("Video embed restricted")) {
+        r = r2;
+        html = h2;
+      }
+    }
     const hasPacker = html.includes("eval(function(p,a,c,k,e,");
     const hasM3u8 = /\.m3u8|master\.txt/i.test(html);
     const hasMp4 = /\.mp4/i.test(html);
@@ -333,11 +376,14 @@ async function main() {
       const entry = { ...t };
       try {
         const detail = await apiCall(apiRoot, `${t.kind}/${t.id}`);
-        const dd = detail.data?.data || detail.data || {};
+        const dd = (!Array.isArray(detail.data?.data) && detail.data?.data) || detail.data || {};
         const obj = dd.series || dd.movie || dd;
         entry.detailOk = !detail.data?.blocked && Boolean(obj?.name || obj?.title);
         entry.name = obj?.name || obj?.title || null;
         entry.dub = obj?.dub;
+        entry.year = obj?.year || obj?.release_date;
+        entry.genres = (obj?.genres || []).map((g) => g.name || g.title);
+        entry.recommendationsCount = (obj?.recommendations || dd.recommendations || []).length;
         entry.vote = obj?.vote_average;
         entry.detailDecrypted = detail.decrypted;
 
