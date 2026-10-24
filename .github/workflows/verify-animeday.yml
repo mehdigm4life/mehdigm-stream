@@ -93,7 +93,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin "${GITHUB_REF_NAME}" > git_push.log 2>&1
           git reset --soft "origin/${GITHUB_REF_NAME}" >> git_push.log 2>&1
-          git add -f build/AnimeDay.cs3 build/CimaCloud.cs3 plugins.json animeday_e2e_report.json animeday_gradle.log >> git_push.log 2>&1
+          for f in build/AnimeDay.cs3 build/CimaCloud.cs3 plugins.json animeday_gradle.log animeday_e2e_report.json; do
+            [ -f "$f" ] && git add -f "$f" >> git_push.log 2>&1
+          done
           git commit -m "chore: animeday v29 build + live e2e results [skip ci]" >> git_push.log 2>&1
           git push origin "HEAD:${GITHUB_REF_NAME}" >> git_push.log 2>&1
           rc=$?

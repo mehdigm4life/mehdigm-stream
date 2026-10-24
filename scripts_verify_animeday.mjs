@@ -124,9 +124,18 @@ function parseMp4TkhdHeight(buf) {
   return best || null;
 }
 
-async function probeServerUrl(url, phpEndpoints) {
-  const u = new URL(url);
-  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+function sanitizeUrl(raw) {
+  return encodeURI(String(raw || "").trim());
+}
+
+async function probeServerUrl(rawUrl, phpEndpoints) {
+  const url = sanitizeUrl(rawUrl);
+  let host = "unknown";
+  try {
+    host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch (e) {
+    return { url: rawUrl.slice(0, 120), host: "invalid_url", status: `err:${e.message}` };
+  }
   const report = { url: url.slice(0, 120), host, status: "untested" };
 
   try {
@@ -210,7 +219,6 @@ async function probeServerUrl(url, phpEndpoints) {
       return report;
     }
 
-    // Also probe PHP endpoints + HTML snippet to see what each anime server returns
     const r = await fetch(url, {
       headers: { "User-Agent": DESKTOP_UA, Referer: "https://www.anime-day.com/" },
       signal: AbortSignal.timeout(10000),
@@ -224,7 +232,8 @@ async function probeServerUrl(url, phpEndpoints) {
 
     let phpCount = 0;
     if (host.includes("vidtube") || (!hasPacker && !hasM3u8 && !hasMp4 && !hasDataOptions)) {
-      for (const ep of phpEndpoints.slice(0, 2)) {
+      for (const ep of phpEndpoints) {
+        if (!ep) continue;
         try {
           const pr = await fetch(`${ep}?url=${encodeURIComponent(url)}`, {
             headers: { "User-Agent": APP_UA },
@@ -241,7 +250,9 @@ async function probeServerUrl(url, phpEndpoints) {
     }
 
     report.status = `http_${r.status}`;
-    report.finalHost = new URL(r.url).hostname;
+    try {
+      report.finalHost = new URL(r.url).hostname;
+    } catch {}
     report.flags = { hasPacker, hasM3u8, hasMp4, hasEnc, hasDataOptions, phpCount };
   } catch (e) {
     report.status = `err:${String(e.message || e).slice(0, 80)}`;
@@ -250,121 +261,145 @@ async function probeServerUrl(url, phpEndpoints) {
 }
 
 async function main() {
-  const out = { timestamp: new Date().toISOString(), config: null, catalog: {}, search: {}, titles: [] };
+  const out = { timestamp: new Date().toISOString(), config: null, catalog: {}, search: {}, titles: [], fatalError: null };
 
-  const cfgRes = await fetch("https://backup-animeday.animegateshorts.workers.dev/", {
-    headers: { "User-Agent": APP_UA },
-  });
-  const cfgJson = await cfgRes.json();
-  out.config = cfgJson;
-  const apiRoot = `${cfgJson.cloudday.replace(/\/$/, "")}/v3.8/api`;
-  const phpEndpoints = [cfgJson.extractorUrl, cfgJson.htmlExtractorUrl, cfgJson.advancedExtractorUrl];
+  try {
+    const cfgRes = await fetch("https://backup-animeday.animegateshorts.workers.dev/", {
+      headers: { "User-Agent": APP_UA },
+      signal: AbortSignal.timeout(15000),
+    });
+    const rawCfg = await cfgRes.json();
+    const entryCfg = (Array.isArray(rawCfg.data) ? rawCfg.data[0] : rawCfg.data) || rawCfg || {};
+    out.config = entryCfg;
+    const cloudday = String(entryCfg.cloudday || "https://20042026.site").replace(/\/$/, "");
+    const apiRoot = cloudday.includes("/api") ? cloudday : `${cloudday}/v3.8/api`;
+    const phpEndpoints = [
+      entryCfg.extractorUrl || "https://cloud-day.online/cimacloud/extractor.php",
+      entryCfg.htmlExtractorUrl || "https://cloud-day.online/cimacloud/html_extractor.php",
+      entryCfg.advancedExtractorUrl || "https://cloud-day.online/cimacloud/advanced_extractor.php",
+    ];
 
-  for (const path of [
-    "home",
-    "section/2?page=2",
-    "section/3?page=2",
-    "section/5?page=2",
-    "section/4?page=2",
-    "section/6?page=2",
-    "series?page=2",
-    "movies?page=2",
-  ]) {
-    const res = await apiCall(apiRoot, path);
-    const d = res.data || {};
-    const arr = d.sections || d.section_items || d.results || [];
-    out.catalog[path] = {
-      count: Array.isArray(arr) ? arr.length : -1,
-      has_more: d.has_more ?? null,
-      blocked: d.blocked ?? false,
-    };
-  }
+    for (const path of [
+      "home",
+      "section/2?page=2",
+      "section/3?page=2",
+      "section/5?page=2",
+      "section/4?page=2",
+      "section/6?page=2",
+      "series?page=2",
+      "movies?page=2",
+    ]) {
+      try {
+        const res = await apiCall(apiRoot, path);
+        const d = res.data || {};
+        const arr = d.sections || d.section_items || d.results || [];
+        out.catalog[path] = {
+          count: Array.isArray(arr) ? arr.length : -1,
+          has_more: d.has_more ?? null,
+          blocked: d.blocked ?? false,
+        };
+      } catch (e) {
+        out.catalog[path] = { error: String(e.message || e) };
+      }
+    }
 
-  for (const q of ["فريرن", "كونان", "Hunter", "Avatar"]) {
-    const res = await apiCall(apiRoot, "search", "POST", { title: q, type: "0", sort: "1", page: "1" });
-    const d = res.data || {};
-    const arr = d.results || d.items || [];
-    out.search[q] = {
-      count: arr.length,
-      first3: arr.slice(0, 3).map((x) => ({ id: x.id, type: x.type, name: x.name, dub: x.dub })),
-    };
-  }
+    for (const q of ["فريرن", "كونان", "Hunter", "Avatar"]) {
+      try {
+        const res = await apiCall(apiRoot, "search", "POST", { title: q, type: "0", sort: "1", page: "1" });
+        const d = res.data || {};
+        const arr = d.results || d.items || [];
+        out.search[q] = {
+          count: arr.length,
+          first3: arr.slice(0, 3).map((x) => ({ id: x.id, type: x.type, name: x.name, dub: x.dub })),
+        };
+      } catch (e) {
+        out.search[q] = { error: String(e.message || e) };
+      }
+    }
 
-  const testItems = [
-    { kind: "series", id: "12819", note: "Frieren (Dubbed Anime Series)" },
-    { kind: "series", id: "12815", note: "Hunter x Hunter (Subbed Anime Series)" },
-    { kind: "series", id: "12773", note: "Avatar: Seven Havens (Cartoon Series)" },
-    { kind: "series", id: "4561", note: "Detective Conan (Long Dubbed Anime)" },
-    { kind: "movie", id: "27070", note: "The Bad Guys 2 (Dubbed Cartoon Movie)" },
-    { kind: "movie", id: "27232", note: "Mononoke Movie III (Subbed Anime Movie)" },
-    { kind: "movie", id: "27226", note: "Detective Conan Movie (Subbed Anime Movie)" },
-  ];
+    const testItems = [
+      { kind: "series", id: "12819", note: "Frieren (Dubbed Anime Series)" },
+      { kind: "series", id: "12815", note: "Hunter x Hunter (Subbed Anime Series)" },
+      { kind: "series", id: "12773", note: "Avatar: Seven Havens (Cartoon Series)" },
+      { kind: "series", id: "4561", note: "Detective Conan (Long Dubbed Anime)" },
+      { kind: "movie", id: "27070", note: "The Bad Guys 2 (Dubbed Cartoon Movie)" },
+      { kind: "movie", id: "27232", note: "Mononoke Movie III (Subbed Anime Movie)" },
+      { kind: "movie", id: "27226", note: "Detective Conan Movie (Subbed Anime Movie)" },
+    ];
 
-  const allHosts = {};
+    const allHosts = {};
 
-  for (const t of testItems) {
-    const entry = { ...t };
-    const detail = await apiCall(apiRoot, `${t.kind}/${t.id}`);
-    const dd = detail.data?.data || detail.data || {};
-    const obj = dd.series || dd.movie || dd;
-    entry.detailOk = !detail.data?.blocked && Boolean(obj?.name || obj?.title);
-    entry.name = obj?.name || obj?.title || null;
-    entry.dub = obj?.dub;
-    entry.vote = obj?.vote_average;
-    entry.detailDecrypted = detail.decrypted;
+    for (const t of testItems) {
+      const entry = { ...t };
+      try {
+        const detail = await apiCall(apiRoot, `${t.kind}/${t.id}`);
+        const dd = detail.data?.data || detail.data || {};
+        const obj = dd.series || dd.movie || dd;
+        entry.detailOk = !detail.data?.blocked && Boolean(obj?.name || obj?.title);
+        entry.name = obj?.name || obj?.title || null;
+        entry.dub = obj?.dub;
+        entry.vote = obj?.vote_average;
+        entry.detailDecrypted = detail.decrypted;
 
-    let serversPath = null;
-    if (t.kind === "series") {
-      const epsRes = await apiCall(apiRoot, `series/${t.id}/episodes`);
-      const seasons = epsRes.data?.seasons || [];
-      let totalEps = 0;
-      let firstEp = null;
-      let fillerCount = 0;
-      for (const s of seasons) {
-        for (const e of s.episodes || []) {
-          totalEps++;
-          if (e.filer || e.filler) fillerCount++;
-          if (!firstEp) firstEp = e;
+        let serversPath = null;
+        if (t.kind === "series") {
+          const epsRes = await apiCall(apiRoot, `series/${t.id}/episodes`);
+          const seasons = epsRes.data?.seasons || [];
+          let totalEps = 0;
+          let firstEp = null;
+          let fillerCount = 0;
+          for (const s of seasons) {
+            for (const e of s.episodes || []) {
+              totalEps++;
+              if (e.filer || e.filler) fillerCount++;
+              if (!firstEp) firstEp = e;
+            }
+          }
+          entry.seasons = seasons.length;
+          entry.totalEpisodes = totalEps;
+          entry.fillerEpisodes = fillerCount;
+          entry.sampleEp = firstEp
+            ? { id: firstEp.id, title: firstEp.title, name: firstEp.name, filer: firstEp.filer }
+            : null;
+          if (firstEp) serversPath = `episode/${firstEp.id}/servers`;
+        } else {
+          serversPath = `movie/${t.id}/servers`;
         }
+
+        if (serversPath) {
+          const srvRes = await apiCall(apiRoot, serversPath);
+          const sd = srvRes.data || {};
+          const srvArr = Array.isArray(sd) ? sd : sd.servers || sd.items || sd.data || [];
+          entry.serversDecrypted = srvRes.decrypted;
+          entry.serverCount = srvArr.length;
+          entry.rawServerSample = srvArr.slice(0, 3);
+
+          const urls = srvArr
+            .map((s) => (typeof s === "string" ? s : s.link || s.url || ""))
+            .filter((u) => String(u).startsWith("http"));
+
+          for (const u of urls) {
+            try {
+              const h = new URL(sanitizeUrl(u)).hostname.replace(/^www\./, "").toLowerCase();
+              allHosts[h] = (allHosts[h] || 0) + 1;
+            } catch {}
+          }
+
+          entry.probedServers = await Promise.all(urls.map((u) => probeServerUrl(u, phpEndpoints)));
+        }
+      } catch (e) {
+        entry.error = String(e.stack || e).slice(0, 300);
       }
-      entry.seasons = seasons.length;
-      entry.totalEpisodes = totalEps;
-      entry.fillerEpisodes = fillerCount;
-      entry.sampleEp = firstEp ? { id: firstEp.id, title: firstEp.title, name: firstEp.name, filer: firstEp.filer } : null;
-      if (firstEp) serversPath = `episode/${firstEp.id}/servers`;
-    } else {
-      serversPath = `movie/${t.id}/servers`;
+      out.titles.push(entry);
     }
 
-    if (serversPath) {
-      const srvRes = await apiCall(apiRoot, serversPath);
-      const sd = srvRes.data || {};
-      const srvArr = Array.isArray(sd) ? sd : sd.servers || sd.items || sd.data || [];
-      entry.serversDecrypted = srvRes.decrypted;
-      entry.serverCount = srvArr.length;
-      entry.rawServerSample = srvArr.slice(0, 3);
-
-      const urls = srvArr
-        .map((s) => (typeof s === "string" ? s : s.link || s.url || ""))
-        .filter((u) => u.startsWith("http"));
-
-      for (const u of urls) {
-        const h = new URL(u).hostname.replace(/^www\./, "").toLowerCase();
-        allHosts[h] = (allHosts[h] || 0) + 1;
-      }
-
-      entry.probedServers = await Promise.all(urls.map((u) => probeServerUrl(u, phpEndpoints)));
-    }
-
-    out.titles.push(entry);
+    out.hostHistogram = allHosts;
+  } catch (e) {
+    out.fatalError = String(e.stack || e);
   }
 
-  out.hostHistogram = allHosts;
   fs.writeFileSync("animeday_e2e_report.json", JSON.stringify(out, null, 2));
-  console.log("Wrote animeday_e2e_report.json successfully. Hosts:", allHosts);
+  console.log("Wrote animeday_e2e_report.json successfully.");
 }
 
-main().catch((err) => {
-  console.error("E2E failed:", err);
-  process.exit(1);
-});
+main();
