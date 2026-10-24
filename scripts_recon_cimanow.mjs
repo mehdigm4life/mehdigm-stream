@@ -453,13 +453,24 @@ async function testPureJetload() {
 }
 
 async function testPureCimaNowItem(name, itemUrl, proxies) {
-  for (const proxy of proxies.slice(0, 4)) {
+  const errors = [];
+  for (const proxy of proxies.slice(0, 5)) {
     const jar = path.join(os.tmpdir(), `cn_p20_${Math.random().toString(36).slice(2)}.cookies`);
     try {
       const mv = await curlReq(itemUrl, { proxy, cookieJar: jar, referer: "https://cimanow.cc/home/" });
-      if (mv.status !== 200 || isCimaBlock(mv.text)) continue;
-      const shineUrl = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] || "";
-      if (!shineUrl) continue;
+      if (mv.status !== 200 || isCimaBlock(mv.text)) {
+        errors.push(`${proxy}: mv status=${mv.status} block=${isCimaBlock(mv.text)}`);
+        continue;
+      }
+      const shineUrl =
+        mv.text.match(/href=["'](https?:\/\/[^"']*\/loadon\/\?link=[^"']+)["']/i)?.[1] ||
+        mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] ||
+        mv.text.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*shine[^"']*["']/i)?.[1] ||
+        "";
+      if (!shineUrl) {
+        errors.push(`${proxy}: no shineUrl (len=${mv.text.length})`);
+        continue;
+      }
 
       await curlReq(shineUrl, { proxy, cookieJar: jar, referer: itemUrl });
       await curlReq("https://rm.freex2line.online/redirectingfree/", { proxy, cookieJar: jar });
@@ -469,7 +480,10 @@ async function testPureCimaNowItem(name, itemUrl, proxies) {
         referer: "https://rm.freex2line.online/redirectingfree/",
       });
       const gw = buildGatewayPostBody(r3.text);
-      if (!gw) continue;
+      if (!gw) {
+        errors.push(`${proxy}: buildGatewayPostBody null (r3 status=${r3.status} len=${r3.text.length})`);
+        continue;
+      }
 
       await sleep(10300);
       const p10 = await curlReq("https://rm.freex2line.online/2020/02/blog-post.html/get-link.php", {
@@ -485,7 +499,10 @@ async function testPureCimaNowItem(name, itemUrl, proxies) {
         },
       });
       const mintedUrl = p10.text.trim();
-      if (!mintedUrl.startsWith("http") || !mintedUrl.includes("?token=")) continue;
+      if (!mintedUrl.startsWith("http") || !mintedUrl.includes("?token=")) {
+        errors.push(`${proxy}: bad mintedUrl=${mintedUrl.slice(0, 120)}`);
+        continue;
+      }
 
       const watchRes = await curlReq(mintedUrl, {
         proxy,
@@ -493,7 +510,12 @@ async function testPureCimaNowItem(name, itemUrl, proxies) {
         referer: "https://rm.freex2line.online/2020/02/blog-post.html/",
       });
       const decoded = pureMathDecodeWatching(watchRes.text);
-      if (!decoded || !decoded.coreToken) continue;
+      if (!decoded || !decoded.coreToken) {
+        errors.push(
+          `${proxy}: decoded=${Boolean(decoded)} coreToken=${decoded?.coreToken || ""} watchLen=${watchRes.text.length} watchUrl=${watchRes.effectiveUrl}`
+        );
+        continue;
+      }
 
       const validTabs = decoded.restoredTabs.filter((t) => t.dataId && t.dataIndex !== "00");
       const serverEmbeds = [];
@@ -529,12 +551,15 @@ async function testPureCimaNowItem(name, itemUrl, proxies) {
         initialEmbed: decoded.initialEmbed,
         serverEmbeds,
         allDownloads: decoded.allDownloads,
+        errors,
       };
-    } catch {} finally {
+    } catch (e) {
+      errors.push(`${proxy}: EXC ${String(e.message || e).slice(0, 180)}`);
+    } finally {
       try { fs.rmSync(jar, { force: true }); } catch {}
     }
   }
-  return { ok: false };
+  return { ok: false, errors };
 }
 
 async function main() {
@@ -542,10 +567,8 @@ async function main() {
   try {
     const proxies = await getWorkingProxies();
     out.proxies = proxies;
-    out.jetloadTest = await testPureJetload();
 
     const items = [
-      ["ForeignMovie_Fall2", "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"],
       ["ArabicMovie_BeitElRuby", "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-%d8%a8%d9%8a%d8%aa-%d8%a7%d9%84%d8%b1%d9%88%d8%a8%d9%8a-2023/"],
       ["ForeignEpisode_LupinS4E1", "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/"],
     ];
