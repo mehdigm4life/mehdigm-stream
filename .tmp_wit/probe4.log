@@ -1,33 +1,62 @@
-Videas step1: 200 {"uid":"01a169f7-c949-72e2-9f8b-4b83609cd57e","embed_type":"single","name":"2673_04_FHD","description":null,"thumbnail_url":"/files/01a169f7-3e91-7673-bdf3-6b06e22bbbc2?sig=p:1xKQ76:03ze0kPtN7eujJaqCCD1J5XpZik1hv59tW_zcpB7XxI","items":[{"asset":{"uid":"01a169f3-c178-7b98-b77c-109045cee1ca","name":"2673_04_FHD","type":"video","description":null,"thumbnail_url":"/files/01a169f7-3e91-7673-bdf3-6b06e22bbbc2?sig=p:1xKQ76:03ze0kPtN7eujJaqCCD1J5XpZik1hv59tW_zcpB7XxI","duration":1469.05,"public_metadata
-Videas step2: 200 {"uid":"01a169f3-c178-7b98-b77c-109045cee1ca","type":"video","expires_at":"2026-10-24T05:33:20.710987776Z","session_id":"8c14b45f-e91c-4f20-98d0-2262c6dadf7a","resume_position_seconds":null,"blocked":false,"hls_url":{"url":"/assets/01a169f3-c178-7b98-b77c-109045cee1ca/stream.m3u8?token=eyJhIjoiMDFhMTY5ZjMtYzE3OC03Yjk4LWI3N2MtMTA5MDQ1Y2VlMWNhIiwicCI6dHJ1ZX0:1xKQdM:WiPjbAUuwHfvwNg97FK72WX8Pgbtk31g9vIPTdxuHvE","expires_at":"2026-10-24T05:33:20.710987776Z"},"preview_sprites_url":{"url":"/assets/01a169f3-c178-7b98-b77c-109045cee1ca/filmstrip.vtt?token=eyJhIjoiMDFhMTY5ZjMtYzE3OC03Yjk4LWI3N2MtMTA5MDQ1Y2VlMWNhIiwicCI6dHJ1ZX0:1xKQdM:WiPjbAUuwHfvwNg97FK72WX8Pgbtk31g9vIPTdxuHvE","expires_at":"2026-10-24T05:33:20.710987776Z"},"waveform_url":{"url":"/files/01a169f7-846e-74e3-b456-671eed93becc?sig=p:1xK
-Traceback (most recent call last):
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/requests/session.py", line 827, in _request_once
-    c.perform()
-    ~~~~~~~~~^^
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/curl.py", line 594, in perform
-    self._check_error(ret, "perform")
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/curl.py", line 320, in _check_error
-    raise error
-curl_cffi.curl.CurlError: Failed to perform, curl: (3) URL rejected: No host part in the URL. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+Videas pbj keys: ['uid', 'type', 'expires_at', 'session_id', 'resume_position_seconds', 'blocked', 'hls_url', 'preview_sprites_url', 'waveform_url', 'chapters', 'linked_files'] source_url: None
+Videas HLS: 200 https://app.videas.com/assets/01a169f3-c178-7b98-b77c-109045cee1ca/stream.m3u8?token=eyJhIjoiMDFhMTY5ZjMtYzE3OC03Yjk4LWI3N2MtMTA5MDQ1Y2VlMWNhIiwicCI6dHJ1ZX0:1xKQeB:18t9eEj2KWurWP-jHmaOID4eCKCd144TzYb942b7gFk 
+ #EXTM3U
+#EXT-X-VERSION:4
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-aac",NAME="日本語",LANGUAGE="ja",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="a/0/aac.m3u8?token=eyJhIjoiMDFhMTY5ZjMtYzE3OC03Yjk4LWI3N2MtMTA5MDQ1Y2VlMWNhIiwicCI6dHJ1ZX0:1xKQeB:18t9eEj2KWurWP-jHmaOID4eCKCd144TzYb942b7gFk"
+#EXT-X-STREAM-INF:BANDWIDTH=659862,AVERAGE-BANDWIDTH=372632,CODECS="avc1.64001e,mp4a.40.2",RESOLUTION=640x360,FRAME-RATE=23.976,AUDIO="audio-aac"
+v/h264/640x360.m3u8?token=eyJhIjoiMDFhMTY5ZjMtYzE3OC03Yjk4LWI3N2MtMTA5MDQ1Y2VlMWNhIiwicCI6dHJ1ZX0:1xKQeB:18t9eEj2KWurWP-jHmaOID4eCKCd144TzYb942b7gFk
+#EXT-X-STREAM-INF:BAND
+MediaFire direct: https://download2392.mediafire.com/mhbpjgltdjfg7qWjh8abZWzavS8wfX3H4SENecuYh292Gp1b7tNSdm8_cTVVcYQtOjCBdlwFGMjJAkADQV8xBpJHQAPNULomHXwsIUXFcl84d0pCGW1M6hN33x_Ka7E49n2hoY-ypYCcpqUZ_6dqxluAvNPfiSV2FLJorPNHUQMQAA/4lkabb0cbyo5j7r/2673_04_FHD.zip
+[MediaFire] status=206 CR=bytes 0-255/664339251 head=b"PK\x03\x04\x14\x00\x00\x00\x08\x00\xf1\x9eW]\xa2\xee\xb90\x8f\x02\x99'\xeas\xa1'\x0f\x00\x00\x002673_04_FHD.mp4\xec]\x0b"
+  [MediaFire] ZIP! comp=8 (0=STORE,8=DEFLATE) csize=664339087 usize=664892394 fname=b'2673_04_FHD.mp4' off=45 inner=b'\xec]\x0b\x9c]\xc5Y\xff\xee>\x93\xdd\xcd\x0b\x02I p\xc3\xfbQ\xb8\x14\xca'
+WorkUpload captcha: 200 
+WorkUpload page title: ['<title>[Witanime.com] BC2S EP 03 HD.mp4</title>']
+  wu link: start/fpY5D2qyqhV
+  wu link: /api/file/coupon
+WorkUpload API: 200 {"success":true,"data":{"url":"https:\/\/f69.workupload.com\/download\/fpY5D2qyqhV"}}
+WorkUpload err: Failed to perform, curl: (28) Operation timed out after 12000 milliseconds with 100851696 out of 481343567 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
+YonaPlay 200! len= 2021
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <title>Black Clover 2nd Season EP 3</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/embed.css?v=1792805671">
+</head>
+<body>
+<div id="root">
+    <div class="panel" id="panel">
+        <header class="hd">
+            <h1 class="hd-title" id="pTitle">Black Clover 2nd Season EP 3</h1>
+            <span class="hd-tag">Select source</span>
+        </header>
+        <nav class="tabs" id="qTabs" role="tablist"></nav>
+        <div class="srv-wrap" id="servers"><div class="state"><span class="dot-pulse"></span></div></div>
+    </div>
+    <div class="vp" id="viewport">
+        <div class="vp-touch" id="vpTouch"></div>
+        <button class="vp-back" id="backBtn" aria-label="Back">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+    </div>
+    <div class="fs" id="loadFs"><div class="fs-ring"></div></div>
+    <div class="fs fs--err" id="errFs">
+        <div class="fs-err-mark">!</div>
+        <p class="fs-err-msg" id="errMsg">Source unavailable</p>
+        <button class="fs-err-btn" id="errBack">Try another</button>
+    </div>
+</div>
+<script>
+document.addEventListener('contextmenu',function(e){e.preventDefault()});
+document.addEventListener('keydown',function(e){if(e.key==='F12'||(e.ctrlKey&&e.shiftKey&&'IJC'.indexOf(e.key)>-1)||(e.ctrlKey&&e.key==='u'))e.preventDefault()});
+window._E={a:"/api"};
+</script>
+<script src="/assets/js/embed.js?v=1792805671"></script>
+</body>
+</html>
 
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "<stdin>", line 30, in <module>
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/requests/session.py", line 949, in get
-    return self.request(method="GET", url=url, **kwargs)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/requests/session.py", line 900, in request
-    return self._request_once(
-           ~~~~~~~~~~~~~~~~~~^
-        method=method,
-        ^^^^^^^^^^^^^^
-    ...<34 lines>...
-        discard_cookies=discard_cookies,
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "/home/runner/.local/lib/python3.14/site-packages/curl_cffi/requests/session.py", line 834, in _request_once
-    raise error(str(e), e.code, rsp) from e
-curl_cffi.requests.exceptions.InvalidURL: Failed to perform, curl: (3) URL rejected: No host part in the URL. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
