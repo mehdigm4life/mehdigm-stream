@@ -622,6 +622,9 @@ object EgyDeadMirrorRouter {
                 host.contains("vidara") || hintLow == "vidara" -> {
                     EgyDeadVidaraExtractor().extract(clean, referer, qualityHint, subtitleCallback, effectiveCallback)
                 }
+                host.contains("vidmoly.") || hintLow == "vidmoly" -> {
+                    EgyDeadVidmolyExtractor().extract(clean, referer, qualityHint, subtitleCallback, effectiveCallback)
+                }
                 BYSE_HOSTS.any { host == it || host.endsWith(".$it") } || host.startsWith("byse") || hintLow == "byse" -> {
                     EgyDeadByseExtractor().extract(clean, referer, qualityHint, effectiveCallback)
                 }
@@ -2701,6 +2704,56 @@ class EgyDeadLuluStreamExtractor : ExtractorApi() {
         val full = EgyDeadExtractorKit.unpackJs(resp.body)
         Regex("""file\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""").find(full)?.groupValues?.get(1)?.let { hls ->
             EgyDeadExtractorKit.emitHlsWithVariants(name, hls, "$origin/", qualityHint, callback = callback)
+        }
+    }
+}
+
+class EgyDeadVidmolyExtractor : ExtractorApi() {
+    override val name = "Vidmoly"
+    override val mainUrl = "https://vidmoly.to"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        extract(url, referer ?: mainUrl, Qualities.Unknown.value, subtitleCallback, callback)
+    }
+
+    suspend fun extract(
+        url: String,
+        referer: String,
+        qualityHint: Int,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val code = Regex("""vidmoly\.[a-z]+/(?:embed-|w/)?([A-Za-z0-9_-]{8,})""", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.get(1)?.removeSuffix(".html")
+        val incomingOrigin = EgyDeadExtractorKit.originOf(url) ?: mainUrl
+        val embedUrl = if (code != null) "$incomingOrigin/embed-$code.html" else url
+
+        val resp = EgyDeadExtractorKit.getText(
+            embedUrl,
+            referer = referer.ifBlank { "$incomingOrigin/" },
+            headers = mapOf("Sec-Fetch-Dest" to "iframe")
+        ) ?: return
+        if (resp.code >= 400) return
+
+        val finalOrigin = EgyDeadExtractorKit.originOf(resp.finalUrl) ?: incomingOrigin
+        val full = EgyDeadExtractorKit.unpackJs(resp.body)
+
+        // Single- or double-quoted `[{ "file": 'https://...m3u8' }]`
+        val streams = Regex("""["']?file["']?\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""")
+            .findAll(full)
+            .map { it.groupValues[1] }
+            .distinct()
+            .toList()
+
+        val headers = mapOf("Referer" to "$finalOrigin/", "Origin" to finalOrigin)
+        for (hls in streams) {
+            EgyDeadExtractorKit.emitHlsWithVariants(name, hls, "$finalOrigin/", qualityHint, headers, callback)
         }
     }
 }

@@ -51,6 +51,7 @@ class EgyDeadPlugin : Plugin() {
         registerExtractorAPI(EgyDeadUpvidExtractor())
         registerExtractorAPI(EgyDeadSaveFilesExtractor())
         registerExtractorAPI(EgyDeadLuluStreamExtractor())
+        registerExtractorAPI(EgyDeadVidmolyExtractor())
 
         openSettings = { ctx ->
             showSettingsDialog(ctx)
