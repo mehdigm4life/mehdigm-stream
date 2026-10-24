@@ -1,0 +1,1536 @@
+{
+  "timestamp": "2026-10-24T11:38:55.031Z",
+  "config": {
+    "cimacloud": "https://www.anime-day.com",
+    "cloudday": "https://20042026.site",
+    "splash_screen": "",
+    "update_title": "يتوفر تحديث جديد لي انمي داي والذي يوفر العديد من الميزات الجديدة *ملاحظة: - التحميل من الموقع الرسمي",
+    "update": "",
+    "ads_link": "https://t.me/animedaycontent",
+    "ads_image": "8",
+    "btn_txt": "تابعنا",
+    "txt_ads": "اشترك في قناتنا على تيليجرام لتصلك آخر التحديثات، الإضافات الجديدة، والتنبيهات المهمة أولاً بأول.",
+    "alert_text": "انضم إلينا على تيليجرام",
+    "show_dialog": "show",
+    "animeday": "https://anime-day.com",
+    "telegram": "https://t.me/animedaycontent",
+    "youtube": "https://youtube.com/@animedaycontent",
+    "email": "contactanimeday@gmail.com",
+    "appkey_applovin": "6ce0b8515dd1c682",
+    "checkadsvideo": "",
+    "ad_interval_minutes": "15",
+    "packageName": "com.video.power",
+    "action_video": "video.power",
+    "name_video": "Video Power",
+    "check_video": "2",
+    "check_ads": "",
+    "tv_free_watch": "free",
+    "check_install_source": "show",
+    "no_play_store_internal": "show",
+    "extractorUrl": "https://cloud-day.online/cimacloud/extractor.php",
+    "checkads_noplay": "show",
+    "checkadsvideo_noplay": "show",
+    "htmlExtractorUrl": "https://cloud-day.online/cimacloud/html_extractor.php",
+    "checkads_ep_nav": "",
+    "advancedExtractorUrl": "https://cloud-day.online/cimacloud/advanced_extractor.php",
+    "original_app_url": "https://www.anime-day.com",
+    "unity_game_id": "5789564",
+    "unity_placement_id": "Interstitial_Android",
+    "unity_test_mode": "",
+    "ads_priority": "applovin",
+    "check_applovin": "",
+    "check_unity": "",
+    "player_version_code": "28",
+    "player_force_update": ""
+  },
+  "catalog": {
+    "home": {
+      "count": 6,
+      "has_more": null,
+      "blocked": false
+    },
+    "section/2?page=2": {
+      "count": 30,
+      "has_more": true,
+      "blocked": false
+    },
+    "section/3?page=2": {
+      "count": 30,
+      "has_more": true,
+      "blocked": false
+    },
+    "section/5?page=2": {
+      "count": 30,
+      "has_more": true,
+      "blocked": false
+    },
+    "section/4?page=2": {
+      "count": 30,
+      "has_more": true,
+      "blocked": false
+    },
+    "section/6?page=2": {
+      "count": 30,
+      "has_more": true,
+      "blocked": false
+    },
+    "series?page=2": {
+      "count": 10,
+      "has_more": true,
+      "blocked": false
+    },
+    "movies?page=2": {
+      "count": 10,
+      "has_more": true,
+      "blocked": false
+    }
+  },
+  "search": {
+    "فريرن": {
+      "count": 1,
+      "first3": [
+        {
+          "id": "12819",
+          "type": "series",
+          "name": "فريرن: ما وراء نهاية الرحلة",
+          "dub": true
+        }
+      ]
+    },
+    "كونان": {
+      "count": 3,
+      "first3": [
+        {
+          "id": "12508",
+          "type": "series",
+          "name": "أفلام المحقق كونان مدبلجة",
+          "dub": true
+        },
+        {
+          "id": "4561",
+          "type": "series",
+          "name": "المحقق كونان",
+          "dub": true
+        },
+        {
+          "id": "27226",
+          "type": "movie",
+          "name": "Detective Conan: The Counterfeit Case of Ultra 30",
+          "dub": false
+        }
+      ]
+    },
+    "Hunter": {
+      "count": 24,
+      "first3": [
+        {
+          "id": "12818",
+          "type": "series",
+          "name": "Hunter x Hunter: Greed Island Final",
+          "dub": false
+        },
+        {
+          "id": "12817",
+          "type": "series",
+          "name": "Hunter × Hunter: Greed Island",
+          "dub": false
+        },
+        {
+          "id": "12816",
+          "type": "series",
+          "name": "Hunter × Hunter: Original Video Animation",
+          "dub": false
+        }
+      ]
+    },
+    "Avatar": {
+      "count": 8,
+      "first3": [
+        {
+          "id": "12773",
+          "type": "series",
+          "name": "Avatar: Seven Havens",
+          "dub": false
+        },
+        {
+          "id": "6728",
+          "type": "series",
+          "name": "Avatar: The Last Airbender",
+          "dub": false
+        },
+        {
+          "id": "12240",
+          "type": "series",
+          "name": "Avatar The Last Airbender",
+          "dub": false
+        }
+      ]
+    }
+  },
+  "titles": [
+    {
+      "kind": "series",
+      "id": "12819",
+      "note": "Frieren (Dubbed Anime Series)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "seasons": 1,
+      "totalEpisodes": 6,
+      "fillerEpisodes": 0,
+      "sampleEp": {
+        "id": "369392",
+        "title": "الحلقة 1",
+        "name": "فريرن: ما وراء نهاية الرحلة",
+        "filer": false
+      },
+      "serversDecrypted": true,
+      "serverCount": 2,
+      "rawServerSample": [
+        {
+          "id": 1374985,
+          "type": "embed",
+          "link": "https://test-stream.developer-pro.workers.dev/video?url=17232018016895"
+        },
+        {
+          "id": 1374986,
+          "type": "embed",
+          "link": "https://photos.google.com/share/AF1QipNFgy_b8yYEe61yXcMlaMYTag0wAUGxaPwnVP0VCc2EVO0mnk3JL8baapuiH9zVFA/photo/AF1QipMnDLVMjEFHUICsCtqKFtKwOtaoeTTW2bzbZd2M?key=d2xTWlc5UXQ2N0hQSXZMQmJjcFBTV0dEU2IwT2x3"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://test-stream.developer-pro.workers.dev/video?url=17232018016895",
+          "host": "test-stream.developer-pro.workers.dev",
+          "status": "ok_worker",
+          "qualities": [
+            "1080p",
+            "720p",
+            "480p",
+            "360p",
+            "240p"
+          ]
+        },
+        {
+          "url": "https://photos.google.com/share/AF1QipNFgy_b8yYEe61yXcMlaMYTag0wAUGxaPwnVP0VCc2EVO0mnk3JL8baapuiH9zVFA/photo/AF1QipMnDLV",
+          "host": "photos.google.com",
+          "status": "ok_gphoto",
+          "qualities": [
+            "=m37:206:video/mp4:1080p",
+            "=m22:206:video/mp4:720p",
+            "=m18:206:video/mp4:360p"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "id": "12815",
+      "note": "Hunter x Hunter (Subbed Anime Series)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "seasons": 1,
+      "totalEpisodes": 62,
+      "fillerEpisodes": 0,
+      "sampleEp": {
+        "id": "369122",
+        "title": "الحلقة 1 - صبي ينطلق في رحلة × ترك صوت الريح خلفه",
+        "name": "Hunter x Hunter",
+        "filer": false
+      },
+      "serversDecrypted": true,
+      "serverCount": 4,
+      "rawServerSample": [
+        {
+          "id": 1373722,
+          "type": "embed",
+          "link": "https://anime3rb.com/episode/hunter-x-hunter/1"
+        },
+        {
+          "id": 1373784,
+          "type": "embed",
+          "link": "https://test-stream.developer-pro.workers.dev/video?url=15199738268287"
+        },
+        {
+          "id": 1373785,
+          "type": "embed",
+          "link": "https://cdnlink.developer-pro.workers.dev/get-links?id=13555748178562"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://anime3rb.com/episode/hunter-x-hunter/1",
+          "host": "anime3rb.com",
+          "status": "http_403",
+          "finalHost": "anime3rb.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://test-stream.developer-pro.workers.dev/video?url=15199738268287",
+          "host": "test-stream.developer-pro.workers.dev",
+          "status": "ok_worker",
+          "qualities": [
+            "1080p",
+            "720p",
+            "480p",
+            "360p",
+            "240p"
+          ]
+        },
+        {
+          "url": "https://cdnlink.developer-pro.workers.dev/get-links?id=13555748178562",
+          "host": "cdnlink.developer-pro.workers.dev",
+          "status": "err:The operation was aborted due to timeout"
+        },
+        {
+          "url": "https://photos.google.com/share/AF1QipOG7-6b9nQXoF__ROb1BDd86UT-nEMvtpkC7IgjF_UhdRDaED3Gvr6gdqaAMPx6JA/photo/AF1QipMqNv4",
+          "host": "photos.google.com",
+          "status": "ok_gphoto",
+          "qualities": [
+            "=m37:206:video/mp4:1080p",
+            "=m22:206:video/mp4:960p",
+            "=m18:206:video/mp4:480p"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "id": "12773",
+      "note": "Avatar: Seven Havens (Cartoon Series)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "seasons": 1,
+      "totalEpisodes": 6,
+      "fillerEpisodes": 0,
+      "sampleEp": {
+        "id": "367327",
+        "title": "الحلقة 1",
+        "name": "Avatar: Seven Havens",
+        "filer": false
+      },
+      "serversDecrypted": true,
+      "serverCount": 29,
+      "rawServerSample": [
+        {
+          "id": 1331058,
+          "type": "embed",
+          "link": "https://vinovo.to/e/7qqoo872fd0yjo"
+        },
+        {
+          "id": 1331059,
+          "type": "embed",
+          "link": "https://vidaraa.cc/e/fZw395EaIB9eC"
+        },
+        {
+          "id": 1331060,
+          "type": "embed",
+          "link": "https://fastvid.cam/embed/6whan21fyvys"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://vinovo.to/e/7qqoo872fd0yjo",
+          "host": "vinovo.to",
+          "status": "http_403",
+          "finalHost": "vinovo.to",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidaraa.cc/e/fZw395EaIB9eC",
+          "host": "vidaraa.cc",
+          "status": "http_404",
+          "finalHost": "vidaraa.cc",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://fastvid.cam/embed/6whan21fyvys",
+          "host": "fastvid.cam",
+          "status": "http_200",
+          "finalHost": "fastvid.cam",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vids.st/e/180065",
+          "host": "vids.st",
+          "status": "err:fetch failed"
+        },
+        {
+          "url": "https://streamhls.to/e/t6y353yqdrb5",
+          "host": "streamhls.to",
+          "status": "http_200",
+          "finalHost": "streamhls.to",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://mxdrop.top/e/8ll9983gh6699dx",
+          "host": "mxdrop.top",
+          "status": "http_200",
+          "finalHost": "mxdrop.click",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://ult4vid.one/embed/8ldcv8FqFQIM2kF",
+          "host": "ult4vid.one",
+          "status": "http_403",
+          "finalHost": "ult4vid.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://71stream.one/embed/LknPjz6NNZ",
+          "host": "71stream.one",
+          "status": "http_403",
+          "finalHost": "71stream.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://morencius.com/embed/t4fsivqujrr2",
+          "host": "morencius.com",
+          "status": "http_200",
+          "finalHost": "morencius.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidmoly.net/embed-4fjeshihsnyy.html",
+          "host": "vidmoly.net",
+          "status": "http_200",
+          "finalHost": "vidmoly.biz",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": true,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://down.vidtube.one/embed-shkfo4kkmweb.html",
+          "host": "down.vidtube.one",
+          "status": "http_403",
+          "finalHost": "down.vidtube.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://updown.icu/embed-90qbhzrs0e1s-1280x640.html",
+          "host": "updown.icu",
+          "status": "http_200",
+          "finalHost": "updown.icu",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://streamwish.fun/e/j4l7twv673mm",
+          "host": "streamwish.fun",
+          "status": "http_200",
+          "finalHost": "streamwish.fun",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://d0o0d.com/e/nfz972xz4q3i",
+          "host": "d0o0d.com",
+          "status": "http_403",
+          "finalHost": "playmogo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://earnvids.xyz/v/rc4pj12ytxrz",
+          "host": "earnvids.xyz",
+          "status": "http_200",
+          "finalHost": "earnvids.xyz",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://byseqekaho.com/e/ld3kvxw2l4hc",
+          "host": "byseqekaho.com",
+          "status": "http_200",
+          "finalHost": "byseqekaho.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://firestream.to/e/ylpyH3aN",
+          "host": "firestream.to",
+          "status": "http_200",
+          "finalHost": "firestream.site",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": true,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://streamtape.cc/e/bgpk9JDXR9HPZak",
+          "host": "streamtape.cc",
+          "status": "http_404",
+          "finalHost": "streamtape.cc",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://luluvdo.com/e/heaf65aasulx",
+          "host": "luluvdo.com",
+          "status": "http_403",
+          "finalHost": "luluvdo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://mixdrop.ps/e/9wn9gp1dcjwk8w",
+          "host": "mixdrop.ps",
+          "status": "http_200",
+          "finalHost": "mxdrop.click",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://www.mediafire.com/file_premium/68hcjeti0he5mdv/Avatar_Seven_Havens_S01_001_480p.mp4/file",
+          "host": "mediafire.com",
+          "status": "http_200",
+          "finalHost": "www.mediafire.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://www.mediafire.com/file_premium/5p9h4bc3bj7y399/Avatar_Seven_Havens_S01_001_720p.mp4/file",
+          "host": "mediafire.com",
+          "status": "http_200",
+          "finalHost": "www.mediafire.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://www.mediafire.com/file_premium/tdhsplnzv94vifa/Avatar_Seven_Havens_S01_001_1080p.mp4/file",
+          "host": "mediafire.com",
+          "status": "http_200",
+          "finalHost": "www.mediafire.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://pixeldrain.com/u/aURT3b7S",
+          "host": "pixeldrain.com",
+          "status": "http_200",
+          "finalHost": "pixeldrain.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://pixeldrain.com/u/R3jANifS",
+          "host": "pixeldrain.com",
+          "status": "http_200",
+          "finalHost": "pixeldrain.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://pixeldrain.com/u/6nARmKnW",
+          "host": "pixeldrain.com",
+          "status": "http_200",
+          "finalHost": "pixeldrain.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://streamtape.com/v/rBKZvYOZG7f8LP/Avatar_Seven_Havens_S01_001_720p.mp4",
+          "host": "streamtape.com",
+          "status": "direct_http_404"
+        },
+        {
+          "url": "https://streamtape.com/v/bRbKJYkwBaTPeP4/Avatar_Seven_Havens_S01_001_1080p.mp4",
+          "host": "streamtape.com",
+          "status": "direct_http_404"
+        },
+        {
+          "url": "https://streamtape.com/v/DPd4OvBAb1FkPKe/Avatar_Seven_Havens_S01_001_480p.mp4",
+          "host": "streamtape.com",
+          "status": "direct_http_404"
+        }
+      ]
+    },
+    {
+      "kind": "series",
+      "id": "4561",
+      "note": "Detective Conan (Long Dubbed Anime)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "seasons": 11,
+      "totalEpisodes": 693,
+      "fillerEpisodes": 0,
+      "sampleEp": {
+        "id": "361674",
+        "title": "الحلقة 1",
+        "name": "المحقق كونان",
+        "filer": false
+      },
+      "serversDecrypted": true,
+      "serverCount": 3,
+      "rawServerSample": [
+        {
+          "id": 1235535,
+          "type": "embed",
+          "link": "https://test-stream.developer-pro.workers.dev/video?url=15171468266111"
+        },
+        {
+          "id": 1235536,
+          "type": "embed",
+          "link": "https://cdnlink.developer-pro.workers.dev/get-links?id=13349081844354"
+        },
+        {
+          "id": 1235537,
+          "type": "embed",
+          "link": "https://photos.google.com/share/AF1QipO-za0HgpyFU_AcvP0Shhgb5fNORvM7ZU-NHUZy9GvHs8G8vL-6GGtNWN1R4QpzJw/photo/AF1QipMF6x9fwP0B4Rr141GjXiRVqj57J28isPlDMhTs?key=VVpoSjliMXZ4MFZFdENrZUJCaTd4ZjFWaGdMdVZB"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://test-stream.developer-pro.workers.dev/video?url=15171468266111",
+          "host": "test-stream.developer-pro.workers.dev",
+          "status": "ok_worker",
+          "qualities": [
+            "1080p",
+            "720p",
+            "480p",
+            "360p",
+            "240p"
+          ]
+        },
+        {
+          "url": "https://cdnlink.developer-pro.workers.dev/get-links?id=13349081844354",
+          "host": "cdnlink.developer-pro.workers.dev",
+          "status": "err:The operation was aborted due to timeout"
+        },
+        {
+          "url": "https://photos.google.com/share/AF1QipO-za0HgpyFU_AcvP0Shhgb5fNORvM7ZU-NHUZy9GvHs8G8vL-6GGtNWN1R4QpzJw/photo/AF1QipMF6x9",
+          "host": "photos.google.com",
+          "status": "ok_gphoto",
+          "qualities": [
+            "=m37:206:video/mp4:1080p",
+            "=m22:206:video/mp4:960p",
+            "=m18:206:video/mp4:480p"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "movie",
+      "id": "27070",
+      "note": "The Bad Guys 2 (Dubbed Cartoon Movie)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "serversDecrypted": true,
+      "serverCount": 25,
+      "rawServerSample": [
+        {
+          "id": 1239845,
+          "type": "embed",
+          "link": "https://uqload.vc/embed-ihv3wf1duf08.html"
+        },
+        {
+          "id": 1239846,
+          "type": "embed",
+          "link": "https://lulustream.com/e/63apxl5lc26b"
+        },
+        {
+          "id": 1239847,
+          "type": "embed",
+          "link": "https://goodstream.one/embed-0brnaogyc4pn.html"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://uqload.vc/embed-ihv3wf1duf08.html",
+          "host": "uqload.vc",
+          "status": "http_200",
+          "finalHost": "uqload.vc",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://lulustream.com/e/63apxl5lc26b",
+          "host": "lulustream.com",
+          "status": "http_403",
+          "finalHost": "luluvdo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://goodstream.one/embed-0brnaogyc4pn.html",
+          "host": "goodstream.one",
+          "status": "err:The operation was aborted due to timeout"
+        },
+        {
+          "url": "https://mixdrop.to/e/gjnl3jjvak1o4n",
+          "host": "mixdrop.to",
+          "status": "http_200",
+          "finalHost": "mxdrop.click",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://hgplaycdn.com/e/j94z9k0jqupc",
+          "host": "hgplaycdn.com",
+          "status": "http_200",
+          "finalHost": "hgplaycdn.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://minochinos.com/embed/1js3pf7hviqh",
+          "host": "minochinos.com",
+          "status": "http_200",
+          "finalHost": "callistanise.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://stardima.worldnow.top/aflam/The.Bad.Guys.2.2025%2520Eg%2520%255BStarDima%255D.mp4",
+          "host": "stardima.worldnow.top",
+          "status": "direct_http_404"
+        },
+        {
+          "url": "https://megamax.me/iframe/4Tvjuojmlbk4D",
+          "host": "megamax.me",
+          "status": "http_200",
+          "finalHost": "megamax.me",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://rubyvidhub.com/e/7k3r2ovd18t3",
+          "host": "rubyvidhub.com",
+          "status": "http_200",
+          "finalHost": "rubyvidhub.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidtube.one/e/lyztll5zsx26.html",
+          "host": "vidtube.one",
+          "status": "http_403",
+          "finalHost": "vidtube.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 2
+          }
+        },
+        {
+          "url": "https://turbovidhls.com/t/6a8b4ad4cfa23",
+          "host": "turbovidhls.com",
+          "status": "err:fetch failed"
+        },
+        {
+          "url": "https://1vid.xyz/embed-lfuox0soajx3.html",
+          "host": "1vid.xyz",
+          "status": "http_200",
+          "finalHost": "1vid.xyz",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vkvideo.ru/video_ext.php?oid=-239012485&id=456239033&hash=31dece39e5814d93&hd=2",
+          "host": "vkvideo.ru",
+          "status": "err:fetch failed"
+        },
+        {
+          "url": "https://ok.ru/videoembed/16276069288665",
+          "host": "ok.ru",
+          "status": "http_200",
+          "finalHost": "ok.ru",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": true,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": true,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidmoly.org/embed-h3ojw833foaq.html",
+          "host": "vidmoly.org",
+          "status": "http_200",
+          "finalHost": "vidmoly.org",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": true,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidspeed.org/embed-87xynvqn40d2.html",
+          "host": "vidspeed.org",
+          "status": "http_200",
+          "finalHost": "vidspeed.org",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://bysesukior.com/e/drg2kqzqvw4s/The.Bad.Guys.2.2025.Dubbed.mp4",
+          "host": "bysesukior.com",
+          "status": "ok_direct_200"
+        },
+        {
+          "url": "https://hgcloud.to/e/dt4pdinlcwyi",
+          "host": "hgcloud.to",
+          "status": "http_200",
+          "finalHost": "hgcloud.to",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://uqload.vc/embed-2otn7isv8kyk.html",
+          "host": "uqload.vc",
+          "status": "http_200",
+          "finalHost": "uqload.vc",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://voe.sx/e/dcmzcxq18ca3",
+          "host": "voe.sx",
+          "status": "http_200",
+          "finalHost": "voe.sx",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://playmogo.com/e/uykc0635cxvi",
+          "host": "playmogo.com",
+          "status": "http_403",
+          "finalHost": "playmogo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://uqload.vc/embed-vrl1zno8cjos.html",
+          "host": "uqload.vc",
+          "status": "http_200",
+          "finalHost": "uqload.vc",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://savefiles.com/e/cj8ciiaweo9l",
+          "host": "savefiles.com",
+          "status": "http_403",
+          "finalHost": "savefiles.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://mixdrop.top/e/gjnl3jjvak1o4n",
+          "host": "mixdrop.top",
+          "status": "http_200",
+          "finalHost": "mxdrop.click",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://hgcloud.to/e/j94z9k0jqupc",
+          "host": "hgcloud.to",
+          "status": "http_200",
+          "finalHost": "hgcloud.to",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        }
+      ]
+    },
+    {
+      "kind": "movie",
+      "id": "27232",
+      "note": "Mononoke Movie III (Subbed Anime Movie)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "serversDecrypted": true,
+      "serverCount": 20,
+      "rawServerSample": [
+        {
+          "id": 1319600,
+          "type": "embed",
+          "link": "https://down.vidtube.one/5ijhmc6t9937.html"
+        },
+        {
+          "id": 1319601,
+          "type": "embed",
+          "link": "https://stmruby.com/embed-anxadp3dgu64.html"
+        },
+        {
+          "id": 1319602,
+          "type": "embed",
+          "link": "https://stmruby.com/embed-pr94p0emopo3.html"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://down.vidtube.one/5ijhmc6t9937.html",
+          "host": "down.vidtube.one",
+          "status": "http_403",
+          "finalHost": "down.vidtube.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 5
+          }
+        },
+        {
+          "url": "https://stmruby.com/embed-anxadp3dgu64.html",
+          "host": "stmruby.com",
+          "status": "http_200",
+          "finalHost": "stmruby.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://stmruby.com/embed-pr94p0emopo3.html",
+          "host": "stmruby.com",
+          "status": "http_200",
+          "finalHost": "stmruby.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://uqload.vc/embed-znz6fpd23z48.html",
+          "host": "uqload.vc",
+          "status": "http_200",
+          "finalHost": "uqload.vc",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://hanerix.com/e/ueexrb5u8dp4",
+          "host": "hanerix.com",
+          "status": "http_200",
+          "finalHost": "hanerix.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://morencius.com/v/hj2rt2vqtw4t",
+          "host": "morencius.com",
+          "status": "http_200",
+          "finalHost": "morencius.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://morencius.com/v/2zotdcejv984",
+          "host": "morencius.com",
+          "status": "http_200",
+          "finalHost": "morencius.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://luluvdo.com/e/cyp90a5r1sok",
+          "host": "luluvdo.com",
+          "status": "http_403",
+          "finalHost": "luluvdo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://luluvdo.com/e/tgw375waiua8",
+          "host": "luluvdo.com",
+          "status": "http_403",
+          "finalHost": "luluvdo.com",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidaraa.cc/e/yb4MUcvQxvMGO",
+          "host": "vidaraa.cc",
+          "status": "http_200",
+          "finalHost": "vidaraa.cc",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://vidaraa.cc/e/SPWJ0fpqJPqyK",
+          "host": "vidaraa.cc",
+          "status": "http_200",
+          "finalHost": "vidaraa.cc",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://updown.icu/a7ut7rpguu7s.html",
+          "host": "updown.icu",
+          "status": "http_200",
+          "finalHost": "updown.icu",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": true,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://streamwish.fun/e/95gpig58usr5",
+          "host": "streamwish.fun",
+          "status": "http_200",
+          "finalHost": "streamwish.fun",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://earnvids.xyz/v/m5gm5x9lsqkj",
+          "host": "earnvids.xyz",
+          "status": "http_200",
+          "finalHost": "earnvids.xyz",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://tuktuk.upns.one/#m9iusq",
+          "host": "tuktuk.upns.one",
+          "status": "http_200",
+          "finalHost": "tuktuk.upns.one",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://tuktuk.p2pstream.vip/#unzey6",
+          "host": "tuktuk.p2pstream.vip",
+          "status": "http_200",
+          "finalHost": "tuktuk.p2pstream.vip",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://megamax.me/iframe/RPBYJdqG5FxQL",
+          "host": "megamax.me",
+          "status": "http_403",
+          "finalHost": "megamax.me",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://megatuktuk.store/iframe/0fSvT5x3AZlox",
+          "host": "megatuktuk.store",
+          "status": "http_200",
+          "finalHost": "megatuktuk.store",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://megatuktuk.store/iframe/1AIYtD3ztfMGL",
+          "host": "megatuktuk.store",
+          "status": "http_200",
+          "finalHost": "megatuktuk.store",
+          "flags": {
+            "hasPacker": false,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        },
+        {
+          "url": "https://morencius.com/v/mdei0xv709dh",
+          "host": "morencius.com",
+          "status": "http_200",
+          "finalHost": "morencius.com",
+          "flags": {
+            "hasPacker": true,
+            "hasM3u8": false,
+            "hasMp4": false,
+            "hasEnc": false,
+            "hasDataOptions": false,
+            "phpCount": 0
+          }
+        }
+      ]
+    },
+    {
+      "kind": "movie",
+      "id": "27226",
+      "note": "Detective Conan Movie (Subbed Anime Movie)",
+      "detailOk": false,
+      "name": null,
+      "detailDecrypted": false,
+      "serversDecrypted": true,
+      "serverCount": 3,
+      "rawServerSample": [
+        {
+          "id": 1304086,
+          "type": "embed",
+          "link": "https://test-stream.developer-pro.workers.dev/video?url=16907747658367"
+        },
+        {
+          "id": 1304087,
+          "type": "embed",
+          "link": "https://link.developer-pro.workers.dev/get-links?id=id17002001205824"
+        },
+        {
+          "id": 1304088,
+          "type": "embed",
+          "link": "https://photos.google.com/share/AF1QipPn2Yg8BUwNZ75I5zqqD0jhISQln0bUD7gsgALLgFYuI8mNZqWcWfniifypD11eyQ/photo/AF1QipNxCqs95D5yJabvWtGaiBGoJHT59H_aJHMJni1Y?key=UmVpaXlsMFNIOGZSUTZfTU00RXA2Vm5VU1NsaG9n"
+        }
+      ],
+      "probedServers": [
+        {
+          "url": "https://test-stream.developer-pro.workers.dev/video?url=16907747658367",
+          "host": "test-stream.developer-pro.workers.dev",
+          "status": "ok_worker",
+          "qualities": [
+            "1080p",
+            "720p",
+            "480p",
+            "360p",
+            "240p"
+          ]
+        },
+        {
+          "url": "https://link.developer-pro.workers.dev/get-links?id=id17002001205824",
+          "host": "link.developer-pro.workers.dev",
+          "status": "err:The operation was aborted due to timeout"
+        },
+        {
+          "url": "https://photos.google.com/share/AF1QipPn2Yg8BUwNZ75I5zqqD0jhISQln0bUD7gsgALLgFYuI8mNZqWcWfniifypD11eyQ/photo/AF1QipNxCqs",
+          "host": "photos.google.com",
+          "status": "ok_gphoto",
+          "qualities": [
+            "=m37:206:video/mp4:1080p",
+            "=m22:206:video/mp4:720p",
+            "=m18:206:video/mp4:360p"
+          ]
+        }
+      ]
+    }
+  ],
+  "fatalError": null,
+  "hostHistogram": {
+    "test-stream.developer-pro.workers.dev": 4,
+    "photos.google.com": 4,
+    "anime3rb.com": 1,
+    "cdnlink.developer-pro.workers.dev": 2,
+    "vinovo.to": 1,
+    "vidaraa.cc": 3,
+    "fastvid.cam": 1,
+    "vids.st": 1,
+    "streamhls.to": 1,
+    "mxdrop.top": 1,
+    "ult4vid.one": 1,
+    "71stream.one": 1,
+    "morencius.com": 4,
+    "vidmoly.net": 1,
+    "down.vidtube.one": 2,
+    "updown.icu": 2,
+    "streamwish.fun": 2,
+    "d0o0d.com": 1,
+    "earnvids.xyz": 2,
+    "byseqekaho.com": 1,
+    "firestream.to": 1,
+    "streamtape.cc": 1,
+    "luluvdo.com": 3,
+    "mixdrop.ps": 1,
+    "mediafire.com": 3,
+    "pixeldrain.com": 3,
+    "streamtape.com": 3,
+    "uqload.vc": 4,
+    "lulustream.com": 1,
+    "goodstream.one": 1,
+    "mixdrop.to": 1,
+    "hgplaycdn.com": 1,
+    "minochinos.com": 1,
+    "stardima.worldnow.top": 1,
+    "megamax.me": 2,
+    "rubyvidhub.com": 1,
+    "vidtube.one": 1,
+    "turbovidhls.com": 1,
+    "1vid.xyz": 1,
+    "vkvideo.ru": 1,
+    "ok.ru": 1,
+    "vidmoly.org": 1,
+    "vidspeed.org": 1,
+    "bysesukior.com": 1,
+    "hgcloud.to": 2,
+    "voe.sx": 1,
+    "playmogo.com": 1,
+    "savefiles.com": 1,
+    "mixdrop.top": 1,
+    "stmruby.com": 2,
+    "hanerix.com": 1,
+    "tuktuk.upns.one": 1,
+    "tuktuk.p2pstream.vip": 1,
+    "megatuktuk.store": 2,
+    "link.developer-pro.workers.dev": 1
+  }
+}
