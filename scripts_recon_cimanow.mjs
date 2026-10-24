@@ -21,6 +21,8 @@ const PROXY_FEEDS = [
   ["socks5h", "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt"],
   ["http", "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/https.txt"],
   ["socks5h", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"],
+  ["http", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"],
+  ["socks5h", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"],
 ];
 
 function isCimaBlock(html) {
@@ -49,7 +51,7 @@ async function curlReq(
     "--max-time",
     String(timeoutSec),
     "--connect-timeout",
-    "5",
+    "8",
     "-X",
     method,
     "-A",
@@ -123,7 +125,7 @@ async function getWorkingProxies() {
 }
 
 // Trace the full redirect chain from `.shine` (`rm.freex2line.online/loadon/?link=...`) to `/watching/`!
-async function followGatewayChain(shineUrl, itemUrl, proxy) {
+async function followGatewayChain(shineUrl, itemUrl, proxies) {
   const jar = `/tmp/cn_chain_${Math.random().toString(36).slice(2)}.txt`;
   const hops = [];
   let curUrl = shineUrl;
@@ -131,9 +133,10 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
   let curMethod = "GET";
   let curPost = null;
   let finalResp = null;
+  let stickyProxy = proxies[0];
 
   try {
-    for (let step = 0; step < 10; step++) {
+    for (let step = 0; step < 12; step++) {
       // Unwrap `https://href.li/?<target>` just like href.li does (meta refresh with noreferrer!)
       if (curUrl.startsWith("https://href.li/?")) {
         const unwrapped = curUrl.slice("https://href.li/?".length);
@@ -142,18 +145,41 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
         curRef = null;
       }
 
-      const r = await curlReq(curUrl, {
-        method: curMethod,
-        postData: curPost,
-        proxy,
-        referer: curRef,
-        cookieJarFile: jar,
-        follow: false,
-        includeHeaders: true,
-      });
+      // Try stickyProxy first (up to 2 tries), then fall back to any other working proxy!
+      const order = [stickyProxy, stickyProxy, ...proxies.filter((x) => x !== stickyProxy)];
+      let r = null;
+      let hopErr = null;
+      for (const p of order) {
+        try {
+          const cand = await curlReq(curUrl, {
+            method: curMethod,
+            postData: curPost,
+            proxy: p,
+            referer: curRef,
+            cookieJarFile: jar,
+            follow: false,
+            includeHeaders: true,
+            timeoutSec: 16,
+          });
+          if (cand.status > 0 && !isCimaBlock(cand.text) && !cand.text.includes("Just a moment...")) {
+            r = cand;
+            stickyProxy = p;
+            break;
+          }
+          hopErr = `blocked_or_zero:${cand.status}`;
+        } catch (e) {
+          hopErr = String(e.message || e);
+        }
+      }
+
+      if (!r) {
+        hops.push({ step, reqUrl: curUrl, reqReferer: curRef, failedAllProxies: hopErr });
+        break;
+      }
 
       hops.push({
         step,
+        usedProxy: stickyProxy,
         reqUrl: curUrl,
         reqMethod: curMethod,
         reqReferer: curRef,
@@ -162,7 +188,7 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
         redirectUrl: r.redirectUrl,
         headers: r.respHeaders.slice(0, 1000),
         len: r.text.length,
-        bodySample: r.text.length < 8000 ? r.text : r.text.slice(0, 2500),
+        bodySample: r.text.length < 10000 ? r.text : r.text.slice(0, 3000),
       });
 
       finalResp = r;
@@ -174,7 +200,6 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
 
       // 1) HTTP 301/302/303/307/308 redirect
       if (r.redirectUrl) {
-        // Check Referrer-Policy header!
         const noRef = /referrer-policy:\s*no-referrer/i.test(r.respHeaders);
         curRef = noRef ? null : curUrl;
         curUrl = new URL(r.redirectUrl, curUrl).toString();
@@ -207,18 +232,20 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
         continue;
       }
 
-      // 4) `<form action="..." method="...">` auto-submit or continue form
+      // 4) `<form action="..." method="...">`
       const formMatch = r.text.match(/<form\b([^>]*)>([\s\S]*?)<\/form>/i);
       if (formMatch && !curUrl.includes("cimanow.cc")) {
         const attrs = formMatch[1];
         const inner = formMatch[2];
         const action = attrs.match(/action=["']([^"']*)["']/i)?.[1] || curUrl;
         const method = (attrs.match(/method=["']([^"']*)["']/i)?.[1] || "GET").toUpperCase();
-        const inputs = [...inner.matchAll(/<input\b([^>]*)>/gi)].map((m) => {
-          const n = m[1].match(/name=["']([^"']+)["']/i)?.[1];
-          const v = m[1].match(/value=["']([^"']*)["']/i)?.[1] || "";
-          return n ? `${encodeURIComponent(n)}=${encodeURIComponent(v)}` : null;
-        }).filter(Boolean);
+        const inputs = [...inner.matchAll(/<input\b([^>]*)>/gi)]
+          .map((m) => {
+            const n = m[1].match(/name=["']([^"']+)["']/i)?.[1];
+            const v = m[1].match(/value=["']([^"']*)["']/i)?.[1] || "";
+            return n ? `${encodeURIComponent(n)}=${encodeURIComponent(v)}` : null;
+          })
+          .filter(Boolean);
         curRef = curUrl;
         curUrl = new URL(action, curUrl).toString();
         curMethod = method;
@@ -245,13 +272,13 @@ async function followGatewayChain(shineUrl, itemUrl, proxy) {
     }
 
     const cookiesAtEnd = fs.existsSync(jar) ? fs.readFileSync(jar, "utf8") : "";
-    return { hops, finalResp, cookiesAtEnd, jar };
+    return { hops, finalResp, stickyProxy, cookiesAtEnd, jar };
   } catch (e) {
-    return { hops, error: String(e.stack || e), jar };
+    return { hops, error: String(e.stack || e), stickyProxy, jar };
   }
 }
 
-async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
+async function inspectWatchingPage(watchHtml, watchUrl, proxies, jar) {
   const info = {};
 
   // 1. Inspect all `<script>` tags on `/watching/`!
@@ -268,7 +295,7 @@ async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
   info.inlineTokenScripts = scripts
     .filter((s) => s.code.includes("_getCoreToken") || s.code.includes("core.php") || (s.len > 0 && s.len < 50000))
     .filter((s) => !s.code.includes("__CF$cv$params") && s.attrs !== 'type="application/ld+json"')
-    .map((s) => ({ idx: s.idx, attrs: s.attrs, code: s.code.slice(0, 6000) }));
+    .map((s) => ({ idx: s.idx, attrs: s.attrs, code: s.code.slice(0, 8000) }));
 
   const extSrcs = scripts
     .map((s) => s.attrs.match(/src=["']([^"']+)["']/i)?.[1])
@@ -279,7 +306,7 @@ async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
   for (const srcUrl of extSrcs) {
     try {
       const fullJsUrl = new URL(srcUrl, watchUrl).toString();
-      const jr = await curlReq(fullJsUrl, { proxy, referer: watchUrl, cookieJarFile: jar });
+      const jr = await smartReq(fullJsUrl, proxies, { referer: watchUrl, cookieJarFile: jar });
       const entry = { url: fullJsUrl, len: jr.text.length, preview: jr.text.slice(0, 3000) };
       // Try running in VM to see if it defines `window._getCoreToken`!
       const sb = {
@@ -357,11 +384,9 @@ async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
   );
   for (let i = 0; i < validTabs.length; i++) {
     const t = validTabs[i];
-    if (i === 0 && computedToken) {
-      // Test WITHOUT token first to see what core.php does!
+    if (i === 0) {
       const noTokUrl = `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
-      const rNoTok = await curlReq(noTokUrl, {
-        proxy,
+      const rNoTok = await smartReq(noTokUrl, proxies, {
         referer: watchUrl,
         cookieJarFile: jar,
         extraHeaders: ["X-Requested-With: XMLHttpRequest"],
@@ -373,8 +398,7 @@ async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
       `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
       (computedToken ? `?token=${encodeURIComponent(computedToken)}&` : `?`) +
       `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
-    const sr = await curlReq(switchUrl, {
-      proxy,
+    const sr = await smartReq(switchUrl, proxies, {
       referer: watchUrl,
       cookieJarFile: jar,
       extraHeaders: ["X-Requested-With: XMLHttpRequest"],
@@ -455,20 +479,13 @@ async function main() {
         const shineMatch = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i);
         const shineUrl = shineMatch?.[1] || "";
 
-        // Try each working proxy for sticky PHPSESSID chain until `/watching/` succeeds!
-        let chain = null;
-        let stickyP = mv.usedProxy || p0;
-        for (const candP of [stickyP, ...proxies.filter((x) => x !== stickyP)]) {
-          chain = shineUrl ? await followGatewayChain(shineUrl, item.url, candP) : { error: "No .shine href found" };
-          stickyP = candP;
-          if (chain.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
-            break;
-          }
-          if (chain.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
-        }
+        const orderedProxies = [mv.usedProxy || p0, ...proxies.filter((x) => x !== (mv.usedProxy || p0))];
+        const chain = shineUrl
+          ? await followGatewayChain(shineUrl, item.url, orderedProxies)
+          : { error: "No .shine href found" };
 
         const flowReport = {
-          usedProxy: stickyP,
+          usedProxy: chain?.stickyProxy || mv.usedProxy || p0,
           shineUrl,
           hops: chain?.hops || [],
           chainError: chain?.error || null,
@@ -477,7 +494,7 @@ async function main() {
 
         if (chain?.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
           const finalHop = chain.hops[chain.hops.length - 1];
-          flowReport.watching = await inspectWatchingPage(chain.finalResp.text, finalHop.reqUrl, stickyP, chain.jar);
+          flowReport.watching = await inspectWatchingPage(chain.finalResp.text, finalHop.reqUrl, orderedProxies, chain.jar);
         }
 
         if (chain?.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
