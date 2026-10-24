@@ -1,7 +1,7 @@
 {
   "cs3_artifact": {
     "exists": true,
-    "file_size": 101927,
+    "file_size": 102698,
     "entries": [
       "manifest.json",
       "classes.dex"
@@ -12,7 +12,7 @@
       "pluginClassName": "com.cimacloud.CimaCloudPlugin",
       "name": "CimaCloud"
     },
-    "dex_size": 244964,
+    "dex_size": 246740,
     "native_so_files": []
   },
   "catalog_verification": {
@@ -84,97 +84,1273 @@
   },
   "phony_detail": {
     "id": "12827",
-    "name": null,
+    "name": "Phony",
     "seasons": 1,
     "episodes": [
       {
         "id": "370096",
-        "name": "Phony",
-        "ep": null
+        "title": "الحلقة 1"
       },
       {
         "id": "370097",
-        "name": "Phony",
-        "ep": null
+        "title": "الحلقة 2"
       }
     ]
   },
   "star_one_detail": {
     "id": "27295",
-    "name": null,
-    "release_date": null,
-    "runtime": null
+    "name": "Star One",
+    "release_date": "2026-07-03",
+    "runtime": 94
   },
   "extractions": [
     {
-      "label": "Phony - Phony (ep_id=370096)",
+      "label": "Phony - الحلقة 1 (ep_id=370096)",
       "servers_api_path": "episode/370096/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 8,
+      "working_servers_count": 7,
+      "total_playable_streams": 17,
+      "qualities_extracted": [
+        "360p",
+        "480p",
+        "720p",
+        "960p"
+      ],
+      "stream_types": [
+        "M3U8"
+      ],
+      "servers_detail": [
+        {
+          "host": "down.vidtube.one",
+          "url": "https://down.vidtube.one/sie7f7xmgk1l.html",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "stmruby.com",
+          "url": "https://stmruby.com/embed-tq6z4fzw8stk.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_l/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848561&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_n/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848561&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_h/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848561&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_o/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848561&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "stmruby.com",
+          "url": "https://stmruby.com/embed-7eqwh0lk4l03.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_l/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848560&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_n/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848560&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_h/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848560&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://ucxipzwkyhms02.streamruby.net/hls2/04/00498/tq6z4fzw8stk_o/index-v1-a1.m3u8?t=JVUznkhmcECtRtreDZLb5zbTQ384Ny6xfUUDWUDynTA&s=1792838424&e=32400&v=1912848560&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "uqload.vc",
+          "url": "https://uqload.vc/embed-g47vtpxmusy0.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/g47vtpxmusy0_l/index-v1-a1.m3u8?t=EkfJeN0qIxNS3KvbZsxaTRLrrx5Ul9cSn35TkG9lmbw&s=1792838424&e=14400&v=2847398&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/g47vtpxmusy0_n/index-v1-a1.m3u8?t=EkfJeN0qIxNS3KvbZsxaTRLrrx5Ul9cSn35TkG9lmbw&s=1792838424&e=14400&v=2847398&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/g47vtpxmusy0_h/index-v1-a1.m3u8?t=EkfJeN0qIxNS3KvbZsxaTRLrrx5Ul9cSn35TkG9lmbw&s=1792838424&e=14400&v=2847398&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "hanerix.com",
+          "url": "https://hanerix.com/e/ybnrleflifjt",
+          "streams": [
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/ybnrleflifjt_,l,n,h,.urlset/index-f1-v1-a1.m3u8?t=NfgaVeE4L8UzyYhEPV357VYpW6Xbw3bLWYglBB0yaV0&s=1792838424&e=129600&f=76027780&srv=551lgwlbaa5pe&i=0.4&sp=500&p1=551lgwlbaa5pe&p2=551lgwlbaa5pe&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/ybnrleflifjt_,l,n,h,.urlset/index-f2-v1-a1.m3u8?t=NfgaVeE4L8UzyYhEPV357VYpW6Xbw3bLWYglBB0yaV0&s=1792838424&e=129600&f=76027780&srv=551lgwlbaa5pe&i=0.4&sp=500&p1=551lgwlbaa5pe&p2=551lgwlbaa5pe&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/ybnrleflifjt_,l,n,h,.urlset/index-f3-v1-a1.m3u8?t=NfgaVeE4L8UzyYhEPV357VYpW6Xbw3bLWYglBB0yaV0&s=1792838424&e=129600&f=76027780&srv=551lgwlbaa5pe&i=0.4&sp=500&p1=551lgwlbaa5pe&p2=551lgwlbaa5pe&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "morencius.com",
+          "url": "https://morencius.com/v/ook097l2x92v",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://dD2STLiWT0bC.dramiyos-cdn.com/hls2/01/08730/ook097l2x92v_o/index-v1-a1.m3u8?t=73dNMOYHoUlpXzGOundaXWKMG6AjmOJdTNiNFhWEVuM&s=1792838424&e=129600&f=43651745&srv=sosNVcMrPrym&i=0.4&sp=500&p1=sosNVcMrPrym&p2=sosNVcMrPrym&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "morencius.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "morencius.com",
+          "url": "https://morencius.com/v/cagh6vlcceie",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://dD2STLiWT0bC.dramiyos-cdn.com/hls2/01/08730/ook097l2x92v_o/index-v1-a1.m3u8?t=73dNMOYHoUlpXzGOundaXWKMG6AjmOJdTNiNFhWEVuM&s=1792838424&e=129600&f=43652980&srv=sosNVcMrPrym&i=0.4&sp=500&p1=sosNVcMrPrym&p2=sosNVcMrPrym&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "morencius.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "luluvdo.com",
+          "url": "https://luluvdo.com/e/ok6s110hikse",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://5t8RYSDVRRsc.tnmr.org/hls2/02/04508/ok6s110hikse_h/index-v1-a1.m3u8?t=8jFKcfLUIYH8qpzXvJ1Eq3l8Gm9fjo3foCr4WrJtEig&s=1792838424&e=28800&f=22540280&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "luluvdo.com"
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
-      "label": "Phony - Phony (ep_id=370097)",
+      "label": "Phony - الحلقة 2 (ep_id=370097)",
       "servers_api_path": "episode/370097/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 8,
+      "working_servers_count": 7,
+      "total_playable_streams": 17,
+      "qualities_extracted": [
+        "360p",
+        "480p",
+        "720p",
+        "960p"
+      ],
+      "stream_types": [
+        "M3U8"
+      ],
+      "servers_detail": [
+        {
+          "host": "down.vidtube.one",
+          "url": "https://down.vidtube.one/nxxef2i8bo9e.html",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "stmruby.com",
+          "url": "https://stmruby.com/embed-55v3sgsy6fct.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_l/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848653&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_n/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848653&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_h/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848653&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_o/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848653&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "stmruby.com",
+          "url": "https://stmruby.com/embed-taxb8uu4fcs3.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_l/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848652&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_n/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848652&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_h/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848652&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/55v3sgsy6fct_o/index-v1-a1.m3u8?t=7eWC3oNmfWZNo-MuQP8kSIyV9Qpcs_YsjkYJs7jgL5I&s=1792838427&e=32400&v=1912848652&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "uqload.vc",
+          "url": "https://uqload.vc/embed-zigngf1b7xv0.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/zigngf1b7xv0_l/index-v1-a1.m3u8?t=OaxhlnKZQtfrEMeozeitEqCpRx6euttfk5SzbpCmCdU&s=1792838427&e=14400&v=2847583&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/zigngf1b7xv0_n/index-v1-a1.m3u8?t=OaxhlnKZQtfrEMeozeitEqCpRx6euttfk5SzbpCmCdU&s=1792838427&e=14400&v=2847583&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://strm15.uqload.vc/hls2/02/05952/zigngf1b7xv0_h/index-v1-a1.m3u8?t=OaxhlnKZQtfrEMeozeitEqCpRx6euttfk5SzbpCmCdU&s=1792838427&e=14400&v=2847583&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "hanerix.com",
+          "url": "https://hanerix.com/e/5wpagwizdjwv",
+          "streams": [
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/5wpagwizdjwv_,l,n,h,.urlset/index-f1-v1-a1.m3u8?t=EHjEnyGUDC_pZy1UpdDEg_G6w56r36K70W0U1TH2tzY&s=1792838428&e=129600&f=76027750&srv=zfrDFVBCJYdZ54KZ&i=0.4&sp=500&p1=zfrDFVBCJYdZ54KZ&p2=zfrDFVBCJYdZ54KZ&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/5wpagwizdjwv_,l,n,h,.urlset/index-f2-v1-a1.m3u8?t=EHjEnyGUDC_pZy1UpdDEg_G6w56r36K70W0U1TH2tzY&s=1792838428&e=129600&f=76027750&srv=zfrDFVBCJYdZ54KZ&i=0.4&sp=500&p1=zfrDFVBCJYdZ54KZ&p2=zfrDFVBCJYdZ54KZ&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            },
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://cyyroro04xrqr.premilkyway.com/hls2/01/15205/5wpagwizdjwv_,l,n,h,.urlset/index-f3-v1-a1.m3u8?t=EHjEnyGUDC_pZy1UpdDEg_G6w56r36K70W0U1TH2tzY&s=1792838428&e=129600&f=76027750&srv=zfrDFVBCJYdZ54KZ&i=0.4&sp=500&p1=zfrDFVBCJYdZ54KZ&p2=zfrDFVBCJYdZ54KZ&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hanerix.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "morencius.com",
+          "url": "https://morencius.com/v/496maamxrh6l",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://WPvsAhSVL0YO.dramiyos-cdn.com/hls2/01/08730/496maamxrh6l_o/index-v1-a1.m3u8?t=Wzf0vfQAKFdxWNYMNTE7wiWNjZ8qBwvbF80i-i1jaYs&s=1792838427&e=129600&f=43650671&srv=FaZ2vo3Wda5G&i=0.4&sp=500&p1=FaZ2vo3Wda5G&p2=FaZ2vo3Wda5G&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "morencius.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "morencius.com",
+          "url": "https://morencius.com/v/heboadyw1smp",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://WPvsAhSVL0YO.dramiyos-cdn.com/hls2/01/08730/496maamxrh6l_o/index-v1-a1.m3u8?t=Wzf0vfQAKFdxWNYMNTE7wiWNjZ8qBwvbF80i-i1jaYs&s=1792838427&e=129600&f=43652982&srv=FaZ2vo3Wda5G&i=0.4&sp=500&p1=FaZ2vo3Wda5G&p2=FaZ2vo3Wda5G&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "morencius.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "luluvdo.com",
+          "url": "https://luluvdo.com/e/uvnap0cebibe",
+          "streams": [
+            {
+              "quality": "960p",
+              "type": "M3U8",
+              "url": "https://nm8bcfdtc4vx.tnmr.org/hls2/02/04508/uvnap0cebibe_h/index-v1-a1.m3u8?t=bBAAc6n-FN2_r8yzMVOpDp5sX5xbe4I-NejHi82w8W0&s=1792838427&e=28800&f=22540296&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "luluvdo.com"
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
       "label": "Star One (movie_id=27295)",
       "servers_api_path": "movie/27295/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 19,
+      "working_servers_count": 14,
+      "total_playable_streams": 27,
+      "qualities_extracted": [
+        "1080p",
+        "144p",
+        "240p",
+        "360p",
+        "480p",
+        "720p",
+        "988p",
+        "HLS",
+        "direct"
+      ],
+      "stream_types": [
+        "M3U8",
+        "MP4 Download+Watch"
+      ],
+      "servers_detail": [
+        {
+          "host": "down.vidtube.one",
+          "url": "https://down.vidtube.one/3zqbbabnyw8a.html",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "stmruby.com",
+          "url": "https://stmruby.com/embed-b23ba4emjx99.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/5cxwh2630w9d_l/index-v1-a1.m3u8?t=AHz19oKziHXjRPRov8UHN6_r0oTlM-Fxpu--pHbB4J0&s=1792838432&e=32400&v=1912848805&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/5cxwh2630w9d_n/index-v1-a1.m3u8?t=AHz19oKziHXjRPRov8UHN6_r0oTlM-Fxpu--pHbB4J0&s=1792838432&e=32400&v=1912848805&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/5cxwh2630w9d_h/index-v1-a1.m3u8?t=AHz19oKziHXjRPRov8UHN6_r0oTlM-Fxpu--pHbB4J0&s=1792838432&e=32400&v=1912848805&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            },
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://rap7c5roebejl0.streamruby.net/hls2/01/00498/5cxwh2630w9d_o/index-v1-a1.m3u8?t=AHz19oKziHXjRPRov8UHN6_r0oTlM-Fxpu--pHbB4J0&s=1792838432&e=32400&v=1912848805&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "stmruby.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "morencius.com",
+          "url": "https://morencius.com/v/u7d7v0b9ir88",
+          "streams": [
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://RNzT2t4XVKU08.acek-cdn.com/hls2/01/08732/m04dykivbias_h/index-v1-a1.m3u8?t=vhp5lpWXXGf4T5tl9i9tYSaID-zkQlw5ReztgrJOzLw&s=1792838432&e=129600&f=43673170&srv=5TICbOQKpSaA&i=0.4&sp=500&p1=5TICbOQKpSaA&p2=5TICbOQKpSaA&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "morencius.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "luluvdo.com",
+          "url": "https://luluvdo.com/e/47fcea54awtu",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "luluvdo.com",
+          "url": "https://luluvdo.com/e/c2pobfuk2dxi",
+          "streams": [
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://rdaszlydufvv.tnmr.org/hls2/02/04519/c2pobfuk2dxi_h/index-v1-a1.m3u8?t=ezfE7429KsHRnWmzWwXunS6zvTIXv1cAKgT6C7LQs4Y&s=1792838432&e=28800&f=22598691&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "luluvdo.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "vidaraa.cc",
+          "url": "https://vidaraa.cc/e/Be3ITdmoRQ3BZ",
+          "streams": [
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://s7-s501740.s1q2105.com/hls/5pP7VYK74uhmXeljQXngaKBUK61DPltr/index_1920x988.m3u8",
+              "http_status": 200,
+              "playable": true,
+              "provider": "Vidara"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "1vid.xyz",
+          "url": "https://1vid.xyz/embed-okjhdcy174kl.html",
+          "streams": [
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://encode.1vid.online/hls2/01/00018/okjhdcy174kl_n/index-v1-a1.m3u8?t=03MMzDxz40DNc3kC7Rkk18o3Ax6_0MFsd3buRu5GUmk&s=1792838432&e=7200&f=93822&i=0.0&sp=4096",
+              "http_status": 200,
+              "playable": true,
+              "provider": "1vid.xyz"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "vk.ru",
+          "url": "https://vk.ru/video_ext.php?oid=-242517679&id=456239111",
+          "streams": [
+            {
+              "provider": "VK",
+              "quality": "144p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 206,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "240p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "360p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "480p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "720p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "1080p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vk6-12.vkuser.net/?expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg=CHROME&ms=95.142.206.171&typ",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "VK",
+              "quality": "HLS",
+              "type": "M3U8",
+              "url": "https://vk6-12.vkuser.net/video.m3u8?cmd=videoPlayerCdn&expires=1793097632834&srcIp=20.102.223.145&pr=40&srcAg",
+              "http_status": 200,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "ok.ru",
+          "url": "https://www.ok.ru/videoembed/16831510874841",
+          "streams": [],
+          "error": "the JSON object must be str, bytes or bytearray, not dict"
+        },
+        {
+          "host": "vidmoly.org",
+          "url": "https://vidmoly.org/embed-6e34jsfg8va4.html",
+          "streams": [
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://prx-1560-ant-t.vmpx.online/hls2/01/03016/6e34jsfg8va4_o/index-v1-a1.m3u8?t=7TIfj9QtlF2e8FHWmcQTpuEwBvAhlaNDgr9U9UUhDu0=&s=1792838433&e=43200&v=&srv=transit-1478-v1&i=0.4&sp=0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidmoly.org"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "vidspeed.org",
+          "url": "https://vidspeed.org/embed-7atido9w9sc7.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://vsped-store1-lob.cdnz.quest/hls2/01/00255/7atido9w9sc7_l/index-v1-a1.m3u8?t=F1Rlm02SF_Ioo-b20iqYXyu-bnqA-WLGgPaQcpLz5Ts&s=1792838433&e=43200&v=631535&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidspeed.org"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://vsped-store1-lob.cdnz.quest/hls2/01/00255/7atido9w9sc7_n/index-v1-a1.m3u8?t=F1Rlm02SF_Ioo-b20iqYXyu-bnqA-WLGgPaQcpLz5Ts&s=1792838433&e=43200&v=631535&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidspeed.org"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "mp4plus.org",
+          "url": "https://mp4plus.org/embed-8i1mv9u55p9r.html",
+          "streams": [
+            {
+              "provider": "mp4plus.org",
+              "quality": "direct",
+              "type": "MP4 Download+Watch",
+              "url": "https://aflam-store1-lfd.cdnz.quest/yh5cpvwnp3ikjnl75yx2rizb5753xsrg6oubjriymy5xaytqo7sujooqbtia/v.mp4",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "uqload.vc",
+          "url": "https://uqload.vc/embed-etlw0y8s7eu2.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://strm13.uqload.vc/hls2/03/05960/iq93hzrhkgbk_l/index-v1-a1.m3u8?t=lFUUYD070PgMAhyRNQ8FUST9-3i5U89Y2IXnIK2XMbU&s=1792838433&e=14400&v=2847912&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://strm13.uqload.vc/hls2/03/05960/iq93hzrhkgbk_n/index-v1-a1.m3u8?t=lFUUYD070PgMAhyRNQ8FUST9-3i5U89Y2IXnIK2XMbU&s=1792838433&e=14400&v=2847912&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "988p",
+              "type": "M3U8",
+              "url": "https://strm13.uqload.vc/hls2/03/05960/iq93hzrhkgbk_h/index-v1-a1.m3u8?t=lFUUYD070PgMAhyRNQ8FUST9-3i5U89Y2IXnIK2XMbU&s=1792838433&e=14400&v=2847912&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "bysesukior.com",
+          "url": "https://bysesukior.com/e/kpkeynaql20a",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "voe.sx",
+          "url": "https://voe.sx/e/msoc3s1jjyun",
+          "streams": [
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://ugc-cdn-caching-n3yf64cjytox0jmhrc.cloudwindow-route.com/engine/hls2-c/01/18604/3ker3ol6ejmi_,n,.urlset/index-v1-a1.m3u8?t=oHCw2s4rduvCHxfXI4FNFBpVviZR2S2yE8YFzkV2adM&s=1792838434&e=14400&f=93099851&node=4prfljwBg7uQxcwds15DlI0pMtNpyl+mDjROq3/I74I=&i=20.102&sp=2500&asn=8075&q=n&rq=ssY6hlgwOjhcOnEnqrcoo0LBjiKDP6vMZxR8mxsQ",
+              "http_status": 200,
+              "playable": true,
+              "provider": "VOE"
+            },
+            {
+              "provider": "VOE",
+              "quality": "direct",
+              "type": "MP4 Download+Watch",
+              "url": "https://ugc-cdn-caching-n3z7bcj1oywfrzq0b0.cloudwindow-route.com/engine/download/01/18604/3ker3ol6ejmi_n.mp4?t",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "mp4upload.com",
+          "url": "https://www.mp4upload.com/embed-4nnn54jxdheb.html",
+          "streams": [
+            {
+              "provider": "mp4upload.com",
+              "quality": "direct",
+              "type": "MP4 Download+Watch",
+              "url": "https://a1.mp4upload.com:183/d/x2x6mhnkz3b4quuojcse4pcoj6xo4pozf7pxbwkpwtioynwqqijrxcexx2ycw3biq6ownsjp/video.",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "mixdrop.top",
+          "url": "https://mixdrop.top/e/366p6ze7f7078e",
+          "streams": [
+            {
+              "provider": "MixDrop",
+              "quality": "720p",
+              "type": "MP4 Download+Watch",
+              "url": "https://q2dgt5pce.mxcontent.net/v2/366p6ze7f7078e.mp4?s=0doBtkFrnzC1CLd4bTE_Rg&e=1792860034&_t=1792839452",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "playmogo.com",
+          "url": "https://playmogo.com/e/vzhp9e9ds8fn",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "hgcloud.to",
+          "url": "https://hgcloud.to/e/lfdg89s3aq1d",
+          "streams": [
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://bxs5xkxkyi4y.premilkyway.com/hls2/01/15212/5dkb9qcgguxx_n/index-v1-a1.m3u8?t=Ie8R3rP2ICwLnF-eqcNTEGNwVQ3hRTg6bj_rwhoRz7k&s=1792838435&e=129600&f=76069566&srv=galk8e9m4l6if&i=0.4&sp=500&p1=galk8e9m4l6if&p2=galk8e9m4l6if&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hgcloud.to"
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
       "label": "Anime Series: Frieren S2 Ep 1 (ep_id=369392)",
       "servers_api_path": "episode/369392/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 2,
+      "working_servers_count": 2,
+      "total_playable_streams": 8,
+      "qualities_extracted": [
+        "1080p",
+        "240p",
+        "360p",
+        "480p",
+        "720p"
+      ],
+      "stream_types": [
+        "MP4 Download+Watch"
+      ],
+      "servers_detail": [
+        {
+          "host": "test-stream.developer-pro.workers.dev",
+          "url": "https://test-stream.developer-pro.workers.dev/video?url=17232018016895",
+          "streams": [
+            {
+              "provider": "CloudWorker",
+              "quality": "1080p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vd656.okcdn.ru/?expires=1792924838706&srcIp=104.22.62.190&pr=10&srcAg=CHROME&ms=178.237.23.7&type=5&si",
+              "http_status": 206,
+              "playable": true
+            },
+            {
+              "provider": "CloudWorker",
+              "quality": "720p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vd656.okcdn.ru/?expires=1792924838706&srcIp=104.22.62.190&pr=10&srcAg=CHROME&ms=178.237.23.7&type=3&si",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "CloudWorker",
+              "quality": "480p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vd656.okcdn.ru/?expires=1792924838706&srcIp=104.22.62.190&pr=10&srcAg=CHROME&ms=178.237.23.7&type=2&si",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "CloudWorker",
+              "quality": "360p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vd656.okcdn.ru/?expires=1792924838706&srcIp=104.22.62.190&pr=10&srcAg=CHROME&ms=178.237.23.7&type=1&si",
+              "http_status": 200,
+              "playable": true
+            },
+            {
+              "provider": "CloudWorker",
+              "quality": "240p",
+              "type": "MP4 Download+Watch",
+              "url": "https://vd656.okcdn.ru/?expires=1792924838706&srcIp=104.22.62.190&pr=10&srcAg=CHROME&ms=178.237.23.7&type=0&si",
+              "http_status": 200,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "photos.google.com",
+          "url": "https://photos.google.com/share/AF1QipNFgy_b8yYEe61yXcMlaMYTag0wAUGxaPwnVP0VCc2EVO0mnk3JL8baapuiH9zVFA/photo/AF1QipMnDLVMjEFHUICsCtqKFtKwOtaoeTTW2bzbZd2M?key=d2xTWlc5UXQ2N0hQSXZMQmJjcFBTV0dEU2IwT2x3",
+          "streams": [
+            {
+              "provider": "GooglePhotos",
+              "quality": "1080p",
+              "type": "MP4 Download+Watch",
+              "url": "https://lh3.googleusercontent.com/pw/AP1GczMxGREvKd43A3uehPzpQmPVV0FbZ0YxcHvpxjT3mY-ibL_xiAx2aVgDFxzQgvlBUoLcq",
+              "http_status": 206,
+              "playable": true
+            },
+            {
+              "provider": "GooglePhotos",
+              "quality": "720p",
+              "type": "MP4 Download+Watch",
+              "url": "https://lh3.googleusercontent.com/pw/AP1GczMxGREvKd43A3uehPzpQmPVV0FbZ0YxcHvpxjT3mY-ibL_xiAx2aVgDFxzQgvlBUoLcq",
+              "http_status": 206,
+              "playable": true
+            },
+            {
+              "provider": "GooglePhotos",
+              "quality": "360p",
+              "type": "MP4 Download+Watch",
+              "url": "https://lh3.googleusercontent.com/pw/AP1GczMxGREvKd43A3uehPzpQmPVV0FbZ0YxcHvpxjT3mY-ibL_xiAx2aVgDFxzQgvlBUoLcq",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
       "label": "Anime Movie: Hunter x Hunter Pilot (movie_id=27291)",
       "servers_api_path": "movie/27291/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 3,
+      "working_servers_count": 2,
+      "total_playable_streams": 2,
+      "qualities_extracted": [
+        "480p",
+        "direct"
+      ],
+      "stream_types": [
+        "MP4 Download+Watch"
+      ],
+      "servers_detail": [
+        {
+          "host": "anime3rb.com",
+          "url": "https://anime3rb.com/episode/hunter-x-hunter-pilot/1",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "pixeldrain.com",
+          "url": "https://pixeldrain.com/u/owDszUEX",
+          "streams": [
+            {
+              "provider": "PixelDrain",
+              "quality": "direct",
+              "type": "MP4 Download+Watch",
+              "url": "https://pixeldrain.com/api/file/owDszUEX",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "mediafire.com",
+          "url": "https://www.mediafire.com/file/cgf69g5r3f0vf4e/Hunter+x+Hunter+Pilot+480p.mp4/file",
+          "streams": [
+            {
+              "provider": "MediaFire",
+              "quality": "480p",
+              "type": "MP4 Download+Watch",
+              "url": "https://download2278.mediafire.com/o93n4sk8qpzgRABwQNWAlZGoIuF_5h44Rnwj9G3ZRC9V_ODm-2NuDWP1mp70pacMfFKHaOu-t-5",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
       "label": "Cartoon Series: Kaijudo Ep 1 (ep_id=370424)",
       "servers_api_path": "episode/370424/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 7,
+      "working_servers_count": 2,
+      "total_playable_streams": 2,
+      "qualities_extracted": [
+        "1080p",
+        "direct"
+      ],
+      "stream_types": [
+        "M3U8",
+        "MP4/MKV Download+Watch"
+      ],
+      "servers_detail": [
+        {
+          "host": "v2.hyperwatching.com",
+          "url": "https://v2.hyperwatching.com/watch/Xt9UhPK5WftV",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "uqload.vc",
+          "url": "https://uqload.vc/embed-1noyk9b9kc4l.html",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "lulustream.com",
+          "url": "https://lulustream.com/e/qgi8iyjeub4h",
+          "streams": [
+            {
+              "quality": "1080p",
+              "type": "M3U8",
+              "url": "https://AtET6vf6VT6f.tnmr.org/hls2/02/04471/qgi8iyjeub4h_h/index-v1-a1.m3u8?t=Hopn_i6TpnBDy5yI8TUPmLtIWiLNVGjNWwXMdXcyAhw&s=1792838441&e=28800&f=22355637&i=0.3&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "lulustream.com"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "savefiles.com",
+          "url": "https://savefiles.com/e/7q3kihype5kp",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "mixdrop.top",
+          "url": "https://mixdrop.top/e/k0w4d0wlbj1vng",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "hgcloud.to",
+          "url": "https://hgcloud.to/e/a6iel8gk581d",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "stardima.worldnow.top",
+          "url": "https://stardima.worldnow.top/Kaijudo%3A%20Rise%20of%20the%20Duel%20Masters%20%282012%29%20sub/Kaijudo%20Rise%20of%20the%20Duel%20Masters%20S01/S01e01.mp4",
+          "streams": [
+            {
+              "provider": "Direct",
+              "quality": "direct",
+              "type": "MP4/MKV Download+Watch",
+              "url": "https://stardima.worldnow.top/Kaijudo%3A%20Rise%20of%20the%20Duel%20Masters%20%282012%29%20sub/Kaijudo%20Rise%",
+              "http_status": 206,
+              "playable": true
+            }
+          ],
+          "subtitles": []
+        }
+      ]
     },
     {
       "label": "Cartoon Movie: Toy Story 5 Dubbed (movie_id=27040)",
       "servers_api_path": "movie/27040/servers",
-      "total_embed_servers": 0,
-      "working_servers_count": 0,
-      "total_playable_streams": 0,
-      "qualities_extracted": [],
-      "stream_types": [],
-      "servers_detail": []
+      "total_embed_servers": 15,
+      "working_servers_count": 6,
+      "total_playable_streams": 14,
+      "qualities_extracted": [
+        "1036p",
+        "360p",
+        "480p",
+        "720p",
+        "900p"
+      ],
+      "stream_types": [
+        "M3U8"
+      ],
+      "servers_detail": [
+        {
+          "host": "uqload.is",
+          "url": "https://uqload.is/embed-oq2h9xuew8ec.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://strm12.uqload.vc/hls2/03/05506/oq2h9xuew8ec_l/index-v1-a1.m3u8?t=b32bAttOBTH757G4voDzdka0OtXXqj9_CAb-sGyvujg&s=1792838454&e=14400&v=2849404&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.is"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://strm12.uqload.vc/hls2/03/05506/oq2h9xuew8ec_n/index-v1-a1.m3u8?t=b32bAttOBTH757G4voDzdka0OtXXqj9_CAb-sGyvujg&s=1792838454&e=14400&v=2849404&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.is"
+            },
+            {
+              "quality": "1036p",
+              "type": "M3U8",
+              "url": "https://strm12.uqload.vc/hls2/03/05506/oq2h9xuew8ec_h/index-v1-a1.m3u8?t=b32bAttOBTH757G4voDzdka0OtXXqj9_CAb-sGyvujg&s=1792838454&e=14400&v=2849404&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.is"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "lulustream.com",
+          "url": "https://lulustream.com/e/12voosv3nun1",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "goodstream.one",
+          "url": "https://goodstream.one/embed-nj4f1tlufl5c.html",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "mixdrop.to",
+          "url": "https://mixdrop.to/e/dkq0q0z4c7xjdme",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "hgplaycdn.com",
+          "url": "https://hgplaycdn.com/e/of4b3jumbpoz",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "minochinos.com",
+          "url": "https://minochinos.com/embed/ktug9jaul7e4",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "stardima.worldnow.top",
+          "url": "https://stardima.worldnow.top/aflam/Toy.Story.5.2026%20egy%20stardima.mkv",
+          "streams": [
+            {
+              "provider": "Direct",
+              "quality": "direct",
+              "type": "MP4/MKV Download+Watch",
+              "url": "https://stardima.worldnow.top/aflam/Toy.Story.5.2026%20egy%20stardima.mkv",
+              "http_status": 404,
+              "playable": false
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "1vid.xyz",
+          "url": "https://1vid.xyz/embed-c0ohfeloxx5k.html",
+          "streams": [
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://encode.1vid.online/hls2/01/00017/c0ohfeloxx5k_n/index-v1-a1.m3u8?t=p8-gzD9pzIWgmxd5O8pObQWr9WISmb6wNvbiZJoW4H8&s=1792838454&e=7200&f=88662&i=0.0&sp=4096",
+              "http_status": 200,
+              "playable": true,
+              "provider": "1vid.xyz"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "vidmoly.org",
+          "url": "https://vidmoly.org/embed-2cad5dewqpc7.html",
+          "streams": [
+            {
+              "quality": "900p",
+              "type": "M3U8",
+              "url": "https://prx-1562-ant-o.vmpx.online/hls2/01/02838/2cad5dewqpc7_n/index-v1-a1.m3u8?t=uZP7RPV1GAl8zoCVFB4nmkkxD4a5IZWeZZn-yFSThOE=&s=1792838454&e=43200&v=&srv=s-box-w-9&i=0.4&sp=0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidmoly.org"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://prx-1562-ant-o.vmpx.online/hls2/01/02838/2cad5dewqpc7_l/index-v1-a1.m3u8?t=uZP7RPV1GAl8zoCVFB4nmkkxD4a5IZWeZZn-yFSThOE=&s=1792838454&e=43200&v=&srv=s-box-w-9&i=0.4&sp=0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidmoly.org"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "voe.sx",
+          "url": "https://voe.sx/e/6fd5dnubta9r",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "bysezejataos.com",
+          "url": "https://bysezejataos.com/e/fv0eqw5evxxr",
+          "streams": [],
+          "subtitles": []
+        },
+        {
+          "host": "vidspeed.org",
+          "url": "https://vidspeed.org/embed-68pzf2zt0i3u.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://vsped-store10-vcd.cdnz.quest/hls2/04/00249/g2lhd8ewjr4x_l/index-v1-a1.m3u8?t=WUPHszaJnNmxQ9UxSIMc3MQbCMjGozGMFctcRzIBk3s&s=1792838454&e=43200&v=631959&i=0.0&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidspeed.org"
+            },
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://vsped-store10-vcd.cdnz.quest/hls2/04/00249/g2lhd8ewjr4x_n/index-v1-a1.m3u8?t=WUPHszaJnNmxQ9UxSIMc3MQbCMjGozGMFctcRzIBk3s&s=1792838454&e=43200&v=631959&i=0.0&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "vidspeed.org"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "hgcloud.to",
+          "url": "https://hgcloud.to/e/u2t0bhyp9cv7",
+          "streams": [
+            {
+              "quality": "480p",
+              "type": "M3U8",
+              "url": "https://qCsH3mKRD1SG2.premilkyway.com/hls2/01/14799/2pp3cprei2xp_,l,n,h,.urlset/index-f1-v1-a1.m3u8?t=VKQihIuSRROjLgbBnMALfLHLd5HoqdZgaCQI0L5e0Ew&s=1792838455&e=129600&f=74186943&srv=uk2y0xwy2xup0&i=0.4&sp=500&p1=uk2y0xwy2xup0&p2=uk2y0xwy2xup0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hgcloud.to"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://qCsH3mKRD1SG2.premilkyway.com/hls2/01/14799/2pp3cprei2xp_,l,n,h,.urlset/index-f2-v1-a1.m3u8?t=VKQihIuSRROjLgbBnMALfLHLd5HoqdZgaCQI0L5e0Ew&s=1792838455&e=129600&f=74186943&srv=uk2y0xwy2xup0&i=0.4&sp=500&p1=uk2y0xwy2xup0&p2=uk2y0xwy2xup0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hgcloud.to"
+            },
+            {
+              "quality": "1036p",
+              "type": "M3U8",
+              "url": "https://qCsH3mKRD1SG2.premilkyway.com/hls2/01/14799/2pp3cprei2xp_,l,n,h,.urlset/index-f3-v1-a1.m3u8?t=VKQihIuSRROjLgbBnMALfLHLd5HoqdZgaCQI0L5e0Ew&s=1792838455&e=129600&f=74186943&srv=uk2y0xwy2xup0&i=0.4&sp=500&p1=uk2y0xwy2xup0&p2=uk2y0xwy2xup0&asn=8075",
+              "http_status": 200,
+              "playable": true,
+              "provider": "hgcloud.to"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "uqload.vc",
+          "url": "https://uqload.vc/embed-ms2k44wvvd2g.html",
+          "streams": [
+            {
+              "quality": "360p",
+              "type": "M3U8",
+              "url": "https://strm11.uqload.vc/hls2/01/05507/6nwh90xpaqb3_l/index-v1-a1.m3u8?t=tYlU4NYvGqjmQJCrotqF_CNWqtbbkIp0pHWRD0pWbvA&s=1792838454&e=14400&v=2849430&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "720p",
+              "type": "M3U8",
+              "url": "https://strm11.uqload.vc/hls2/01/05507/6nwh90xpaqb3_n/index-v1-a1.m3u8?t=tYlU4NYvGqjmQJCrotqF_CNWqtbbkIp0pHWRD0pWbvA&s=1792838454&e=14400&v=2849430&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            },
+            {
+              "quality": "1036p",
+              "type": "M3U8",
+              "url": "https://strm11.uqload.vc/hls2/01/05507/6nwh90xpaqb3_h/index-v1-a1.m3u8?t=tYlU4NYvGqjmQJCrotqF_CNWqtbbkIp0pHWRD0pWbvA&s=1792838454&e=14400&v=2849430&i=20.102&sp=0",
+              "http_status": 200,
+              "playable": true,
+              "provider": "uqload.vc"
+            }
+          ],
+          "subtitles": []
+        },
+        {
+          "host": "playmogo.com",
+          "url": "https://playmogo.com/e/q541gguj00ym",
+          "streams": [],
+          "subtitles": []
+        }
+      ]
     }
   ]
 }
