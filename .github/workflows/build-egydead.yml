@@ -34,7 +34,7 @@ jobs:
         run: |
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+          sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp xdotool
           warp-cli --accept-tos registration new || true
           warp-cli --accept-tos mode proxy || warp-cli --accept-tos set-mode proxy || true
           warp-cli --accept-tos proxy port 40000 || warp-cli --accept-tos set-proxy-port 40000 || true
@@ -42,21 +42,12 @@ jobs:
           sleep 3
 
           python3 -m pip install --quiet patchright curl_cffi
-          xvfb-run -a --server-args="-screen 0 412x915x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
-          import time, json
+          xvfb-run -a --server-args="-screen 0 500x980x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
+          import time, json, subprocess
           from curl_cffi import requests as creq
           from patchright.sync_api import sync_playwright
 
-          print("=== 1. WARP EXIT CHECK + DIRECT CURL_CFFI OVER WARP ===")
-          try:
-              tr = creq.get("https://tv10.egydead.live/cdn-cgi/trace", proxies={"https": "socks5h://127.0.0.1:40000"}, timeout=8)
-              print("[WARP trace]", tr.text.replace("\n", " | "))
-              r_w = creq.get("https://tv10.egydead.live/h3/", impersonate="chrome131_android", proxies={"https": "socks5h://127.0.0.1:40000"}, timeout=10)
-              print(f"[WARP curl_cffi /h3/] -> status={r_w.status_code}, len={len(r_w.text)}, movieItem={'movieItem' in r_w.text}")
-          except Exception as e:
-              print("[WARP curl_cffi err]", e)
-
-          print("=== 2. PATCHRIGHT REAL CHROME + OUR EXACT TURNSTILE SOLVER OVER WARP ===")
+          print("=== REAL OS XDOTOOL MOUSE MOVE + CLICK ON ON-SCREEN CHROME + WARP ===")
           with sync_playwright() as p:
               browser = p.chromium.launch(
                   channel="chrome",
@@ -65,18 +56,19 @@ jobs:
                   args=[
                       "--no-sandbox",
                       "--disable-blink-features=AutomationControlled",
+                      "--window-position=10,10",
                       "--window-size=412,915",
                   ]
               )
-              ctx = browser.new_context(viewport={"width": 412, "height": 915}, locale="ar-EG")
+              ctx = browser.new_context(no_viewport=True, locale="ar-EG")
               page = ctx.new_page()
               real_ua = page.evaluate("navigator.userAgent")
               t0 = time.time()
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=25000)
-              print(f"[CHROME+WARP] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              print(f"[CHROME+XDOTOOL] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
 
               for attempt in range(1, 10):
-                  time.sleep(2.2)
+                  time.sleep(2.5)
                   cards = page.locator("li.movieItem").count()
                   cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in ctx.cookies()]
                   if cards > 0:
@@ -103,16 +95,38 @@ jobs:
                               }
                           }
                       }
-                      return {title: document.title, dir: document.documentElement.dir, target};
+                      // Exact screen offset of viewport inside X11!
+                      const chromeTopOffset = window.outerHeight - window.innerHeight;
+                      const chromeLeftOffset = window.outerWidth - window.innerWidth;
+                      return {
+                          title: document.title,
+                          dir: document.documentElement.dir,
+                          screenX: window.screenX,
+                          screenY: window.screenY,
+                          chromeTopOffset,
+                          chromeLeftOffset,
+                          target
+                      };
                   }""")
                   print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] cookies={cookies_now} info={json.dumps(info, ensure_ascii=False)}")
                   t = info["target"]
                   if t and t.get("valLen", 0) == 0:
                       is_rtl = (info.get("dir") or "").lower() == "rtl"
-                      click_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
-                      cy = t["top"] + t["height"] / 2.0
-                      print(f"[TAP #{attempt}] clicking ({click_x}, {cy}) (is_rtl={is_rtl})")
-                      page.mouse.click(click_x, cy)
+                      client_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
+                      client_y = t["top"] + t["height"] / 2.0
+                      abs_x = int(round(info["screenX"] + (info["chromeLeftOffset"] / 2.0) + client_x))
+                      abs_y = int(round(info["screenY"] + info["chromeTopOffset"] + client_y))
+                      print(f"[XDOTOOL TAP #{attempt}] client=({client_x:.1f}, {client_y:.1f}) -> X11 screen=({abs_x}, {abs_y})")
+                      # Smooth human mouse trail + real X11 OS click!
+                      subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 120)), str(max(20, abs_y - 90))], check=False)
+                      time.sleep(0.08)
+                      subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 45)), str(max(20, abs_y - 25))], check=False)
+                      time.sleep(0.08)
+                      subprocess.run(["xdotool", "mousemove", str(abs_x), str(abs_y)], check=False)
+                      time.sleep(0.06)
+                      subprocess.run(["xdotool", "mousedown", "1"], check=False)
+                      time.sleep(0.07)
+                      subprocess.run(["xdotool", "mouseup", "1"], check=False)
 
               cards = page.locator("li.movieItem").count()
               cookies = ctx.cookies()
