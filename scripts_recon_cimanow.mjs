@@ -1,4 +1,5 @@
 import fs from "fs";
+import crypto from "crypto";
 import { spawn, execFile } from "child_process";
 import { promisify } from "util";
 
@@ -71,7 +72,6 @@ async function getWorkingProxies() {
       batch.map(async (p) => {
         if (working.length >= 8) return;
         try {
-          // Test BOTH cimanow.cc AND rm.freex2line.online so Chrome proxy works for both!
           const r1 = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 9 });
           if (r1.status === 200 && !isCimaBlock(r1.text) && r1.text.includes("cimanow")) {
             const r2 = await curlReq("https://rm.freex2line.online/redirectingfree/", { proxy: p, timeoutSec: 9 });
@@ -84,6 +84,35 @@ async function getWorkingProxies() {
     );
   }
   return working;
+}
+
+function decodeVaultToCtx(vaultHtml) {
+  const arrStart = vaultHtml.search(/window\["[^"]+"\]\s*=\s*\[/);
+  const openBracket = arrStart >= 0 ? vaultHtml.indexOf("[", vaultHtml.indexOf("=", arrStart)) : -1;
+  const arrEnd = openBracket >= 0 ? vaultHtml.indexOf("];", openBracket) : -1;
+  if (openBracket < 0 || arrEnd <= openBracket) return null;
+  const arrSlice = vaultHtml.slice(openBracket + 1, arrEnd);
+  const b64Joined = [...arrSlice.matchAll(/"([A-Za-z0-9+/=]+)"/g)].map((m) => m[1]).join("");
+  const raw = Buffer.from(b64Joined, "base64");
+  const needle = Buffer.from("<script>");
+  for (let off = 0; off <= 8; off++) {
+    for (let klen = 1; klen <= 10; klen++) {
+      const key = Buffer.alloc(klen);
+      for (let j = 0; j < klen && j < needle.length; j++) key[(off + j) % klen] = raw[off + j] ^ needle[j];
+      let ok = true;
+      for (let j = 0; j < needle.length; j++) {
+        if ((raw[off + j] ^ key[(off + j) % klen]) !== needle[j]) { ok = false; break; }
+      }
+      if (!ok) continue;
+      const probe = Buffer.from(raw.slice(0, 96).map((v, i) => v ^ key[i % klen])).toString("utf8");
+      if (probe.includes("<script>") && probe.includes("window.")) {
+        const topSlice = Buffer.from(raw.slice(0, 1200).map((v, i) => v ^ key[i % klen])).toString("utf8");
+        const topScript = topSlice.match(/<script>([\s\S]*?)<\/script>/i)?.[1] || "";
+        return { vaultKey: key.toString("utf8"), topScript };
+      }
+    }
+  }
+  return null;
 }
 
 class CDPClient {
@@ -118,7 +147,7 @@ class CDPClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`CDP timeout: ${method}`));
-      }, 20000);
+      }, 22000);
       this.pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
@@ -160,12 +189,15 @@ async function runChromeFlow(item, proxyUrl, port) {
     { stdio: "ignore" }
   );
 
-  const netEvents = [];
   const reqMap = new Map();
   let cdp = null;
+  let blogPostVaultCtx = null;
+  let getLinkEvent = null;
+  let mintedWatchingUrl = "";
+  let rawWatchingHtmlSample = "";
+  const encodedStringsLog = [];
 
   try {
-    // Wait for /json/list
     let wsUrl = null;
     for (let i = 0; i < 30; i++) {
       await sleep(300);
@@ -173,10 +205,7 @@ async function runChromeFlow(item, proxyUrl, port) {
         const res = await fetch(`http://127.0.0.1:${port}/json/list`);
         const pages = await res.json();
         const page = pages.find((p) => p.type === "page" && p.webSocketDebuggerUrl);
-        if (page) {
-          wsUrl = page.webSocketDebuggerUrl;
-          break;
-        }
+        if (page) { wsUrl = page.webSocketDebuggerUrl; break; }
       } catch {}
     }
     if (!wsUrl) throw new Error("Chrome CDP failed to start");
@@ -187,171 +216,118 @@ async function runChromeFlow(item, proxyUrl, port) {
     await cdp.send("Network.enable");
     await cdp.send("Runtime.enable");
 
-    // Ensure `navigator.webdriver` is completely absent on prototype (no own property!)
+    // Intercept TextEncoder.prototype.encode + SubtleCrypto.prototype.importKey/sign via console.debug (does NOT touch XMLHttpRequest or window globals!)
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
       source: `
+        try { delete Object.getPrototypeOf(navigator).webdriver; } catch (e) {}
         try {
-          delete Object.getPrototypeOf(navigator).webdriver;
+          const origEncode = TextEncoder.prototype.encode;
+          TextEncoder.prototype.encode = function(str) {
+            try {
+              if (typeof str === 'string' && str.length > 4 && str.length < 400) {
+                console.debug('__TE_ENC__:' + str);
+              }
+            } catch (e) {}
+            return origEncode.call(this, str);
+          };
         } catch (e) {}
       `,
     });
 
-    cdp.on("Network.requestWillBeSent", (p) => {
-      const u = p.request.url;
-      if (
-        u.includes("freex2line") ||
-        u.includes("cimanow") ||
-        u.includes("href.li") ||
-        p.type === "XHR" ||
-        p.type === "Fetch" ||
-        p.type === "Document"
-      ) {
-        if (!u.match(/\.(png|jpg|jpeg|gif|webp|svg|woff2?|css)(\?|$)/i)) {
-          const entry = {
-            requestId: p.requestId,
-            type: p.type,
-            method: p.request.method,
-            url: u,
-            headers: p.request.headers,
-            postData: p.request.postData || null,
-          };
-          reqMap.set(p.requestId, entry);
-          netEvents.push(entry);
+    cdp.on("Runtime.consoleAPICalled", (p) => {
+      if (p.type === "debug" && p.args?.[0]?.value?.startsWith?.("__TE_ENC__:")) {
+        const s = p.args[0].value.slice("__TE_ENC__:".length);
+        if (!encodedStringsLog.includes(s) && encodedStringsLog.length < 60) {
+          encodedStringsLog.push(s);
         }
       }
     });
 
-    cdp.on("Network.responseReceived", (p) => {
-      const entry = reqMap.get(p.requestId);
-      if (entry) {
-        entry.status = p.response.status;
-        entry.respHeaders = p.response.headers;
-        entry.mimeType = p.response.mimeType;
-      }
+    // Skip `href.li/__challenge` completely! Intercept navigation to `https://href.li/?...` or detect `loadon` finish!
+    cdp.on("Network.requestWillBeSent", (p) => {
+      reqMap.set(p.requestId, {
+        requestId: p.requestId,
+        type: p.type,
+        method: p.request.method,
+        url: p.request.url,
+        headers: p.request.headers,
+        postData: p.request.postData || null,
+      });
     });
 
     cdp.on("Network.loadingFinished", async (p) => {
       const entry = reqMap.get(p.requestId);
-      if (
-        entry &&
-        (entry.type === "XHR" ||
-          entry.type === "Fetch" ||
-          entry.url.includes("core.php") ||
-          entry.url.includes("mint") ||
-          entry.url.includes("token") ||
-          entry.url.includes("ajax") ||
-          (entry.url.includes("freex2line") && !entry.url.endsWith("blog-post.html/")))
-      ) {
+      if (!entry) return;
+      if (entry.url.endsWith("/2020/02/blog-post.html/")) {
         try {
           const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
-          entry.respBody = (b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body).slice(0, 4000);
+          const html = b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body;
+          blogPostVaultCtx = decodeVaultToCtx(html);
+        } catch {}
+      } else if (entry.url.includes("get-link.php")) {
+        try {
+          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
+          const txt = (b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body).trim();
+          getLinkEvent = {
+            url: entry.url,
+            method: entry.method,
+            headers: entry.headers,
+            postData: entry.postData,
+            respBody: txt,
+          };
+          if (txt.startsWith("http")) mintedWatchingUrl = txt;
+        } catch {}
+      } else if (entry.url.includes("/watching/")) {
+        try {
+          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
+          const html = b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body;
+          if (html.length > 5000) rawWatchingHtmlSample = html.slice(0, 6000);
         } catch {}
       }
     });
 
-    // Step 1: Open item page or navigate directly to `shineUrl` with Referer `item.url`!
+    // Step 1: Load `shineUrl` (`loadon/?link=...`) just long enough to set `PHPSESSID`, then jump straight to `/redirectingfree/` (skipping `href.li`)!
     await cdp.send("Page.navigate", { url: item.shineUrl, referrer: item.url });
-
-    // Wait up to 22s for countdown + mint XHR + `#downloadbtn` to become visible/populated!
-    let gatewayDomState = null;
-    for (let t = 0; t < 24; t++) {
-      await sleep(1000);
-      try {
-        const ev = await cdp.send("Runtime.evaluate", {
-          expression: `(() => {
-            const anchors = [...document.querySelectorAll('a, button, #downloadbtn, .downloadbtn')].map(el => ({
-              tag: el.tagName,
-              id: el.id,
-              cls: el.className,
-              href: el.href || el.getAttribute('href') || el.getAttribute('data-href') || '',
-              text: (el.innerText || el.textContent || '').trim().slice(0, 120),
-              rect: el.getBoundingClientRect ? el.getBoundingClientRect().toJSON() : null
-            }));
-            return JSON.stringify({
-              url: location.href,
-              title: document.title,
-              hasWatch: !!document.querySelector('#watch'),
-              anchors: anchors.filter(a => a.id || a.cls || a.href.includes('cimanow') || a.text.includes('مشاهد') || a.text.includes('انقر') || a.text.includes('تحميل'))
-            });
-          })()`,
-          returnByValue: true,
-        });
-        if (ev?.result?.value) {
-          gatewayDomState = JSON.parse(ev.result.value);
-          // Check if an anchor pointing to cimanow watching appeared and has width > 0!
-          const readyBtn = gatewayDomState.anchors?.find(
-            (a) => (a.href && a.href.includes("cimanow") && a.rect && a.rect.width > 0) || gatewayDomState.hasWatch
-          );
-          if (readyBtn && t >= 12) break;
-        }
-      } catch {}
-    }
-
-    // Also grab stripped body HTML of blog-post.html so we see exact markup!
-    let strippedGatewayHtml = "";
-    try {
-      const evHtml = await cdp.send("Runtime.evaluate", {
-        expression: `(() => {
-          const clone = document.documentElement.cloneNode(true);
-          clone.querySelectorAll('script, style, svg').forEach(e => e.remove());
-          return clone.outerHTML.slice(0, 12000);
-        })()`,
-        returnByValue: true,
-      });
-      strippedGatewayHtml = evHtml?.result?.value || "";
-    } catch {}
-
-    // Find the button to click with a REAL trusted mouse click (`Input.dispatchMouseEvent`)!
-    let clickInfo = null;
-    if (gatewayDomState && !gatewayDomState.hasWatch) {
-      const targetBtn =
-        gatewayDomState.anchors?.find((a) => a.href && a.href.includes("cimanow") && a.rect && a.rect.width > 0) ||
-        gatewayDomState.anchors?.find((a) => (a.id === "downloadbtn" || a.cls.includes("downloadbtn")) && a.rect && a.rect.width > 0) ||
-        gatewayDomState.anchors?.find((a) => a.rect && a.rect.width > 0 && a.href && !a.href.startsWith("javascript"));
-
-      if (targetBtn && targetBtn.rect) {
-        // Scroll element into view first and get fresh coordinates!
-        const freshBoxEv = await cdp.send("Runtime.evaluate", {
-          expression: `(() => {
-            const el = document.querySelector('#downloadbtn a, a#downloadbtn, .downloadbtn a, a.downloadbtn, a[href*="cimanow"]');
-            if (!el) return null;
-            el.scrollIntoView({ block: 'center' });
-            const r = el.getBoundingClientRect();
-            return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2, href: el.href, outer: el.outerHTML.slice(0, 500) });
-          })()`,
-          returnByValue: true,
-        });
-        if (freshBoxEv?.result?.value) {
-          const box = JSON.parse(freshBoxEv.result.value);
-          clickInfo = box;
-          await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
-          await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
-        }
+    for (let w = 0; w < 12; w++) {
+      await sleep(500);
+      const ck = await cdp.send("Network.getAllCookies");
+      if ((ck.cookies || []).some((c) => c.name === "PHPSESSID" && c.domain.includes("freex2line"))) {
+        break;
       }
     }
+    // Navigate directly to `/redirectingfree/` with empty referrer (just like href.li does)!
+    await cdp.send("Page.navigate", { url: "https://rm.freex2line.online/redirectingfree/", referrer: "" });
 
-    // Wait up to 16s for `/watching/` (`#watch`) to load!
+    // Wait up to 20s for `get-link.php` to return `mintedWatchingUrl`!
+    for (let t = 0; t < 40; t++) {
+      await sleep(500);
+      if (mintedWatchingUrl) break;
+    }
+
+    if (!mintedWatchingUrl) {
+      return {
+        ok: false,
+        stage: "waiting_for_get_link_php",
+        proxyUsed: proxyUrl,
+        blogPostVaultCtx,
+        getLinkEvent,
+        encodedStringsLog,
+      };
+    }
+
+    // Step 2: Navigate directly to `mintedWatchingUrl` with Referer `https://rm.freex2line.online/2020/02/blog-post.html/`!
+    await cdp.send("Page.navigate", {
+      url: mintedWatchingUrl,
+      referrer: "https://rm.freex2line.online/2020/02/blog-post.html/",
+    });
+
     let watchingData = null;
-    for (let t = 0; t < 16; t++) {
-      await sleep(1000);
+    for (let t = 0; t < 20; t++) {
+      await sleep(750);
       try {
-        // Check if a new tab was opened (`target="_blank"`)!
-        const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
-        const pages = await listRes.json();
-        const watchTab = pages.find((p) => p.url && p.url.includes("cimanow.cc") && p.webSocketDebuggerUrl);
-        if (watchTab && watchTab.webSocketDebuggerUrl !== wsUrl) {
-          const tabCdp = new CDPClient(watchTab.webSocketDebuggerUrl);
-          await tabCdp.connect();
-          await tabCdp.send("Runtime.enable");
-          await tabCdp.send("Network.enable");
-          cdp.close();
-          cdp = tabCdp;
-          wsUrl = watchTab.webSocketDebuggerUrl;
-        }
-
         const evW = await cdp.send("Runtime.evaluate", {
           expression: `(() => {
-            if (!document.querySelector('#watch')) return JSON.stringify({ ready: false, url: location.href, title: document.title });
+            if (!document.querySelector('#watch')) return JSON.stringify({ ready: false, url: location.href, title: document.title, bodyLen: document.body ? document.body.innerHTML.length : 0 });
             const tabs = [...document.querySelectorAll('#watch li')].map(li => ({
               ariaLabel: li.getAttribute('aria-label') || '',
               dataIndex: li.getAttribute('data-index') || '',
@@ -360,19 +336,22 @@ async function runChromeFlow(item, proxyUrl, port) {
               text: (li.innerText || li.textContent || '').trim(),
               innerHtml: li.innerHTML.slice(0, 600)
             }));
-            const downloads = [...document.querySelectorAll('#download li[aria-label="quality"], #download > li')].map(q => ({
-              qualityHeader: (q.querySelector('span, h3, h4, em, b') || {}).innerText || q.innerText.split('\\n')[0] || '',
+            const dlUl = document.querySelector('#download');
+            const dlRawHtml = dlUl ? dlUl.outerHTML.slice(0, 10000) : '';
+            const downloads = [...document.querySelectorAll('#download li')].map(q => ({
+              ariaLabel: q.getAttribute('aria-label') || '',
+              text: (q.innerText || '').trim().slice(0, 300),
               links: [...q.querySelectorAll('a[href]')].map(a => ({
                 href: a.href,
                 text: (a.innerText || a.textContent || '').trim()
               }))
-            }));
+            })).filter(d => d.links.length > 0);
             const scripts = [...document.querySelectorAll('script')].map((s, idx) => ({
               idx,
               src: s.src || '',
               id: s.id || '',
               len: (s.innerHTML || '').length,
-              preview: (s.innerHTML || '').slice(0, 500)
+              preview: (s.innerHTML || '').slice(0, 400)
             }));
             return JSON.stringify({
               ready: true,
@@ -380,9 +359,11 @@ async function runChromeFlow(item, proxyUrl, port) {
               title: document.title,
               cookie: document.cookie,
               hasGetCoreToken: typeof window._getCoreToken === 'function',
-              sampleCoreToken: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
-              coreTokenFnSrc: typeof window._getCoreToken === 'function' ? window._getCoreToken.toString().slice(0, 2000) : null,
+              sampleCoreToken1: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
+              sampleCoreToken2: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
+              coreTokenFnSrc: typeof window._getCoreToken === 'function' ? window._getCoreToken.toString().slice(0, 3000) : null,
               tabs,
+              dlRawHtml,
               downloads,
               scripts
             });
@@ -390,14 +371,13 @@ async function runChromeFlow(item, proxyUrl, port) {
           returnByValue: true,
         });
         if (evW?.result?.value) {
-          const parsed = JSON.parse(evW.result.value);
-          watchingData = parsed;
-          if (parsed.ready) break;
+          watchingData = JSON.parse(evW.result.value);
+          if (watchingData.ready) break;
         }
       } catch {}
     }
 
-    // If `#watch` is ready, switch EVERY server tab right inside the page via fetch/jQuery so we get EVERY iframe!
+    // Step 3: Switch EVERY server tab via `core.php`!
     let switchResults = [];
     if (watchingData?.ready) {
       const evSw = await cdp.send("Runtime.evaluate", {
@@ -406,7 +386,6 @@ async function runChromeFlow(item, proxyUrl, port) {
           const lis = [...document.querySelectorAll('#watch li[data-id]')].filter(
             li => li.getAttribute('data-index') !== '00' && li.getAttribute('aria-label') !== 'embed'
           );
-          // Test first tab WITHOUT token to see if core.php requires token!
           if (lis[0]) {
             const r0 = await fetch('/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=' + encodeURIComponent(lis[0].dataset.index) + '&id=' + encodeURIComponent(lis[0].dataset.id), {
               headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -434,23 +413,20 @@ async function runChromeFlow(item, proxyUrl, port) {
       if (evSw?.result?.value) switchResults = JSON.parse(evSw.result.value);
     }
 
-    // Also dump all cookies in Chrome's cookie jar!
-    let allBrowserCookies = [];
-    try {
-      const ck = await cdp.send("Network.getAllCookies");
-      allBrowserCookies = (ck.cookies || []).filter(
-        (c) => c.domain.includes("cimanow") || c.domain.includes("freex2line")
-      );
-    } catch {}
+    const ckEnd = await cdp.send("Network.getAllCookies");
+    const allBrowserCookies = (ckEnd.cookies || []).filter(
+      (c) => c.domain.includes("cimanow") || c.domain.includes("freex2line")
+    );
 
     return {
       ok: !!watchingData?.ready,
       proxyUsed: proxyUrl,
-      gatewayDomState,
-      strippedGatewayHtml: strippedGatewayHtml.slice(0, 8000),
-      clickInfo,
+      blogPostVaultCtx,
+      getLinkEvent,
+      mintedWatchingUrl,
+      encodedStringsLog,
+      rawWatchingHtmlSample,
       allBrowserCookies,
-      netEvents,
       watchingData,
       switchResults,
     };
@@ -485,7 +461,6 @@ async function main() {
     out.items = {};
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      // Get `.shine` URL via curl
       let shineUrl = "";
       let workingP = proxies[0];
       for (const p of proxies) {
@@ -500,9 +475,8 @@ async function main() {
       }
       it.shineUrl = shineUrl;
 
-      // Try up to 2 proxies in Chrome if first proxy stalls
       let flowRes = null;
-      for (const candP of [workingP, ...proxies.filter((x) => x !== workingP)].slice(0, 3)) {
+      for (const candP of [workingP, ...proxies.filter((x) => x !== workingP)].slice(0, 2)) {
         try {
           flowRes = await runChromeFlow(it, candP, 9222 + i);
           if (flowRes.ok) break;
@@ -510,7 +484,11 @@ async function main() {
           flowRes = { ok: false, err: String(e.stack || e), proxyTried: candP };
         }
       }
-      if (i > 0 && flowRes?.strippedGatewayHtml) delete flowRes.strippedGatewayHtml;
+      if (i > 0 && flowRes?.watchingData) {
+        delete flowRes.watchingData.dlRawHtml;
+        delete flowRes.watchingData.scripts;
+        delete flowRes.rawWatchingHtmlSample;
+      }
       out.items[it.name] = flowRes;
     }
   } catch (e) {
@@ -518,7 +496,7 @@ async function main() {
   }
 
   fs.writeFileSync("cimanow_recon.json", JSON.stringify(out, null, 2));
-  console.log("Wrote v11 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
+  console.log("Wrote v12 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
 }
 
 main();
