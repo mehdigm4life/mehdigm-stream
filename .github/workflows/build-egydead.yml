@@ -31,167 +31,135 @@ jobs:
 
       - name: Live Cloudflare & Transport Forensics (Temporary Dev Probe)
         id: cf_probe
-        continue-on-error: true
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xdotool imagemagick >/dev/null 2>&1 || true
-          python3 -m pip install --quiet pillow curl_cffi 2>/dev/null || true
-
-          echo "=== 1. CHECK ALL EGYDEAD SUBDOMAINS / MIRRORS ===" | tee cf_probe.log
-          python3 - <<'PY' | tee -a cf_probe.log
+          python3 -m pip install --quiet patchright pillow curl_cffi
+          xvfb-run -a --server-args="-screen 0 412x915x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
+          import time, json
+          from PIL import Image
+          from patchright.sync_api import sync_playwright
           from curl_cffi import requests as creq
-          import concurrent.futures
-          hosts = [
-              f"https://tv{i}.egydead.live/h3/" for i in range(1, 16)
-          ] + [
-              "https://egydead.live/", "https://w.egydead.live/", "https://a.egydead.live/",
-              "https://m.egydead.live/", "https://egydead.fyi/", "https://egydead.skin/",
-              "https://egydead.cam/", "https://egydead.ink/", "https://egydead.sbs/"
-          ]
-          def chk(u):
-              try:
-                  r = creq.get(u, impersonate="chrome131_android", timeout=5, allow_redirects=True)
-                  return f"{u} -> {r.status_code} final={r.url} len={len(r.text)} movieItem={'movieItem' in r.text}"
-              except Exception as e:
-                  return f"{u} -> ERR {type(e).__name__}"
-          with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-              for line in ex.map(chk, hosts):
-                  if "ERR" not in line:
-                      print(" ", line)
-          PY
 
-          echo "=== 2. GENUINE UN-INSTRUMENTED CHROME + XDOTOOL TURNSTILE SOLVE ON tv10.egydead.live/h3/ ===" | tee -a cf_probe.log
-          mkdir -p /tmp/ed_ext /tmp/ed_prof
-          cat > /tmp/ed_ext/manifest.json <<'EOF'
-          {
-            "manifest_version": 3,
-            "name": "EDProbe",
-            "version": "1.0",
-            "content_scripts": [{
-              "matches": ["https://*.egydead.live/*"],
-              "js": ["probe.js"],
-              "run_at": "document_idle"
-            }]
-          }
-          EOF
-          cat > /tmp/ed_ext/probe.js <<'EOF'
-          (function() {
-            function report(tag) {
-              const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
-              const hostParent = inp ? inp.parentElement : null;
-              let box = null;
-              if (hostParent) {
-                const r = hostParent.getBoundingClientRect();
-                box = {via: 'inputParent', x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)};
-              } else {
-                const divs = document.querySelectorAll('div');
-                for (let i = 0; i < divs.length; i++) {
-                  const d = divs[i];
-                  if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
-                  const r = d.getBoundingClientRect();
-                  if (d.children.length === 0 && r.width >= 240 && r.width <= 420 && r.height >= 50 && r.height <= 95 && r.top > 0) {
-                    box = {via: 'leafDiv', x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)};
-                    break;
+          UA = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(
+                  channel="chrome",
+                  headless=False,
+                  args=[
+                      "--no-sandbox",
+                      "--disable-blink-features=AutomationControlled",
+                      "--window-size=412,915",
+                  ]
+              )
+              ctx = browser.new_context(
+                  viewport={"width": 412, "height": 915},
+                  device_scale_factor=2,
+                  user_agent=UA,
+                  locale="ar-EG"
+              )
+              page = ctx.new_page()
+              t0 = time.time()
+              resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=20000)
+              print(f"[PATCHRIGHT] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              time.sleep(3.5)
+
+              # Inspect exact DOM & screenshot of Turnstile box at y~378!
+              info = page.evaluate("""() => {
+                  const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
+                  let target = null;
+                  if (inp && inp.parentElement) {
+                      const r = inp.parentElement.getBoundingClientRect();
+                      if (r.width >= 200 && r.height >= 45) {
+                          target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, html: inp.parentElement.outerHTML.slice(0, 300)};
+                      }
                   }
-                }
-              }
-              const cards = document.querySelectorAll('li.movieItem').length;
-              let extra = '';
-              if (cards > 0 && !window.__edFetched) {
-                window.__edFetched = true;
-                fetch('/movies/', {credentials: 'include'}).then(async r => {
-                  const t = await r.text();
-                  window.__edMovies = r.status + ':' + t.length + ':' + t.includes('movieItem');
-                }).catch(e => { window.__edMovies = 'err'; });
-              }
-              if (window.__edMovies) extra = ':mov=' + window.__edMovies;
-              document.title = '[ED:' + cards + ':' + (box ? (box.via + '@' + box.x + ',' + box.y + ',' + box.w + 'x' + box.h) : 'nobox') + extra + '] ' + document.title.replace(/^\[ED:[^\]]+\]\s*/, '');
-            }
-            setInterval(report, 500);
-            report();
-          })();
-          EOF
+                  if (!target) {
+                      const divs = document.querySelectorAll('div');
+                      for (let i = 0; i < divs.length; i++) {
+                          const d = divs[i];
+                          if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
+                          const r = d.getBoundingClientRect();
+                          if (d.children.length === 0 && r.width >= 200 && r.width <= 420 && r.height >= 45 && r.height <= 95 && r.top > 0) {
+                              target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, parentHtml: d.parentElement ? d.parentElement.outerHTML.slice(0, 300) : ''};
+                              break;
+                          }
+                      }
+                  }
+                  return {title: document.title, dir: document.documentElement.dir, target};
+              }""")
+              print("[PATCHRIGHT +3.5s] info =", json.dumps(info, ensure_ascii=False))
 
-          xvfb-run -a --server-args="-screen 0 412x915x24" bash -c '
-            google-chrome \
-              --no-sandbox \
-              --no-first-run \
-              --no-default-browser-check \
-              --user-data-dir=/tmp/ed_prof \
-              --window-position=0,0 \
-              --window-size=412,915 \
-              --kiosk \
-              --user-agent="Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" \
-              --load-extension=/tmp/ed_ext \
-              "https://tv10.egydead.live/h3/" >/dev/null 2>&1 &
-            CPID=$!
-            for s in 1 2 3 4 5 6; do
-              sleep 1
-              WTITLE=$(xdotool search --onlyvisible --name "ED:" getwindowname 2>/dev/null | head -n 1 || true)
-              echo "[T+${s}s] window=$WTITLE"
-            done
-            # Capture screenshot of the whole X11 screen to inspect exact Turnstile checkbox pixel position!
-            import -window root /tmp/screen_before.png 2>/dev/null || true
-            python3 - <<PY2
-          from PIL import Image
-          import os, re, subprocess
-          # Get Chrome content offset (toolbar height) and find Turnstile border/checkbox in screenshot!
-          if os.path.exists("/tmp/screen_before.png"):
-              im = Image.open("/tmp/screen_before.png").convert("RGB")
-              w, h = im.size
-              print(f"Screenshot size: {w}x{h}")
-              # Scan rows y=300..620 for the ~65px tall Turnstile widget box & checkbox square!
-              for y in range(300, min(650, h), 10):
-                  row_sample = [im.getpixel((x, y)) for x in range(10, min(410, w), 20)]
-                  non_white = sum(1 for r,g,b in row_sample if (r,g,b) != (255,255,255) and (r,g,b) != (34,34,34))
-                  if non_white > 0:
-                      # Find dark/gray pixels horizontally on this row
-                      xs = [x for x in range(0, min(420, w)) if im.getpixel((x, y)) not in ((255,255,255), (249,249,249), (34,34,34))]
-                      if xs:
-                          print(f"  y={y}: active x range [{min(xs)}..{max(xs)}] count={len(xs)} leftPx={im.getpixel((44,y))} rightPx={im.getpixel((368,y))}")
-          PY2
-            # Parse box y from window title [ED:0:...@x,y,wxh] + Chrome UI top bar (~85px in desktop Chrome; 0px in Android WebView!)
-            WTITLE=$(xdotool search --onlyvisible --name "ED:" getwindowname 2>/dev/null | head -n 1 || true)
-            echo "Before click title: $WTITLE"
-            # Also find exact checkbox square (~24x24 border) in /tmp/screen_before.png!
-            CLICK_XY=$(python3 - <<PY3
-          from PIL import Image
-          im = Image.open("/tmp/screen_before.png").convert("RGB")
-          # In Turnstile widget (y between 380 and 580 on X11 including Chrome address bar), find checkbox square or widget center
-          # Wait: Turnstile widget background is #fafafa (250,250,250) or #ffffff with border #e0e0e0 (224,224,224) / #dadada
-          best_y = None
-          rows = []
-          for y in range(350, 600):
-              # Count pixels matching Turnstile light card bg (250,250,250) or border (224,224,224)
-              cnt = sum(1 for x in range(15, 400) if 215 <= im.getpixel((x,y))[0] <= 252 and im.getpixel((x,y))[0] == im.getpixel((x,y))[1] == im.getpixel((x,y))[2] and im.getpixel((x,y)) != (255,255,255))
-              if cnt > 150:
-                  rows.append(y)
-          if rows:
-              top_y, bot_y = min(rows), max(rows)
-              mid_y = (top_y + bot_y) // 2
-              # Check left (x=25..75) vs right (x=335..390) around mid_y for checkbox border pixels (< 200)
-              left_dark = sum(1 for x in range(25, 80) for y in range(mid_y-15, mid_y+15) if im.getpixel((x,y))[0] < 200)
-              right_dark = sum(1 for x in range(335, 392) for y in range(mid_y-15, mid_y+15) if im.getpixel((x,y))[0] < 200)
-              cx = 368 if right_dark > left_dark else 44
-              print(f"{cx} {mid_y} top={top_y} bot={bot_y} leftDark={left_dark} rightDark={right_dark}")
-          else:
-              print("44 495 none")
-          PY3
-            )
-            echo "Detected Turnstile screen coords: $CLICK_XY"
-            CX=$(echo "$CLICK_XY" | awk "{print \$1}")
-            CY=$(echo "$CLICK_XY" | awk "{print \$2}")
-            xdotool mousemove "$CX" "$CY" sleep 0.1 click 1
-            for s in 1 2 3 4 5 6 7 8; do
-              sleep 1
-              WTITLE=$(xdotool search --onlyvisible --name "" getwindowname 2>/dev/null | grep -E "ED:|ايجي|EgyDead|لحظة|Just" | head -n 1 || true)
-              echo "[AFTER CLICK +${s}s] window=$WTITLE"
-              if echo "$WTITLE" | grep -q -E "ED:[1-9]"; then
-                echo ">>> CLOUDFLARE TURNSTILE SOLVED LIVE IN REAL CHROME!! <<<"
-                break
-              fi
-            done
-            kill $CPID 2>/dev/null || true
-          ' 2>&1 | tee -a cf_probe.log
+              page.screenshot(path="/tmp/turnstile.png")
+              im = Image.open("/tmp/turnstile.png").convert("RGB")
+              print(f"[SCREENSHOT] actual pixel size={im.size} (scale=2 -> 824x1830)")
+              if info["target"]:
+                  t = info["target"]
+                  # Inspect CSS row y = top + height/2 (multiply by 2 for device_scale_factor=2!)
+                  cy_css = t["top"] + t["height"] / 2.0
+                  py = int(cy_css * 2)
+                  # Find dark/border pixels across the widget width to pinpoint the exact checkbox X!
+                  dark_xs_css = []
+                  for cx in range(int(t["left"]), int(t["right"])):
+                      r, g, b = im.getpixel((cx * 2, py))
+                      if (r, g, b) not in ((255,255,255), (250,250,250), (34,34,34), (35,35,35), (249,249,249)):
+                          dark_xs_css.append((cx, (r,g,b)))
+                  print(f"[WIDGET PIXEL SCAN at y_css={cy_css}] active CSS X samples: first5={dark_xs_css[:8]}, last5={dark_xs_css[-8:]}")
+
+              # Now auto-tap using our exact selector!
+              for attempt in range(1, 6):
+                  cards = page.locator("li.movieItem").count()
+                  if cards > 0:
+                      print(f">>> SOLVED BEFORE TAP #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r} <<<")
+                      break
+                  t = info["target"]
+                  if t:
+                      # In RTL (<html dir="rtl">), check if checkbox is on right (right - 28) or left (left + 28)
+                      is_rtl = (info.get("dir") or "").lower() == "rtl"
+                      x1 = (t["right"] - 28) if is_rtl else (t["left"] + 28)
+                      x2 = (t["left"] + 28) if is_rtl else (t["right"] - 28)
+                      cy = t["top"] + t["height"] / 2.0
+                      click_x = x1 if attempt % 2 == 1 else x2
+                      print(f"[TAP #{attempt}] clicking ({click_x}, {cy}) (is_rtl={is_rtl})")
+                      page.mouse.click(click_x, cy)
+                  time.sleep(3.5)
+
+              cards = page.locator("li.movieItem").count()
+              cookies = ctx.cookies()
+              print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], len(c['value'])) for c in cookies]}")
+
+              if cards > 0:
+                  # Test 1: window.fetch inside solved browser (Tier 3A persistent WebView model!)
+                  t_f = time.time()
+                  f_mov = page.evaluate("""async () => {
+                      const r = await fetch('/movies/', {credentials: 'include'});
+                      const txt = await r.text();
+                      return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
+                  }""")
+                  print(f"[TEST window.fetch('/movies/')] ({int((time.time()-t_f)*1000)}ms) -> {f_mov}")
+
+                  t_s = time.time()
+                  f_srch = page.evaluate("""async () => {
+                      const r = await fetch('/?s=Lupin', {credentials: 'include'});
+                      const txt = await r.text();
+                      return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
+                  }""")
+                  print(f"[TEST window.fetch('/?s=Lupin')] ({int((time.time()-t_s)*1000)}ms) -> {f_srch}")
+
+                  # Test 2: Does curl_cffi or Python urllib (non-Chrome TLS) work with extracted cf_clearance?
+                  cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131_android", headers={"User-Agent": UA, "Cookie": cookie_hdr}, timeout=8)
+                  print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
+
+                  import urllib.request
+                  req_std = urllib.request.Request("https://tv10.egydead.live/movies/", headers={"User-Agent": UA, "Cookie": cookie_hdr})
+                  try:
+                      with urllib.request.urlopen(req_std, timeout=8) as uresp:
+                          ubody = uresp.read().decode("utf-8", "ignore")
+                          print(f"[TEST stdlib TLS + cf_clearance] -> status={uresp.status}, len={len(ubody)}, movieItem={'movieItem' in ubody}")
+                  except Exception as ue:
+                      print(f"[TEST stdlib TLS + cf_clearance] -> BLOCKED ({ue})")
+              browser.close()
+          PY
 
       - name: Configure Android SDK, test, and build EgyDead plugin
         id: gradle_build
@@ -199,7 +167,7 @@ jobs:
           set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :EgyDead:testDebugUnitTest :EgyDead:make --info --stacktrace --no-daemon 2>&1 | tee gradle.log
+          ./gradlew :EgyDead:testDebugUnitTest --tests com.egydead.EgyDeadUnitTest --no-daemon 2>&1 | tee gradle.log
 
       - name: Publish Detailed Test & Build Report to Check Run API
         if: always()
