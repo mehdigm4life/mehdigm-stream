@@ -181,8 +181,9 @@ function decodeVaultHtml(vaultHtml) {
 
   // Extract the big base64 string array `window["..."] = ["...", "...", ...];`
   const arrStart = vaultHtml.search(/window\["[^"]+"\]\s*=\s*\[/);
-  const arrEnd = vaultHtml.indexOf("];", arrStart);
-  const arrSlice = arrStart >= 0 && arrEnd > arrStart ? vaultHtml.slice(arrStart, arrEnd + 2) : "";
+  const openBracket = arrStart >= 0 ? vaultHtml.indexOf("[", vaultHtml.indexOf("=", arrStart)) : -1;
+  const arrEnd = openBracket >= 0 ? vaultHtml.indexOf("];", openBracket) : -1;
+  const arrSlice = openBracket >= 0 && arrEnd > openBracket ? vaultHtml.slice(openBracket + 1, arrEnd) : "";
   const afterArr = arrEnd > 0 ? vaultHtml.slice(arrEnd + 2) : "";
 
   // Decode the `e=[...],k=...` stage-2 loader right after `];` so we have the exact author code!
@@ -200,27 +201,31 @@ function decodeVaultHtml(vaultHtml) {
   let decoded = "";
   let keyUsed = "";
 
-  // Known plaintext: `raw` always starts with `<script>` (8 bytes) followed by whitespace + `window.`!
-  const known = Buffer.from("<script>");
-  for (let klen = 1; klen <= 24; klen++) {
-    const key = Buffer.alloc(klen);
-    // Derive key bytes from `<script>` for positions 0..min(7,klen-1), and space (0x20) frequency in first 1500 bytes for any remaining positions
-    for (let pos = 0; pos < klen; pos++) {
-      if (pos < known.length) {
-        key[pos] = raw[pos] ^ known[pos];
-      } else {
-        const counts = new Map();
-        for (let i = pos; i < Math.min(raw.length, 1500); i += klen) {
-          counts.set(raw[i], (counts.get(raw[i]) || 0) + 1);
+  // Exact O(1) known-plaintext solver: decoded HTML starts (within first 8 bytes of whitespace/BOM) with `<script>` followed by `window.`!
+  const needle = Buffer.from("<script>");
+  outer: for (let off = 0; off <= 8; off++) {
+    for (let klen = 1; klen <= 10; klen++) {
+      const key = Buffer.alloc(klen);
+      for (let j = 0; j < klen; j++) {
+        if (j < needle.length) {
+          key[(off + j) % klen] = raw[off + j] ^ needle[j];
         }
-        key[pos] = [...counts.entries()].sort((a, c) => c[1] - a[1])[0][0] ^ 0x20;
       }
-    }
-    const probe = Buffer.from(raw.slice(0, 80).map((v, i) => v ^ key[i % klen])).toString("utf8");
-    if (probe.startsWith("<script>") && probe.includes("window.")) {
-      keyUsed = key.toString("utf8");
-      decoded = Buffer.from(raw.map((v, i) => v ^ key[i % klen])).toString("utf8");
-      break;
+      // Verify `<script>` matches across all 8 bytes AND `window.` appears in first 96 bytes!
+      let ok = true;
+      for (let j = 0; j < needle.length; j++) {
+        if ((raw[off + j] ^ key[(off + j) % klen]) !== needle[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      const probe = Buffer.from(raw.slice(0, 96).map((v, i) => v ^ key[i % klen])).toString("utf8");
+      if (probe.includes("<script>") && probe.includes("window.")) {
+        keyUsed = key.toString("utf8");
+        decoded = Buffer.from(raw.map((v, i) => v ^ key[i % klen])).toString("utf8");
+        break outer;
+      }
     }
   }
 
@@ -383,25 +388,7 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
       report.getCoreTokenFnSource = sb._getCoreToken.toString().slice(0, 4000);
     }
 
-    // Dump strings from `sb._0x2426()` / `sb._0x39aa` if present!
-    if (typeof sb._0x2426 === "function") {
-      try {
-        const rawArr = sb._0x2426();
-        report.nbmRawTableLen = rawArr.length;
-      } catch {}
-    }
-    if (typeof sb._0x39aa === "function") {
-      const interesting = [];
-      for (let i = 0; i < 3000; i++) {
-        try {
-          const v = sb._0x39aa(i);
-          if (typeof v === "string" && v.length >= 2 && interesting.length < 500 && !interesting.includes(v)) {
-            interesting.push(v);
-          }
-        } catch {}
-      }
-      report.nbmDecodedStrings = interesting;
-    }
+    report._sb = sb;
     report._mintFn = typeof sb._getCoreToken === "function" ? () => sb._getCoreToken() : null;
   } catch (e) {
     report.vmError = String(e.stack || e);
@@ -413,8 +400,33 @@ function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
 async function inspectDecodedWatching(watchingHtml, watchUrl, nbmJsCode, proxies) {
   const res = {};
   const tokenAnalysis = analyzeNbmAndToken(nbmJsCode, watchingHtml, "https://rm.freex2line.online/2020/02/blog-post.html/");
-  const mintFn = tokenAnalysis._mintFn;
+  let mintFn = tokenAnalysis._mintFn;
+  const sb = tokenAnalysis._sb;
   delete tokenAnalysis._mintFn;
+  delete tokenAnalysis._sb;
+
+  // If `_getCoreToken` wasn't defined yet, check if `watchingHtml` has a different external JS file on cimanow.cc and execute it!
+  if (!mintFn && sb && Array.isArray(tokenAnalysis.watchingExternalSrcs)) {
+    tokenAnalysis.fetchedExtraScripts = [];
+    for (const src of tokenAnalysis.watchingExternalSrcs) {
+      if (src.includes("cimanow") && !src.includes("jquery") && !src.includes("owl.carousel") && !src.includes("0CYA6X1KhKIS") && !src.includes("nbm2oHaQcN60y6Ozwm")) {
+        try {
+          const fullU = new URL(src, "https://cimanow.cc/").toString();
+          const jr = await smartReq(fullU, proxies, { referer: "https://rm.freex2line.online/" });
+          tokenAnalysis.fetchedExtraScripts.push({ url: fullU, len: jr.text.length, preview: jr.text.slice(0, 1500) });
+          vm.runInContext(jr.text, sb, { timeout: 5000 });
+          if (typeof sb._getCoreToken === "function") {
+            mintFn = () => sb._getCoreToken();
+            tokenAnalysis.tokenFromExtraScript = mintFn();
+            tokenAnalysis.extraScriptUrl = fullU;
+            tokenAnalysis.extraScriptFullIfSmall = jr.text.length < 100000 ? jr.text : undefined;
+          }
+        } catch (e) {
+          tokenAnalysis.fetchedExtraScripts.push({ url: src, err: String(e.message || e) });
+        }
+      }
+    }
+  }
   res.tokenAnalysis = tokenAnalysis;
 
   // Parse `<ul id="watch">`
