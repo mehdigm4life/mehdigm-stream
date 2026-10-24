@@ -2,6 +2,7 @@ package com.witanime
 
 import android.util.Base64
 import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -421,7 +422,7 @@ object WitAnimeExtractors {
                     val subUrl = sub.optString("url").trim()
                     val subLang = sub.optString("label", sub.optString("language", "Arabic")).trim()
                     if (subUrl.isNotEmpty()) {
-                        subtitleCallback(SubtitleFile(subLang, resolveRelative(subUrl, origin)))
+                        subtitleCallback(newSubtitleFile(subLang, resolveRelative(subUrl, origin)))
                     }
                 }
             }

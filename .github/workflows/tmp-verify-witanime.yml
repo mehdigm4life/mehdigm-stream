@@ -66,7 +66,7 @@ jobs:
           good_proxies = []
 
           def test_px(px):
-              if len(good_proxies) >= 6: return
+              if len(good_proxies) >= 12: return
               try:
                   s = requests.Session()
                   s.proxies = {"http": px, "https": px}
@@ -76,8 +76,8 @@ jobs:
               except Exception:
                   pass
 
-          with ThreadPoolExecutor(max_workers=25) as ex:
-              list(ex.map(test_px, cands[:120]))
+          with ThreadPoolExecutor(max_workers=30) as ex:
+              list(ex.map(test_px, cands[:180]))
 
           print(f"Found {len(good_proxies)} working proxies: {good_proxies[:4]}", flush=True)
           assert good_proxies, "No working proxy found for CI runner"
@@ -132,82 +132,99 @@ jobs:
           assert "/watch/movie/" in mv_watch
 
           # Gate unlocker matching WitAnimeNetwork.resolveWatchPageSources (with proxy overflow on 429)
+          global_px_cursor = [1 if len(good_proxies) > 1 else 0]
+
           def resolve_all_gates(watch_url):
               def open_ws(px):
-                  s = make_session(px)
-                  rw = s.get(watch_url, headers={"Referer": MAIN + "/"}, timeout=15)
-                  if rw.status_code != 200 or "_cf_chl_opt" in rw.text: return None
-                  sp = BeautifulSoup(rw.text, "html.parser")
-                  csrf = sp.select_one("meta[name=csrf-token]")["content"]
-                  cfg = json.loads(sp.select_one("[data-watch-config]")["data-watch-config"])
-                  rs = s.post(urljoin(MAIN, cfg["sourcesUrl"]), headers={
-                      "Accept": "application/json", "X-CSRF-TOKEN": csrf,
-                      "Origin": MAIN, "Referer": watch_url,
-                      "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
-                  }, timeout=15)
-                  if rs.status_code != 200: return None
-                  data = rs.json()
-                  slots = {}
-                  ordered = []
-                  seen_stream = set()
-                  for ver, vobj in data.get("versions", {}).items():
-                      for q, arr in vobj.get("players", {}).items():
-                          for it in arr:
-                              k = f"stream|{ver}|{q}|{it['name'].lower()}"
-                              seen_stream.add(f"{ver}|{q}|{it['name'].lower()}")
-                              rec = ("stream", ver, q, it["name"], it["token"], k)
-                              slots[k] = rec
-                              ordered.append(rec)
-                      for q, arr in vobj.get("downloads", {}).items():
-                          for it in arr:
-                              if f"{ver}|{q}|{it['name'].lower()}" in seen_stream:
-                                  continue
-                              k = f"download|{ver}|{q}|{it['name'].lower()}"
-                              rec = ("download", ver, q, it["name"], it["token"], k)
-                              slots[k] = rec
-                              ordered.append(rec)
-                  return (s, csrf, slots, ordered)
+                  try:
+                      s = make_session(px)
+                      rw = s.get(watch_url, headers={"Referer": MAIN + "/"}, timeout=15)
+                      if rw.status_code != 200 or "_cf_chl_opt" in rw.text: return None
+                      sp = BeautifulSoup(rw.text, "html.parser")
+                      csrf_el = sp.select_one("meta[name=csrf-token]")
+                      cfg_el = sp.select_one("[data-watch-config]")
+                      if not csrf_el or not cfg_el: return None
+                      csrf = csrf_el["content"]
+                      cfg = json.loads(cfg_el["data-watch-config"])
+                      rs = s.post(urljoin(MAIN, cfg["sourcesUrl"]), headers={
+                          "Accept": "application/json", "X-CSRF-TOKEN": csrf,
+                          "Origin": MAIN, "Referer": watch_url,
+                          "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
+                      }, timeout=15)
+                      if rs.status_code != 200: return None
+                      data = rs.json()
+                      slots = {}
+                      ordered = []
+                      seen_stream = set()
+                      for ver, vobj in data.get("versions", {}).items():
+                          for q, arr in vobj.get("players", {}).items():
+                              for it in arr:
+                                  k = f"stream|{ver}|{q}|{it['name'].lower()}"
+                                  seen_stream.add(f"{ver}|{q}|{it['name'].lower()}")
+                                  rec = ("stream", ver, q, it["name"], it["token"], k)
+                                  slots[k] = rec
+                                  ordered.append(rec)
+                          for q, arr in vobj.get("downloads", {}).items():
+                              for it in arr:
+                                  if f"{ver}|{q}|{it['name'].lower()}" in seen_stream:
+                                      continue
+                                  k = f"download|{ver}|{q}|{it['name'].lower()}"
+                                  rec = ("download", ver, q, it["name"], it["token"], k)
+                                  slots[k] = rec
+                                  ordered.append(rec)
+                      return (s, csrf, slots, ordered) if ordered else None
+                  except Exception:
+                      return None
 
-              px_idx = 0
-              cur = None
-              while px_idx < len(good_proxies) and cur is None:
-                  cur = open_ws(good_proxies[px_idx]); px_idx += 1
+              def next_ws():
+                  for _ in range(len(good_proxies)):
+                      px = good_proxies[global_px_cursor[0] % len(good_proxies)]
+                      global_px_cursor[0] += 1
+                      ws = open_ws(px)
+                      if ws is not None:
+                          return ws
+                  return None
+
+              cur = next_ws()
               assert cur is not None, f"Could not open watch session for {watch_url}"
               primary_ordered = cur[3]
 
               def try_unlock(ws, rec):
-                  s, csrf, _, _ = ws
-                  kind, ver, q, name, tok, _ = rec
-                  time.sleep(0.22)
-                  if kind == "stream":
-                      rp = s.post(f"{MAIN}/watch/stream-source/{tok}", headers={
-                          "Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": MAIN, "Referer": watch_url,
-                          "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
-                      }, timeout=12)
-                      if rp.status_code == 429: return ("429", None)
-                      if rp.status_code != 200: return ("fail", None)
-                      pj = rp.json()
-                      ref_pol = pj.get("referrerPolicy", "no-referrer")
-                      hdrs = {"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe", "Upgrade-Insecure-Requests": "1"}
-                      if ref_pol == "origin": hdrs["Referer"] = MAIN + "/"
-                      rg = s.get(urljoin(MAIN, pj.get("gateUrl", f"/watch/stream-gate/{tok}")), headers=hdrs, allow_redirects=False, timeout=12)
-                      if rg.status_code == 429: return ("429", None)
-                      loc = rg.headers.get("Location")
-                      return ("ok", (kind, ver, q, name, loc, MAIN + "/" if ref_pol == "origin" else None)) if loc else ("fail", None)
-                  else:
-                      rp = s.post(f"{MAIN}/watch/download-source/{tok}", headers={
-                          "Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": MAIN, "Referer": watch_url,
-                          "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
-                      }, timeout=12)
-                      if rp.status_code == 429: return ("429", None)
-                      if rp.status_code != 200: return ("fail", None)
-                      rg = s.get(f"{MAIN}/watch/download-gate/{tok}", headers={
-                          "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": watch_url,
-                          "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Upgrade-Insecure-Requests": "1"
-                      }, allow_redirects=False, timeout=12)
-                      if rg.status_code == 429: return ("429", None)
-                      loc = rg.headers.get("Location")
-                      return ("ok", (kind, ver, q, name, loc, MAIN + "/")) if loc else ("fail", None)
+                  try:
+                      s, csrf, _, _ = ws
+                      kind, ver, q, name, tok, _ = rec
+                      time.sleep(0.22)
+                      if kind == "stream":
+                          rp = s.post(f"{MAIN}/watch/stream-source/{tok}", headers={
+                              "Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": MAIN, "Referer": watch_url,
+                              "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
+                          }, timeout=12)
+                          if rp.status_code == 429: return ("429", None)
+                          if rp.status_code != 200: return ("fail", None)
+                          pj = rp.json()
+                          ref_pol = pj.get("referrerPolicy", "no-referrer")
+                          hdrs = {"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe", "Upgrade-Insecure-Requests": "1"}
+                          if ref_pol == "origin": hdrs["Referer"] = MAIN + "/"
+                          rg = s.get(urljoin(MAIN, pj.get("gateUrl", f"/watch/stream-gate/{tok}")), headers=hdrs, allow_redirects=False, timeout=12)
+                          if rg.status_code == 429: return ("429", None)
+                          loc = rg.headers.get("Location")
+                          return ("ok", (kind, ver, q, name, loc, MAIN + "/" if ref_pol == "origin" else None)) if loc else ("fail", None)
+                      else:
+                          rp = s.post(f"{MAIN}/watch/download-source/{tok}", headers={
+                              "Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": MAIN, "Referer": watch_url,
+                              "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"
+                          }, timeout=12)
+                          if rp.status_code == 429: return ("429", None)
+                          if rp.status_code != 200: return ("fail", None)
+                          rg = s.get(f"{MAIN}/watch/download-gate/{tok}", headers={
+                              "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": watch_url,
+                              "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Upgrade-Insecure-Requests": "1"
+                          }, allow_redirects=False, timeout=12)
+                          if rg.status_code == 429: return ("429", None)
+                          loc = rg.headers.get("Location")
+                          return ("ok", (kind, ver, q, name, loc, MAIN + "/")) if loc else ("fail", None)
+                  except Exception:
+                      return ("fail", None)
 
               out = []
               for rec in primary_ordered:
@@ -215,15 +232,13 @@ jobs:
                   target_rec = cur[2].get(slot_key)
                   if not target_rec: continue
                   st, val = try_unlock(cur, target_rec)
-                  if st == "429":
-                      while px_idx < len(good_proxies):
-                          nxt = open_ws(good_proxies[px_idx]); px_idx += 1
-                          if nxt is not None:
-                              cur = nxt
-                              target_rec = cur[2].get(slot_key)
-                              if target_rec:
-                                  st, val = try_unlock(cur, target_rec)
-                              break
+                  if st in ("429", "fail"):
+                      nxt = next_ws()
+                      if nxt is not None:
+                          cur = nxt
+                          target_rec = cur[2].get(slot_key)
+                          if target_rec:
+                              st, val = try_unlock(cur, target_rec)
                   if st == "ok" and val:
                       out.append(val)
               return out
@@ -335,27 +350,35 @@ jobs:
 
               # 8. YonaPlay -> DotPlay
               if "yonaplay.net" in low:
-                  sy = make_session(good_proxies[0])
-                  ry = sy.get(url, headers={"Referer": MAIN + "/"}, timeout=12)
-                  org = "https://mid.yonaplay.net"
-                  ri = sy.post(f"{org}/api/init-session.php", json={}, headers={"Origin": org, "Referer": url}, timeout=12).json()
-                  rs = sy.post(f"{org}/api/sources.php", json={"code": ri["c"]}, headers={"Origin": org, "Referer": url, "X-Embed-Token": ri["t"]}, timeout=12).json()
-                  results = []
-                  for qk, qg in rs.get("qualities", {}).items():
-                      for sv in qg.get("servers", []):
-                          ra = sy.post(f"{org}/api/api.php", json={"code": ri["c"], "token": sv["token"], "key": ri["k"]}, headers={"Origin": org, "Referer": url}, timeout=12).json()
-                          raw = base64.b64decode(ra["d"])
-                          iv, tag, ct = raw[:12], raw[12:28], raw[28:]
-                          sub_u = AES.new(hashlib.sha256(ri["k"].encode()).digest(), AES.MODE_GCM, nonce=iv).decrypt_and_verify(ct, tag).decode()
-                          if "dotplay." in sub_u:
-                              rd = sy.get(sub_u, headers={"Referer": org + "/"}, timeout=12).text
-                              ec = re.search(r'window\.embedCode\s*=\s*"([^"]+)"', rd).group(1)
-                              et = re.search(r'window\.embedToken\s*=\s*"([^"]+)"', rd).group(1)
-                              rad = sy.get(f"https://dotplay.net/api.php?code={ec}", headers={"Accept": "application/json", "Referer": sub_u, "X-Embed-Token": et}, timeout=12).json()
-                              v_url = base64.b64decode(rad["video_url"]).decode().split("|")[0]
-                              ok, code, head = probe_media(v_url, {"Referer": "https://dotplay.net/"})
-                              results.append(f"DotPlay[{qk.upper()}]={ok}(HTTP {code})")
-                  return f"YonaPlay -> {results}"
+                  for ypx in good_proxies:
+                      try:
+                          sy = make_session(ypx)
+                          ry = sy.get(url, headers={"Referer": MAIN + "/"}, timeout=12)
+                          if ry.status_code != 200 or "_cf_chl_opt" in ry.text:
+                              continue
+                          org = "https://mid.yonaplay.net"
+                          ri = sy.post(f"{org}/api/init-session.php", json={}, headers={"Origin": org, "Referer": url}, timeout=12).json()
+                          rs = sy.post(f"{org}/api/sources.php", json={"code": ri["c"]}, headers={"Origin": org, "Referer": url, "X-Embed-Token": ri["t"]}, timeout=12).json()
+                          results = []
+                          for qk, qg in rs.get("qualities", {}).items():
+                              for sv in qg.get("servers", []):
+                                  ra = sy.post(f"{org}/api/api.php", json={"code": ri["c"], "token": sv["token"], "key": ri["k"]}, headers={"Origin": org, "Referer": url}, timeout=12).json()
+                                  raw = base64.b64decode(ra["d"])
+                                  iv, tag, ct = raw[:12], raw[12:28], raw[28:]
+                                  sub_u = AES.new(hashlib.sha256(ri["k"].encode()).digest(), AES.MODE_GCM, nonce=iv).decrypt_and_verify(ct, tag).decode()
+                                  if "dotplay." in sub_u:
+                                      rd = sy.get(sub_u, headers={"Referer": org + "/"}, timeout=12).text
+                                      ec = re.search(r'window\.embedCode\s*=\s*"([^"]+)"', rd).group(1)
+                                      et = re.search(r'window\.embedToken\s*=\s*"([^"]+)"', rd).group(1)
+                                      rad = sy.get(f"https://dotplay.net/api.php?code={ec}", headers={"Accept": "application/json", "Referer": sub_u, "X-Embed-Token": et}, timeout=12).json()
+                                      v_url = base64.b64decode(rad["video_url"]).decode().split("|")[0]
+                                      ok, code, head = probe_media(v_url, {"Referer": "https://dotplay.net/"})
+                                      results.append(f"DotPlay[{qk.upper()}]={ok}(HTTP {code})")
+                          if results:
+                              return f"YonaPlay -> {results}"
+                      except Exception:
+                          continue
+                  return "YonaPlay -> no proxy succeeded"
 
               # 9. GoFile
               if "gofile.io" in low:
@@ -414,7 +437,10 @@ jobs:
               assert len(unlocked) >= 6, f"Too few gates unlocked on {wurl}"
               playable_count = 0
               for item in unlocked:
-                  res_str = test_extract(item)
+                  try:
+                      res_str = test_extract(item)
+                  except Exception as ex_err:
+                      res_str = f"ERR({type(ex_err).__name__}: {ex_err})"
                   print(f"  [{item[0]}|{item[2]}|{item[3]}] {res_str}", flush=True)
                   if "-> True" in res_str or "=True" in res_str:
                       playable_count += 1

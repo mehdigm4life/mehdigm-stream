@@ -460,7 +460,6 @@ object WitAnimeNetwork {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true
             loadsImagesAutomatically = false
             blockNetworkImage = true
             mediaPlaybackRequiresUserGesture = true
