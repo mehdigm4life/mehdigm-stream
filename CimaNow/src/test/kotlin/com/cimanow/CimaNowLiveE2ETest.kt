@@ -94,7 +94,7 @@ class CimaNowLiveE2ETest {
         assertNotNull("Expected MovieLoadResponse for Fall 2", fall2Load)
         println(
             "[E2E][Load Movie] title='${fall2Load!!.name}' year=${fall2Load.year} dur=${fall2Load.duration}m " +
-                "tags=${fall2Load.tags.size} actors=${fall2Load.actors?.size ?: 0} recs=${fall2Load.recommendations?.size ?: 0} poster=${fall2Load.posterUrl}",
+                "tags=${fall2Load.tags?.size ?: 0} actors=${fall2Load.actors?.size ?: 0} recs=${fall2Load.recommendations?.size ?: 0} poster=${fall2Load.posterUrl}",
         )
         assertFalse(fall2Load.posterUrl.isNullOrBlank())
         assertFalse(fall2Load.plot.isNullOrBlank())
