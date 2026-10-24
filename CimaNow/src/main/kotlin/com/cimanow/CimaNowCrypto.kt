@@ -87,8 +87,8 @@ object CimaNowCrypto {
     fun solveGatewayPostBody(vaultHtml: String): String? {
         val arrMatch = Regex("""(?:window\[["'][^"']+["']\]|var\s+_0x[A-Za-z0-9_]+)\s*=\s*\[""").find(vaultHtml)
             ?: return null
-        val openBracket = vaultHtml.indexOf('[', arrMatch.range.first)
-        if (openBracket < 0) return null
+        val openBracket = arrMatch.range.last
+        if (openBracket < 0 || vaultHtml[openBracket] != '[') return null
 
         val maxSliceEnd = minOf(vaultHtml.length, openBracket + 24576)
         val closeBracket = vaultHtml.indexOf(']', openBracket + 1)

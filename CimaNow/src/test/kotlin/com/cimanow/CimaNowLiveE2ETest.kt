@@ -43,6 +43,21 @@ class CimaNowLiveE2ETest {
         val sampleIframe =
             """<iframe id="cn_fr_02bd5628" src="about:blank" data-cnk="633637376630323664653663303836346663363863613432" data-cna="12.86.98.105.46.66.72.123.104.112.210.148.253.231.252.208.196.247.169.181.70.22.127.108.53.20.11.126.54.223.203.194.170.226.156"></iframe>"""
         assertEquals("https://cimanow.upns.online/#otni3k", CimaNowCrypto.decodeCnBootFrame(sampleIframe))
+
+        // 4. `solveGatewayPostBody` repeating-XOR + `window["..."] = [...]` unpacker
+        val innerScript =
+            "<script>window.d={'k1':'chVal','k2':'riVal','k3':'AAECAw==','k4':'abcd'};" +
+                "window.map_a1={ch:'k1',ri:'k2',ke:'k3',se:'k4'};</script>"
+        val xorKey = byteArrayOf(0x5A, 0x33, 0x71)
+        val xored = ByteArray(innerScript.length) { i ->
+            (innerScript[i].code xor (xorKey[i % xorKey.size].toInt() and 0xFF)).toByte()
+        }
+        val b64Full = java.util.Base64.getEncoder().encodeToString(xored)
+        val chunkedJs = b64Full.chunked(17).joinToString(",") { "\"$it\"" }
+        val mockVault = """<html><body><script>window["_0x9f2a"] = [$chunkedJs];</script></body></html>"""
+        val solvedPost = CimaNowCrypto.solveGatewayPostBody(mockVault)
+        assertNotNull("Expected solveGatewayPostBody to unpack window[\"_0x9f2a\"] array", solvedPost)
+        assertTrue(solvedPost!!.contains("request_id=riVal") && solvedPost.contains("ch=chVal") && solvedPost.contains("hmac_token="))
     }
 
     @Test
