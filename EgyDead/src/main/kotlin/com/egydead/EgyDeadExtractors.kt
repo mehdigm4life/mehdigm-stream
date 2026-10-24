@@ -435,7 +435,7 @@ object EgyDeadMegaMaxExtractor {
     ) {
         for (origin in origins) {
             val embedUrl = "$origin/e/$hashId"
-            val res = EgyDeadNetwork.executeGetWithProxyFallback(embedUrl, referer = referer, extraHeaders = embedHeaders(referer)) ?: continue
+            val res = EgyDeadExtractorKit.getText(embedUrl, referer = referer, headers = embedHeaders(referer)) ?: continue
             if (res.code !in 200..299) continue
             val page = extractInertiaPage(res.body) ?: continue
             if (!page.optString("component").contains("leech/video", ignoreCase = true)) continue
@@ -515,7 +515,7 @@ object EgyDeadMegaMaxExtractor {
     ) = coroutineScope {
         for (origin in origins) {
             val iframeUrl = "$origin/iframe/$hashId"
-            val res = EgyDeadNetwork.executeGetWithProxyFallback(iframeUrl, referer = referer, extraHeaders = embedHeaders(referer)) ?: continue
+            val res = EgyDeadExtractorKit.getText(iframeUrl, referer = referer, headers = embedHeaders(referer)) ?: continue
             if (res.code !in 200..299) continue
             val page = extractInertiaPage(res.body) ?: continue
             val props = page.optJSONObject("props") ?: continue
