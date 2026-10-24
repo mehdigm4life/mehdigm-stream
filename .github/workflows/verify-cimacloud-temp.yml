@@ -1,0 +1,33 @@
+name: Verify CimaCloud Temp
+
+on:
+  push:
+    branches:
+      - 'arena/0c66d3ac-mehdigm-stream'
+    paths:
+      - '.tmp_verify/**'
+      - '.github/workflows/verify-cimacloud-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install aarch64 binutils and run probe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-aarch64-linux-gnu python3-requests
+          python3 .tmp_verify/probe_phase1.py > .tmp_verify/probe_phase1.log 2>&1
+      - name: Commit results
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f .tmp_verify/
+          git commit -m "chore: phase1 probe results [skip ci]" || true
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"
