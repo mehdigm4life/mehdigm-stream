@@ -12,134 +12,55 @@ jobs:
   inspect:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Final Verify Videas + WorkUpload + GoFile + MediaFire + YonaPlay
+      - name: Dump raw YonaPlay embed.js & resolve sub-servers
         run: |
-          pip install -q "curl_cffi" beautifulsoup4
-          python3 -u - <<'PY' > .tmp_wit/probe4.log 2>&1
-          import base64, hashlib, json, random, re, struct, urllib.parse, uuid
+          pip install -q "curl_cffi"
+          python3 -u - <<'PY' > .tmp_wit/yonaplay.log 2>&1
+          import random, re
           from curl_cffi import requests as creq
 
-          BASE = "https://witanime.site"
           vs = creq.Session(impersonate="chrome124")
-
-          # 1. Videas HLS!
-          try:
-              rvp = vs.get("https://app.videas.com/embed/01a169f7-c949-72e2-9f8b-4b83609cd57e/", headers={"Referer": BASE + "/"}, timeout=12)
-              cfg = json.loads(re.search(r'<script id="videas-embed-config"[^>]*>([\s\S]*?)</script>', rvp.text).group(1))
-              r_emb = vs.get(
-                  f"https://app.videas.com/api/visitor/embed/{cfg['embedId']}/?viewer_id={uuid.uuid4()}",
-                  headers={"Accept": "application/json", "X-Embed-Opening": cfg["opening"], "Referer": "https://app.videas.com/embed/" + cfg["embedId"] + "/"},
-                  timeout=12,
-              ).json()
-              aid = r_emb["items"][0]["asset"]["uid"]
-              pbj = vs.post(
-                  "https://app.videas.com/api/visitor/playback/info/",
-                  json={"asset_id": aid, "playback_token": r_emb["playback_token"], "session_id": r_emb.get("session_id")},
-                  headers={"Accept": "application/json", "Referer": "https://app.videas.com/embed/" + cfg["embedId"] + "/"},
-                  timeout=12,
-              ).json()
-              print("Videas pbj keys:", list(pbj.keys()), "source_url:", pbj.get("source_url"))
-              hls_u = urllib.parse.urljoin("https://app.videas.com", (pbj.get("hls_url") or {}).get("url", ""))
-              rhls = vs.get(hls_u, headers={"Referer": "https://app.videas.com/"}, timeout=12)
-              print("Videas HLS:", rhls.status_code, hls_u, "\n", rhls.text[:600])
-          except Exception as e:
-              print("Videas err:", e)
-
-          def inspect_bytes(label, b, status, cr):
-              print(f"[{label}] status={status} CR={cr} head={b[:48]}")
-              if b[:4] == b"PK\x03\x04":
-                  ver, flags, comp, mtime, mdate, crc, csize, usize, fnlen, exlen = struct.unpack("<HHHHHIIIHH", b[4:30])
-                  fname = b[30:30+fnlen]
-                  off = 30 + fnlen + exlen
-                  print(f"  [{label}] ZIP! comp={comp} (0=STORE,8=DEFLATE) csize={csize} usize={usize} fname={fname} off={off} inner={b[off:off+24]}")
-
-          # 2. MediaFire!
-          try:
-              mf_html = open(".tmp_wit/hosts/dl_mediafire.html", encoding="utf-8").read()
-              m_scr = re.search(r'data-scrambled-url="([^"]+)"', mf_html)
-              mf_direct = base64.b64decode(m_scr.group(1)).decode() if m_scr else re.search(r'https?://download\d*\.mediafire\.com/[^"\'\s<>]+', mf_html).group(0)
-              print("MediaFire direct:", mf_direct)
-              rmf = vs.get(mf_direct, headers={"Range": "bytes=0-255"}, timeout=12)
-              inspect_bytes("MediaFire", rmf.content, rmf.status_code, rmf.headers.get("content-range"))
-          except Exception as e:
-              print("MediaFire err:", e)
-
-          # 3. GoFile!
-          try:
-              r_acc = vs.post("https://api.gofile.io/accounts", timeout=10).json()
-              gf_tok = r_acc["data"]["token"]
-              gcfg = vs.get("https://gofile.io/dist/js/config.js", timeout=10).text
-              wt = re.search(r'appdata\.wt\s*=\s*["\']([^"\']+)["\']', gcfg)
-              wt_val = wt.group(1) if wt else "4fd6sg89d7s6"
-              rgf = vs.get(f"https://api.gofile.io/contents/BzonTbGE?wt={wt_val}", headers={"Authorization": f"Bearer {gf_tok}"}, timeout=12).json()
-              for cid, ch in (rgf.get("data", {}).get("children") or {}).items():
-                  glink = ch.get("link", "")
-                  print("GoFile file:", ch.get("name"), glink)
-                  rgfb = vs.get(glink, headers={"Cookie": f"accountToken={gf_tok}", "Referer": "https://gofile.io/", "Range": "bytes=0-255"}, timeout=12)
-                  inspect_bytes("GoFile", rgfb.content, rgfb.status_code, rgfb.headers.get("content-range"))
-          except Exception as e:
-              print("GoFile err:", e)
-
-          # 4. WorkUpload!
-          try:
-              wus = creq.Session(impersonate="chrome124")
-              rw0 = wus.get("https://workupload.com/file/fpY5D2qyqhV", timeout=12)
-              if "solvePuzzle" in rw0.text:
-                  rpuz = wus.get("https://workupload.com/puzzle", headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest", "Referer": "https://workupload.com/file/fpY5D2qyqhV"}, timeout=10).json()
-                  puz_str = rpuz["data"]["puzzle"]
-                  find_set = set(rpuz["data"]["find"])
-                  rng = rpuz["data"]["range"]
-                  sols = []
-                  for i in range(rng):
-                      if hashlib.sha256((puz_str + str(i)).encode()).hexdigest() in find_set:
-                          sols.append(str(i))
-                          if len(sols) == len(find_set):
-                              break
-                  rcap = wus.post("https://workupload.com/captcha", data={"captcha": " ".join(sols) + " "}, headers={"X-Requested-With": "XMLHttpRequest", "Referer": "https://workupload.com/file/fpY5D2qyqhV"}, timeout=10)
-                  print("WorkUpload captcha:", rcap.status_code, rcap.text[:150])
-              rw1 = wus.get("https://workupload.com/file/fpY5D2qyqhV", timeout=12)
-              print("WorkUpload page title:", re.findall(r"<title>[\s\S]*?</title>", rw1.text))
-              for m in re.finditer(r'(/api/file/[^"\'\s<>]+|start/[A-Za-z0-9]+|download/[A-Za-z0-9]+)', rw1.text):
-                  print("  wu link:", m.group(0))
-              wus.get("https://workupload.com/start/fpY5D2qyqhV", headers={"Referer": "https://workupload.com/file/fpY5D2qyqhV"}, timeout=12)
-              rapi = wus.get("https://workupload.com/api/file/getDownloadServer/fpY5D2qyqhV", headers={"X-Requested-With": "XMLHttpRequest", "Referer": "https://workupload.com/start/fpY5D2qyqhV"}, timeout=12)
-              print("WorkUpload API:", rapi.status_code, rapi.text[:300])
-              wu_dl = rapi.json().get("data", {}).get("url", "")
-              if wu_dl:
-                  rwub = wus.get(wu_dl, headers={"Range": "bytes=0-255"}, timeout=12)
-                  inspect_bytes("WorkUpload", rwub.content, rwub.status_code, rwub.headers.get("content-range"))
-          except Exception as e:
-              print("WorkUpload err:", e)
-
-          # 5. YonaPlay!
-          try:
-              cands = []
-              for fu in [
-                  "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-                  "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-              ]:
+          cands = []
+          for fu in [
+              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+          ]:
+              try:
                   for ln in vs.get(fu, timeout=8).text.splitlines():
                       if re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", ln.strip()):
                           cands.append("socks5h://" + ln.strip())
-              random.shuffle(cands)
-              for px in cands[:80]:
-                  try:
-                      ps = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-                      ry = ps.get("https://mid.yonaplay.net/embed/7b80c24b3fb699b0/", headers={"Referer": BASE + "/"}, timeout=7)
-                      if ry.status_code == 200 and "just a moment" not in ry.text[:3000].lower():
-                          print("YonaPlay 200! len=", len(ry.text))
-                          print(ry.text[:4000])
-                          break
-                  except Exception:
-                      pass
-          except Exception as e:
-              print("YonaPlay err:", e)
+              except Exception:
+                  pass
+          random.shuffle(cands)
+
+          for px in cands[:80]:
+              try:
+                  ps = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  r = ps.get("https://mid.yonaplay.net/embed/7b80c24b3fb699b0/", headers={"Referer": "https://witanime.site/"}, timeout=8)
+                  if r.status_code != 200 or "just a moment" in r.text[:2500].lower():
+                      continue
+                  ejs = ps.get("https://mid.yonaplay.net/assets/js/embed.js", headers={"Referer": "https://mid.yonaplay.net/embed/7b80c24b3fb699b0/"}, timeout=8).text
+                  print("=== RAW embed.js ===")
+                  print(ejs)
+                  print("=== TESTING LIVE YONAPLAY API ===")
+                  h = {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest", "Accept": "application/json", "Origin": "https://mid.yonaplay.net", "Referer": "https://mid.yonaplay.net/embed/7b80c24b3fb699b0/"}
+                  ini = ps.post("https://mid.yonaplay.net/api/init-session.php", json={}, headers=h, timeout=8).json()
+                  print("init-session:", ini)
+                  srcs = ps.post("https://mid.yonaplay.net/api/sources.php", json={"code": ini["c"]}, headers=h, timeout=8).json()
+                  print("sources:", srcs)
+                  for qk, qobj in (srcs.get("qualities") or {}).items():
+                      for srv in (qobj.get("servers") or []):
+                          ra = ps.post("https://mid.yonaplay.net/api/api.php", json={"code": ini["c"], "token": srv["token"], "key": ini["k"]}, headers=h, timeout=8).json()
+                          print(f"  [{qk}] {srv['name']} -> {ra}")
+                  break
+              except Exception as e:
+                  pass
           PY
 
       - name: Commit inspection dump
@@ -148,6 +69,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A .tmp_wit
-          git commit -m "chore: save probe4b [skip ci]" || true
+          git commit -m "chore: save yonaplay dump [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
