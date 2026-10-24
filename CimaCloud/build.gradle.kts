@@ -1,6 +1,4 @@
-import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
-
-version = 29
+version = 35
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"
@@ -16,17 +14,9 @@ cloudstream {
         "Cartoon"
     )
 
-    iconUrl = "https://cima-cloud.com/favicon.ico"
+    iconUrl = "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.png"
 }
 
-tasks.matching { it.name == "make" }.configureEach {
-    (this as org.gradle.api.tasks.bundling.Zip).from("src/main/jniLibs") {
-        into("lib")
-    }
-}
-
-tasks.withType<CompileDexTask>().configureEach {
-    val javaCompile = project.tasks.named("compileDebugJavaWithJavac")
-    dependsOn(javaCompile)
-    input.from(javaCompile)
+android {
+    namespace = "com.cimacloud"
 }
