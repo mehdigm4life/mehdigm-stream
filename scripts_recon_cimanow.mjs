@@ -53,7 +53,7 @@ async function curlReq(url, opts = {}) {
   if (follow) args.push("-L", "--max-redirs", "5");
   if (method !== "GET") args.push("-X", method);
   if (formBody !== null) args.push("--data-raw", formBody);
-  if (range) args.push("-r", range);
+  if (range) args.push("-r", range, "-o", "/dev/null");
   if (proxy) args.push("-x", proxy.replace(/^socks5:\/\//, "socks5h://"));
   if (referer) args.push("-e", referer);
   if (cookieJar) args.push("-b", cookieJar, "-c", cookieJar);
