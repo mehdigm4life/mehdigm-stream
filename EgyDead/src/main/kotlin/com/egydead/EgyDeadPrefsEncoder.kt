@@ -44,12 +44,12 @@ object EgyDeadPrefsEncoder {
             Class.forName("com.lagradost.cloudstream3.CloudStreamApp")
                 .getMethod("getContext")
                 .invoke(null) as? Context
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             try {
                 Class.forName("com.lagradost.cloudstream3.AcraApplication")
                     .getMethod("getApplicationContext")
                     .invoke(null) as? Context
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 null
             }
         }
