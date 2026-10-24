@@ -41,36 +41,31 @@ jobs:
           warp-cli --accept-tos connect || true
           sleep 3
 
-          python3 -m pip install --quiet patchright curl_cffi
-          xvfb-run -a --server-args="-screen 0 500x980x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
+          python3 -m pip install --quiet -U "camoufox[geoip]" pillow curl_cffi
+          python3 -m camoufox fetch
+          xvfb-run -a --server-args="-screen 0 1280x960x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
           import time, json, subprocess
+          from PIL import Image
           from curl_cffi import requests as creq
-          from patchright.sync_api import sync_playwright
+          from camoufox.sync_api import Camoufox
 
-          print("=== REAL OS XDOTOOL MOUSE MOVE + CLICK ON ON-SCREEN CHROME + WARP ===")
-          with sync_playwright() as p:
-              browser = p.chromium.launch(
-                  channel="chrome",
-                  headless=False,
-                  proxy={"server": "socks5://127.0.0.1:40000"},
-                  args=[
-                      "--no-sandbox",
-                      "--disable-blink-features=AutomationControlled",
-                      "--window-position=10,10",
-                      "--window-size=412,915",
-                  ]
-              )
-              ctx = browser.new_context(no_viewport=True, locale="ar-EG")
-              page = ctx.new_page()
+          print("=== CAMOUFOX (HARDWARE WEBGL) + WARP + PIXEL-VERIFIED XDOTOOL CLICK ===")
+          with Camoufox(
+              headless=False,
+              humanize=True,
+              proxy={"server": "socks5://127.0.0.1:40000"}
+          ) as browser:
+              page = browser.new_page()
               real_ua = page.evaluate("navigator.userAgent")
+              nav_lang = page.evaluate("navigator.language")
               t0 = time.time()
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=25000)
-              print(f"[CHROME+XDOTOOL] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              print(f"[CAMOUFOX+WARP] UA={real_ua} lang={nav_lang} goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
 
               for attempt in range(1, 10):
-                  time.sleep(2.5)
+                  time.sleep(3.0)
                   cards = page.locator("li.movieItem").count()
-                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in ctx.cookies()]
+                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in page.context.cookies()]
                   if cards > 0:
                       print(f">>> LIVE CLOUDFLARE BYPASSED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
                       break
@@ -95,41 +90,52 @@ jobs:
                               }
                           }
                       }
-                      // Exact screen offset of viewport inside X11!
-                      const chromeTopOffset = window.outerHeight - window.innerHeight;
-                      const chromeLeftOffset = window.outerWidth - window.innerWidth;
                       return {
                           title: document.title,
                           dir: document.documentElement.dir,
-                          screenX: window.screenX,
-                          screenY: window.screenY,
-                          chromeTopOffset,
-                          chromeLeftOffset,
+                          screenX: window.mozInnerScreenX || window.screenX,
+                          screenY: window.mozInnerScreenY || (window.screenY + (window.outerHeight - window.innerHeight)),
                           target
                       };
                   }""")
                   print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] cookies={cookies_now} info={json.dumps(info, ensure_ascii=False)}")
                   t = info["target"]
                   if t and t.get("valLen", 0) == 0:
-                      is_rtl = (info.get("dir") or "").lower() == "rtl"
-                      client_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
-                      client_y = t["top"] + t["height"] / 2.0
-                      abs_x = int(round(info["screenX"] + (info["chromeLeftOffset"] / 2.0) + client_x))
-                      abs_y = int(round(info["screenY"] + info["chromeTopOffset"] + client_y))
-                      print(f"[XDOTOOL TAP #{attempt}] client=({client_x:.1f}, {client_y:.1f}) -> X11 screen=({abs_x}, {abs_y})")
-                      # Smooth human mouse trail + real X11 OS click!
-                      subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 120)), str(max(20, abs_y - 90))], check=False)
-                      time.sleep(0.08)
-                      subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 45)), str(max(20, abs_y - 25))], check=False)
-                      time.sleep(0.08)
-                      subprocess.run(["xdotool", "mousemove", str(abs_x), str(abs_y)], check=False)
-                      time.sleep(0.06)
-                      subprocess.run(["xdotool", "mousedown", "1"], check=False)
-                      time.sleep(0.07)
-                      subprocess.run(["xdotool", "mouseup", "1"], check=False)
+                      page.screenshot(path="/tmp/cfx.png")
+                      im = Image.open("/tmp/cfx.png").convert("RGB")
+                      cy = int(t["top"] + t["height"] / 2.0)
+                      # Scan [left..right] at cy to see exact 300px Turnstile bounds AND checkbox square!
+                      active = [x for x in range(max(0, int(t["left"])), min(im.width, int(t["right"]))) if im.getpixel((x, cy)) not in ((255,255,255),(250,250,250),(249,249,249),(34,34,34),(35,35,35))]
+                      if active:
+                          w_left, w_right = min(active), max(active)
+                          # Check dark border pixels near left end (w_left..w_left+55) vs right end (w_right-55..w_right)
+                          l_dark = sum(1 for x in range(w_left+8, min(im.width, w_left+52)) for y in range(max(0, cy-14), min(im.height, cy+14)) if im.getpixel((x,y))[0] < 190 and abs(im.getpixel((x,y))[0] - im.getpixel((x,y))[2]) < 30)
+                          r_dark = sum(1 for x in range(max(0, w_right-52), min(im.width, w_right-8)) for y in range(max(0, cy-14), min(im.height, cy+14)) if im.getpixel((x,y))[0] < 190 and abs(im.getpixel((x,y))[0] - im.getpixel((x,y))[2]) < 30)
+                          # Note: Cloudflare orange/black logo is on the OPPOSITE side of the checkbox! Cloudflare logo has orange pixels (R - B > 80)!
+                          l_orange = sum(1 for x in range(w_left+4, min(im.width, w_left+90)) for y in range(max(0, cy-20), min(im.height, cy+20)) if im.getpixel((x,y))[0] - im.getpixel((x,y))[2] > 70)
+                          r_orange = sum(1 for x in range(max(0, w_right-90), min(im.width, w_right-4)) for y in range(max(0, cy-20), min(im.height, cy+20)) if im.getpixel((x,y))[0] - im.getpixel((x,y))[2] > 70)
+                          # Checkbox is ALWAYS on the opposite side of the orange Cloudflare logo!
+                          client_x = (w_left + 28) if r_orange >= l_orange else (w_right - 28)
+                          print(f"[WIDGET SCAN] widget=[{w_left}..{w_right}] (w={w_right-w_left}) l_orange={l_orange} r_orange={r_orange} -> checkbox client_x={client_x}, cy={cy}")
+                      else:
+                          is_rtl = (info.get("dir") or "").lower() == "rtl"
+                          client_x = (t["right"] - 28) if is_rtl else (t["left"] + 28)
+                          print(f"[WIDGET SCAN] no active pixels yet, fallback client_x={client_x}")
+
+                      abs_x = int(round(info["screenX"] + client_x))
+                      abs_y = int(round(info["screenY"] + cy))
+                      print(f"[CLICK #{attempt}] mozInnerScreen=({info['screenX']}, {info['screenY']}) -> X11=({abs_x}, {abs_y})")
+                      if attempt % 2 == 1:
+                          subprocess.run(["xdotool", "mousemove", str(max(20, abs_x - 90)), str(max(20, abs_y - 60))], check=False)
+                          time.sleep(0.08)
+                          subprocess.run(["xdotool", "mousemove", str(abs_x), str(abs_y)], check=False)
+                          time.sleep(0.08)
+                          subprocess.run(["xdotool", "click", "1"], check=False)
+                      else:
+                          page.mouse.click(client_x, cy)
 
               cards = page.locator("li.movieItem").count()
-              cookies = ctx.cookies()
+              cookies = page.context.cookies()
               print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], c['domain'], len(c['value'])) for c in cookies]}")
 
               if cards > 0:
@@ -143,9 +149,8 @@ jobs:
                       print(f"[TEST window.fetch({path!r})] ({int((time.time()-tf)*1000)}ms) -> {res}")
 
                   cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies if 'egydead' in c['domain'])
-                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131", proxies={"https": "socks5h://127.0.0.1:40000"}, headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
+                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="firefox133", proxies={"https": "socks5h://127.0.0.1:40000"}, headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
                   print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
-              browser.close()
           PY
 
       - name: Configure Android SDK, test, and build EgyDead plugin
