@@ -1,18 +1,19 @@
 import fs from "node:fs";
-import { execFile, spawn } from "node:child_process";
+import vm from "node:vm";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const DESKTOP_UA =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const UA =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
 const KNOWN_GOOD_PROXIES = [
-  "socks5h://184.178.172.25:15291",
+  "socks5h://91.107.179.68:10809",
   "socks5h://184.178.172.5:15303",
+  "socks5h://184.178.172.25:15291",
   "socks5h://45.74.31.46:8287",
   "socks5h://45.74.31.46:8506",
-  "socks5h://91.107.179.68:10809",
   "socks5h://45.74.31.46:8478",
 ];
 
@@ -52,7 +53,7 @@ async function curlReq(
     "-X",
     method,
     "-A",
-    DESKTOP_UA,
+    UA,
     "-H",
     "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "-H",
@@ -69,32 +70,29 @@ async function curlReq(
   args.push(url);
 
   try {
-    const t0 = Date.now();
     const { stdout } = await execFileAsync("curl", args, { maxBuffer: 25 * 1024 * 1024 });
-    const elapsedMs = Date.now() - t0;
     const markerIdx = stdout.lastIndexOf("\n__CURL_META__:");
     const text = markerIdx >= 0 ? stdout.slice(0, markerIdx) : stdout;
     const [codeStr, finalUrl, redirectUrl] =
       markerIdx >= 0 ? stdout.slice(markerIdx + "\n__CURL_META__:".length).trim().split("|") : ["0", url, ""];
     const respHeaders = includeHeaders && fs.existsSync(hdrFile) ? fs.readFileSync(hdrFile, "utf8") : "";
-    return { status: Number(codeStr) || 0, finalUrl, redirectUrl, respHeaders, text, elapsedMs };
+    return { status: Number(codeStr) || 0, finalUrl, redirectUrl, respHeaders, text };
   } finally {
     if (fs.existsSync(hdrFile)) try { fs.unlinkSync(hdrFile); } catch {}
   }
 }
 
-async function getRankedProxies() {
-  const results = [];
+async function getWorkingProxies() {
+  const working = [];
   await Promise.all(
     KNOWN_GOOD_PROXIES.map(async (p) => {
       try {
         const r = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 8 });
-        if (r.status === 200 && !isCimaBlock(r.text) && r.text.length > 5000) {
-          results.push({ proxy: p, ms: r.elapsedMs });
-        }
+        if (r.status === 200 && !isCimaBlock(r.text) && r.text.length > 5000) working.push(p);
       } catch {}
     })
   );
+  if (working.length >= 2) return working;
 
   const candidates = [];
   await Promise.all(
@@ -112,351 +110,370 @@ async function getRankedProxies() {
   let idx = 0;
   await Promise.all(
     Array.from({ length: 30 }, async () => {
-      while (idx < candidates.length && results.length < 6) {
+      while (idx < candidates.length && working.length < 5) {
         const p = candidates[idx++];
         try {
           const r = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 7 });
-          if (r.status === 200 && !isCimaBlock(r.text) && r.text.length > 5000) {
-            results.push({ proxy: p, ms: r.elapsedMs });
-          }
+          if (r.status === 200 && !isCimaBlock(r.text) && r.text.length > 5000) working.push(p);
         } catch {}
       }
     })
   );
-
-  results.sort((a, b) => a.ms - b.ms);
-  return results;
+  return working;
 }
 
-async function probeWatchingMatrixWithCurl(proxies, movieUrl, shineUrl) {
-  const out = {};
-  const watchUrl = movieUrl.replace(/\/?$/, "/watching/");
+// Trace the full redirect chain from `.shine` (`rm.freex2line.online/loadon/?link=...`) to `/watching/`!
+async function followGatewayChain(shineUrl, itemUrl, proxy) {
+  const jar = `/tmp/cn_chain_${Math.random().toString(36).slice(2)}.txt`;
+  const hops = [];
+  let curUrl = shineUrl;
+  let curRef = itemUrl;
+  let curMethod = "GET";
+  let curPost = null;
+  let finalResp = null;
 
-  // A. Test `rm.freex2line.online/loadon/?link=...` across ALL working proxies!
-  out.freex2lineAcrossProxies = [];
-  for (const p of proxies) {
-    try {
-      const r = await curlReq(shineUrl, {
-        proxy: p,
-        referer: movieUrl,
-        includeHeaders: true,
-        timeoutSec: 12,
-      });
-      out.freex2lineAcrossProxies.push({
-        proxy: p,
-        status: r.status,
-        finalUrl: r.finalUrl,
-        headers: r.respHeaders.slice(0, 800),
-        title: r.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || "",
-        len: r.text.length,
-        bodySample: r.text.slice(0, 3500),
-      });
-      if (r.status === 200 && !r.text.includes("Just a moment")) break;
-    } catch (e) {
-      out.freex2lineAcrossProxies.push({ proxy: p, err: String(e.message || e) });
-    }
-  }
-
-  // B. Test HTTP POST & custom Referers / query params directly to `/watching/`!
-  const p0 = proxies[0];
-  const tests = [
-    { name: "POST_empty_ref_movie", method: "POST", postData: "", referer: movieUrl },
-    { name: "POST_empty_ref_freex2line", method: "POST", postData: "", referer: shineUrl },
-    { name: "GET_ref_full_shineUrl", method: "GET", referer: shineUrl },
-    { name: "GET_ref_vip_cimanowinc", method: "GET", referer: "https://vip.cimanowinc.com/" },
-    { name: "GET_ref_cimanow_home", method: "GET", referer: "https://cimanow.cc/home/" },
-    { name: "GET_no_follow_inspect_302", method: "GET", referer: shineUrl, follow: false },
-  ];
-  out.directWatchProbes = [];
-  for (const t of tests) {
-    try {
-      const r = await curlReq(watchUrl, {
-        proxy: p0,
-        method: t.method,
-        postData: t.postData ?? null,
-        referer: t.referer,
-        follow: t.follow ?? true,
-        includeHeaders: true,
-      });
-      out.directWatchProbes.push({
-        name: t.name,
-        status: r.status,
-        finalUrl: r.finalUrl,
-        redirectUrl: r.redirectUrl,
-        headers: r.respHeaders,
-        hasWatchId: r.text.includes('id="watch"') || r.text.includes("id='watch'"),
-        hasCorePhp: r.text.includes("core.php"),
-        len: r.text.length,
-        sample: r.text.includes("core.php") || r.text.includes('id="watch"') ? r.text.slice(0, 4000) : r.text.slice(0, 400),
-      });
-    } catch (e) {
-      out.directWatchProbes.push({ name: t.name, err: String(e.message || e) });
-    }
-  }
-
-  // C. Also test calling `core.php?action=switch&index=0&id=...` directly if we know or guess post ID (check wp shortlink / body classes / watchlist `data-post` on movie HTML!)
-  const mv = await curlReq(movieUrl, { proxy: p0, referer: "https://cimanow.cc/home/", includeHeaders: true });
-  const dataPostMatch = mv.text.match(/data-post=["'](\d+)["']|post[_-]?id["'\s:=]+(\d+)|\?p=(\d+)/i);
-  const allDataAttrs = [...mv.text.matchAll(/\bdata-[a-z0-9_-]+=["'][^"']*["']/gi)].map((m) => m[0]).slice(0, 30);
-  const metaTags = [...mv.text.matchAll(/<(?:meta|link)\b[^>]+>/gi)].map((m) => m[0]);
-  out.moviePostIdClues = {
-    dataPostMatch: dataPostMatch?.[0] || null,
-    allDataAttrs,
-    metaAndLinkTags: metaTags,
-  };
-
-  return out;
-}
-
-async function runFastXvfbChrome(rankedProxies, movieUrl, epUrl, shineUrl) {
-  const chromeBin = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser"].find((p) =>
-    fs.existsSync(p)
-  );
-  const xvfbBin = "/usr/bin/xvfb-run";
-  if (!chromeBin || rankedProxies.length === 0) return { available: false };
-
-  // Pick fastest SOCKS5 proxy (or HTTP proxy)
-  const chosen = rankedProxies.find((x) => x.proxy.startsWith("socks5")) || rankedProxies[0];
-  const rawProxy = chosen.proxy;
-  const hostPort = rawProxy.replace(/^[a-z0-9]+:\/\//i, "");
-  const proxyHost = hostPort.split(":")[0];
-  const chromeProxyScheme = rawProxy.startsWith("socks5") ? "socks5" : "http";
-
-  const port = 9235;
-  const userDataDir = `/tmp/chrome_fast_${Date.now()}`;
-  const chromeArgs = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--window-size=1366,768",
-    `--proxy-server=${chromeProxyScheme}://${hostPort}`,
-    `--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE ${proxyHost} , EXCLUDE 127.0.0.1`,
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${userDataDir}`,
-    "about:blank",
-  ];
-
-  const proc = fs.existsSync(xvfbBin)
-    ? spawn(xvfbBin, ["-a", chromeBin, ...chromeArgs], { stdio: "ignore" })
-    : spawn(chromeBin, ["--headless=new", ...chromeArgs], { stdio: "ignore" });
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
-    let targets = null;
-    for (let i = 0; i < 30; i++) {
-      await sleep(300);
+    for (let step = 0; step < 10; step++) {
+      // Unwrap `https://href.li/?<target>` just like href.li does (meta refresh with noreferrer!)
+      if (curUrl.startsWith("https://href.li/?")) {
+        const unwrapped = curUrl.slice("https://href.li/?".length);
+        hops.push({ step, note: "unwrap href.li (strip referer)", from: curUrl, to: unwrapped });
+        curUrl = unwrapped;
+        curRef = null;
+      }
+
+      const r = await curlReq(curUrl, {
+        method: curMethod,
+        postData: curPost,
+        proxy,
+        referer: curRef,
+        cookieJarFile: jar,
+        follow: false,
+        includeHeaders: true,
+      });
+
+      hops.push({
+        step,
+        reqUrl: curUrl,
+        reqMethod: curMethod,
+        reqReferer: curRef,
+        reqPost: curPost,
+        status: r.status,
+        redirectUrl: r.redirectUrl,
+        headers: r.respHeaders.slice(0, 1000),
+        len: r.text.length,
+        bodySample: r.text.length < 8000 ? r.text : r.text.slice(0, 2500),
+      });
+
+      finalResp = r;
+
+      // Did we reach `/watching/` with `#watch`?
+      if (r.status === 200 && (r.text.includes('id="watch"') || r.text.includes("id='watch'")) && r.text.includes("data-index")) {
+        break;
+      }
+
+      // 1) HTTP 301/302/303/307/308 redirect
+      if (r.redirectUrl) {
+        // Check Referrer-Policy header!
+        const noRef = /referrer-policy:\s*no-referrer/i.test(r.respHeaders);
+        curRef = noRef ? null : curUrl;
+        curUrl = new URL(r.redirectUrl, curUrl).toString();
+        curMethod = "GET";
+        curPost = null;
+        continue;
+      }
+
+      // 2) JS `location.href = '...'` / `location.replace('...')` / `window.location = '...'`
+      const jsLocMatch =
+        r.text.match(/(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/i) ||
+        r.text.match(/location\.replace\(\s*["']([^"']+)["']\s*\)/i);
+      if (jsLocMatch) {
+        const nextU = new URL(jsLocMatch[1].trim(), curUrl).toString();
+        curRef = curUrl;
+        curUrl = nextU;
+        curMethod = "GET";
+        curPost = null;
+        continue;
+      }
+
+      // 3) `<meta http-equiv="refresh" content="...;url=...">`
+      const metaMatch = r.text.match(/http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"'>\s]+)/i);
+      if (metaMatch) {
+        const nextU = new URL(metaMatch[1].trim(), curUrl).toString();
+        curRef = curUrl;
+        curUrl = nextU;
+        curMethod = "GET";
+        curPost = null;
+        continue;
+      }
+
+      // 4) `<form action="..." method="...">` auto-submit or continue form
+      const formMatch = r.text.match(/<form\b([^>]*)>([\s\S]*?)<\/form>/i);
+      if (formMatch && !curUrl.includes("cimanow.cc")) {
+        const attrs = formMatch[1];
+        const inner = formMatch[2];
+        const action = attrs.match(/action=["']([^"']*)["']/i)?.[1] || curUrl;
+        const method = (attrs.match(/method=["']([^"']*)["']/i)?.[1] || "GET").toUpperCase();
+        const inputs = [...inner.matchAll(/<input\b([^>]*)>/gi)].map((m) => {
+          const n = m[1].match(/name=["']([^"']+)["']/i)?.[1];
+          const v = m[1].match(/value=["']([^"']*)["']/i)?.[1] || "";
+          return n ? `${encodeURIComponent(n)}=${encodeURIComponent(v)}` : null;
+        }).filter(Boolean);
+        curRef = curUrl;
+        curUrl = new URL(action, curUrl).toString();
+        curMethod = method;
+        curPost = method === "POST" ? inputs.join("&") : null;
+        if (method === "GET" && inputs.length > 0) {
+          curUrl += (curUrl.includes("?") ? "&" : "?") + inputs.join("&");
+        }
+        continue;
+      }
+
+      // 5) Direct `<a href="...">` pointing to cimanow or next step on gateway page
+      const aMatch = [...r.text.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)]
+        .map((m) => m[1])
+        .find((h) => h.includes("cimanow") || h.includes("redirect") || h.includes("freex2line") || h.includes("href.li"));
+      if (aMatch && !curUrl.includes("cimanow.cc")) {
+        curRef = curUrl;
+        curUrl = new URL(aMatch, curUrl).toString();
+        curMethod = "GET";
+        curPost = null;
+        continue;
+      }
+
+      break;
+    }
+
+    const cookiesAtEnd = fs.existsSync(jar) ? fs.readFileSync(jar, "utf8") : "";
+    return { hops, finalResp, cookiesAtEnd, jar };
+  } catch (e) {
+    return { hops, error: String(e.stack || e), jar };
+  }
+}
+
+async function inspectWatchingPage(watchHtml, watchUrl, proxy, jar) {
+  const info = {};
+
+  // 1. Inspect all `<script>` tags on `/watching/`!
+  const scripts = [...watchHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
+    idx,
+    attrs: m[1].trim(),
+    len: m[2].length,
+    preview: m[2].slice(0, 600),
+    code: m[2],
+  }));
+  info.scriptsMeta = scripts.map(({ idx, attrs, len, preview }) => ({ idx, attrs, len, preview }));
+
+  // Check if any script mentions `_getCoreToken` or `core.php` or if there is a new external JS file on `/watching/`!
+  info.inlineTokenScripts = scripts
+    .filter((s) => s.code.includes("_getCoreToken") || s.code.includes("core.php") || (s.len > 0 && s.len < 50000))
+    .filter((s) => !s.code.includes("__CF$cv$params") && s.attrs !== 'type="application/ld+json"')
+    .map((s) => ({ idx: s.idx, attrs: s.attrs, code: s.code.slice(0, 6000) }));
+
+  const extSrcs = scripts
+    .map((s) => s.attrs.match(/src=["']([^"']+)["']/i)?.[1])
+    .filter((u) => u && u.includes("cimanow") && !u.includes("jquery") && !u.includes("owl.carousel") && !u.includes("0CYA6X1KhKIS"));
+  info.watchingSpecificExternalJs = [];
+  let computedToken = "";
+
+  for (const srcUrl of extSrcs) {
+    try {
+      const fullJsUrl = new URL(srcUrl, watchUrl).toString();
+      const jr = await curlReq(fullJsUrl, { proxy, referer: watchUrl, cookieJarFile: jar });
+      const entry = { url: fullJsUrl, len: jr.text.length, preview: jr.text.slice(0, 3000) };
+      // Try running in VM to see if it defines `window._getCoreToken`!
+      const sb = {
+        window: {},
+        document: { cookie: "" },
+        navigator: { userAgent: UA },
+        location: new URL(watchUrl),
+        atob: (b) => Buffer.from(b, "base64").toString("binary"),
+        btoa: (b) => Buffer.from(b, "binary").toString("base64"),
+      };
+      sb.window = sb;
+      sb.self = sb;
+      sb.globalThis = sb;
+      vm.createContext(sb);
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-        targets = await res.json();
-        if (Array.isArray(targets) && targets.length > 0) break;
+        vm.runInContext(jr.text, sb, { timeout: 3000 });
+        if (typeof sb._getCoreToken === "function") {
+          computedToken = sb._getCoreToken();
+          entry.definedGetCoreToken = true;
+          entry.tokenSample = computedToken;
+          entry.fnSource = sb._getCoreToken.toString().slice(0, 2000);
+        }
+      } catch (e) {
+        entry.vmErr = String(e.message || e);
+      }
+      if (jr.text.length < 60000) entry.fullCode = jr.text;
+      info.watchingSpecificExternalJs.push(entry);
+    } catch (e) {
+      info.watchingSpecificExternalJs.push({ url: srcUrl, err: String(e.message || e) });
+    }
+  }
+
+  // Also check inline scripts for `_getCoreToken` definition!
+  for (const s of scripts) {
+    if (s.code.includes("_getCoreToken") && !s.attrs.includes("x19WCM90B19F")) {
+      const sb = {
+        window: {},
+        document: { cookie: "" },
+        navigator: { userAgent: UA },
+        location: new URL(watchUrl),
+        atob: (b) => Buffer.from(b, "base64").toString("binary"),
+        btoa: (b) => Buffer.from(b, "binary").toString("base64"),
+      };
+      sb.window = sb;
+      sb.self = sb;
+      sb.globalThis = sb;
+      vm.createContext(sb);
+      try {
+        vm.runInContext(s.code, sb, { timeout: 3000 });
+        if (typeof sb._getCoreToken === "function") {
+          computedToken = sb._getCoreToken();
+          info.inlineComputedToken = computedToken;
+        }
       } catch {}
     }
-    const pageTarget = targets?.find((t) => t.type === "page") || targets?.[0];
-    if (!pageTarget?.webSocketDebuggerUrl) return { available: true, error: "No CDP target" };
-
-    const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener("open", resolve, { once: true });
-      ws.addEventListener("error", reject, { once: true });
-    });
-
-    let msgId = 1;
-    const pending = new Map();
-    const netTrace = [];
-
-    const cdp = (method, params = {}) =>
-      new Promise((resolve, reject) => {
-        const id = msgId++;
-        pending.set(id, { resolve, reject });
-        ws.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => {
-          if (pending.has(id)) {
-            pending.delete(id);
-            reject(new Error(`CDP timeout: ${method}`));
-          }
-        }, 20000);
-      });
-
-    ws.addEventListener("message", async (ev) => {
-      const msg = JSON.parse(String(ev.data));
-      if (msg.id && pending.has(msg.id)) {
-        const { resolve, reject } = pending.get(msg.id);
-        pending.delete(msg.id);
-        if (msg.error) reject(new Error(msg.error.message));
-        else resolve(msg.result);
-      } else if (msg.method === "Fetch.requestPaused") {
-        const reqUrl = msg.params.request.url;
-        const reqId = msg.params.requestId;
-        // Abort heavy images/CSS-JS-packer/popunder ads so pages load in <1s over SOCKS5!
-        if (
-          /\.(png|jpe?g|gif|webp|svg|woff2?|ttf)(\?|$)/i.test(reqUrl) ||
-          reqUrl.includes("0CYA6X1KhKIS.js") ||
-          reqUrl.includes("llvpn.com") ||
-          reqUrl.includes("keewoach") ||
-          reqUrl.includes("viiukuhe") ||
-          reqUrl.includes("can-get-some") ||
-          reqUrl.includes("fontawesome")
-        ) {
-          cdp("Fetch.fulfillRequest", {
-            requestId: reqId,
-            responseCode: 200,
-            responseHeaders: [{ name: "Content-Type", value: "application/javascript" }],
-            body: "",
-          }).catch(() => {});
-        } else {
-          cdp("Fetch.continueRequest", { requestId: reqId }).catch(() => {});
-        }
-      } else if (msg.method === "Network.requestWillBeSent") {
-        const u = msg.params.request.url;
-        if (!/\.(png|jpe?g|gif|webp|svg|css)(\?|$)/i.test(u) && !u.startsWith("data:")) {
-          netTrace.push({
-            ev: "req",
-            url: u,
-            method: msg.params.request.method,
-            headers: msg.params.request.headers,
-            postData: msg.params.request.postData,
-          });
-        }
-      } else if (msg.method === "Network.responseReceived") {
-        const u = msg.params.response.url;
-        if (!/\.(png|jpe?g|gif|webp|svg|css)(\?|$)/i.test(u) && !u.startsWith("data:")) {
-          netTrace.push({
-            ev: "resp",
-            url: u,
-            status: msg.params.response.status,
-            headers: msg.params.response.headers,
-          });
-        }
-      }
-    });
-
-    await cdp("Page.enable");
-    await cdp("Network.enable");
-    await cdp("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
-    await cdp("Page.addScriptToEvaluateOnNewDocument", {
-      source: `Object.defineProperty(navigator, 'webdriver', { get: () => undefined });`,
-    });
-
-    const evalJs = async (expression) => {
-      const r = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-      return r?.result?.value;
-    };
-
-    const result = { chosenProxy: rawProxy };
-
-    // 1. Navigate directly to `shineUrl` (`https://rm.freex2line.online/loadon/?link=...`) with `referrer: movieUrl` in REAL Xvfb Chrome!
-    await cdp("Page.navigate", { url: shineUrl, referrer: movieUrl });
-    for (let i = 0; i < 20; i++) {
-      await sleep(1000);
-      const st = await evalJs(`({ url: location.href, title: document.title, ready: document.readyState, len: document.body?.innerHTML?.length || 0 })`);
-      if (st && st.ready === "complete" && !st.title.includes("Just a moment") && st.len > 300) break;
-    }
-
-    result.gatewayStep1 = await evalJs(`(() => ({
-      url: location.href,
-      title: document.title,
-      cookie: document.cookie,
-      watchTabsCount: document.querySelectorAll('#watch li').length,
-      htmlSample: document.documentElement?.outerHTML?.slice(0, 6000) || '',
-      scripts: [...document.querySelectorAll('script')].map(s => ({ src: s.src, code: s.innerHTML.slice(0, 1500) })),
-      formsAndLinks: [...document.querySelectorAll('form, a[href], button')].slice(0, 25).map(e => e.outerHTML.slice(0, 400)),
-    }))()`);
-
-    // If gateway has a form or link or timer, wait/interact up to 12s to reach `/watching/`!
-    for (let step = 0; step < 3; step++) {
-      const onWatch = await evalJs(`document.querySelectorAll('#watch li').length > 0 || location.href.includes('/watching/')`);
-      if (onWatch) break;
-      await evalJs(`(() => {
-        const f = document.querySelector('form');
-        if (f) { f.submit(); return 'form-submitted'; }
-        const btn = [...document.querySelectorAll('a[href], button')].find(el =>
-          /watch|continue|skip|مشاهد|انتقل|الرابط|اضغط/i.test(el.innerText || '') || (el.href && el.href.includes('cimanow'))
-        );
-        if (btn) { btn.removeAttribute('target'); btn.click(); return 'clicked'; }
-      })()`);
-      await sleep(4000);
-    }
-
-    result.afterGateway = await evalJs(`(() => ({
-      url: location.href,
-      title: document.title,
-      cookie: document.cookie,
-      hasTokenFn: typeof window._getCoreToken,
-      tokenVal: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
-      tokenFnSrc: typeof window._getCoreToken === 'function' ? window._getCoreToken.toString().slice(0, 1500) : null,
-      watchTabsCount: document.querySelectorAll('#watch li').length,
-      scriptsOnPage: [...document.querySelectorAll('script')].map(s => ({ src: s.src, id: s.id, len: s.innerHTML.length, preview: s.innerHTML.slice(0, 800) })),
-    }))()`);
-
-    if (result.afterGateway?.watchTabsCount > 0) {
-      result.movieWatchingData = await evalJs(`(async () => {
-        const tabs = [...document.querySelectorAll('#watch li')].map(li => ({
-          ariaLabel: li.getAttribute('aria-label'),
-          dataIndex: li.getAttribute('data-index'),
-          dataId: li.getAttribute('data-id'),
-          className: li.className,
-          text: li.innerText.trim(),
-          html: li.innerHTML.slice(0, 500),
-        }));
-        const downloads = [...document.querySelectorAll('#download > li')].map(qLi => ({
-          ariaLabel: qLi.getAttribute('aria-label'),
-          qualityTitle: qLi.querySelector('span, em, h3, strong')?.innerText?.trim() || qLi.innerText.split('\\n')[0],
-          links: [...qLi.querySelectorAll('a[href]')].map(a => ({
-            href: a.href,
-            text: a.innerText.trim().replace(/\\s+/g, ' '),
-            html: a.outerHTML.slice(0, 400),
-          })),
-        }));
-        const switchResults = [];
-        const serverTabs = [...document.querySelectorAll('#watch li:not([aria-label="embed"]):not([aria-label="uptobox"])')]
-          .filter(li => li.getAttribute('data-index') !== '00' && li.getAttribute('data-id'));
-        for (const li of serverTabs) {
-          const idx = li.getAttribute('data-index');
-          const id = li.getAttribute('data-id');
-          const tok = typeof window._getCoreToken === 'function' ? window._getCoreToken() : '';
-          const u = '/wp-content/themes/Cima%20Now%20New/core.php' + (tok ? '?token=' + encodeURIComponent(tok) : '') + (tok ? '&' : '?') + 'action=switch&index=' + encodeURIComponent(idx) + '&id=' + encodeURIComponent(id);
-          try {
-            const r = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-            const txt = await r.text();
-            switchResults.push({ name: li.innerText.trim(), idx, id, status: r.status, tok, resp: txt.slice(0, 600) });
-          } catch (e) {
-            switchResults.push({ name: li.innerText.trim(), idx, id, err: String(e) });
-          }
-        }
-        return { tabs, downloads, switchResults };
-      })()`);
-    }
-
-    result.allCookies = (await cdp("Network.getAllCookies")).cookies;
-    result.netTrace = netTrace.slice(0, 80);
-    ws.close();
-    return result;
-  } catch (e) {
-    return { available: true, error: String(e.stack || e) };
-  } finally {
-    try { proc.kill("SIGKILL"); } catch {}
   }
+
+  // 2. Parse `#watch` server tabs + initial `li[aria-label="embed"]`!
+  const watchSection = watchHtml.match(/<ul[^>]*id=["']watch["'][^>]*>([\s\S]*?)<\/ul>/i)?.[0] || "";
+  info.watchUlHtml = watchSection.slice(0, 5000);
+
+  const liMatches = [...watchSection.matchAll(/<li\b([^>]*)>([\s\S]*?)<\/li>/gi)].map((m) => ({
+    attrs: m[1],
+    ariaLabel: m[1].match(/aria-label=["']([^"']*)["']/i)?.[1] || "",
+    dataIndex: m[1].match(/data-index=["']([^"']*)["']/i)?.[1] || "",
+    dataId: m[1].match(/data-id=["']([^"']*)["']/i)?.[1] || "",
+    inner: m[2].trim(),
+  }));
+  info.parsedWatchTabs = liMatches;
+
+  // 3. Call `core.php` for EVERY valid server tab (test both WITH token and WITHOUT token on first tab!)
+  info.switchResults = [];
+  const validTabs = liMatches.filter(
+    (t) => t.ariaLabel !== "embed" && t.ariaLabel !== "uptobox" && t.dataIndex !== "00" && t.dataId
+  );
+  for (let i = 0; i < validTabs.length; i++) {
+    const t = validTabs[i];
+    if (i === 0 && computedToken) {
+      // Test WITHOUT token first to see what core.php does!
+      const noTokUrl = `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
+      const rNoTok = await curlReq(noTokUrl, {
+        proxy,
+        referer: watchUrl,
+        cookieJarFile: jar,
+        extraHeaders: ["X-Requested-With: XMLHttpRequest"],
+      });
+      info.switchWithoutTokenTest = { status: rNoTok.status, resp: rNoTok.text.slice(0, 500) };
+    }
+
+    const switchUrl =
+      `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
+      (computedToken ? `?token=${encodeURIComponent(computedToken)}&` : `?`) +
+      `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
+    const sr = await curlReq(switchUrl, {
+      proxy,
+      referer: watchUrl,
+      cookieJarFile: jar,
+      extraHeaders: ["X-Requested-With: XMLHttpRequest"],
+    });
+    info.switchResults.push({
+      serverName: t.inner.replace(/<[^>]+>/g, "").trim(),
+      dataIndex: t.dataIndex,
+      dataId: t.dataId,
+      status: sr.status,
+      resp: sr.text.trim(),
+    });
+  }
+
+  // 4. Parse `<ul id="download">` quality groups & links!
+  const dlIdx = watchHtml.search(/<ul[^>]*id=["']download["']/i);
+  const dlSlice = dlIdx >= 0 ? watchHtml.slice(dlIdx, dlIdx + 18000) : "";
+  info.downloadHtmlSample = dlSlice.slice(0, 8000);
+  const dlLinks = [...dlSlice.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].map((m) => ({
+    href: m[1].replace("web2.cnvids.com", "fr.cimanow.cc"),
+    rawHref: m[1],
+    text: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+  }));
+  info.downloadLinks = dlLinks;
+
+  return info;
 }
 
 async function main() {
   const out = {};
-  const ranked = await getRankedProxies();
-  out.rankedProxies = ranked;
-  const proxies = ranked.map((x) => x.proxy);
+  const proxies = await getWorkingProxies();
+  out.proxies = proxies;
+  const p0 = proxies[0];
 
-  const movieUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/";
-  const epUrl = "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/";
-  const shineUrl =
-    "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS1mYWxsLTItZGVhZHBvaW50LTIwMjYtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1L3dhdGNoaW5nLw==";
+  // Also fetch `nbm2oHaQcN60y6Ozwm.js?v=2.3` that we saw in `<link rel="preload" as="script">`!
+  try {
+    const nbm = await curlReq("https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3", {
+      proxy: p0,
+      referer: "https://cimanow.cc/home/",
+    });
+    out.nbmPreloadScript = { status: nbm.status, len: nbm.text.length, preview: nbm.text.slice(0, 2500) };
+  } catch (e) {
+    out.nbmPreloadScript = { err: String(e.message || e) };
+  }
 
-  out.curlMatrix = await probeWatchingMatrixWithCurl(proxies, movieUrl, shineUrl);
-  out.xvfbGateway = await runFastXvfbChrome(ranked, movieUrl, epUrl, shineUrl);
+  const testItems = [
+    {
+      name: "ForeignMovie_Fall2",
+      url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/",
+    },
+    {
+      name: "ArabicMovie_BeitElRuby",
+      url: "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-%d8%a8%d9%8a%d8%aa-%d8%a7%d9%84%d8%b1%d9%88%d8%a8%d9%8a-2023/",
+    },
+    {
+      name: "ForeignEpisode_LupinS4E1",
+      url: "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/",
+    },
+  ];
+
+  out.itemFlows = {};
+  for (const item of testItems) {
+    const mv = await curlReq(item.url, { proxy: p0, referer: "https://cimanow.cc/home/" });
+    const shineMatch = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i);
+    const shineUrl = shineMatch?.[1] || "";
+
+    const chain = shineUrl ? await followGatewayChain(shineUrl, item.url, p0) : { error: "No .shine href found" };
+    const flowReport = {
+      shineUrl,
+      hops: chain.hops,
+      cookiesAtEnd: chain.cookiesAtEnd,
+    };
+
+    if (chain.finalResp && (chain.finalResp.text.includes('id="watch"') || chain.finalResp.text.includes("id='watch'"))) {
+      const finalHop = chain.hops[chain.hops.length - 1];
+      flowReport.watching = await inspectWatchingPage(chain.finalResp.text, finalHop.reqUrl, p0, chain.jar);
+    }
+
+    if (chain.jar && fs.existsSync(chain.jar)) try { fs.unlinkSync(chain.jar); } catch {}
+    out.itemFlows[item.name] = flowReport;
+  }
+
+  // Test if that final Referer discovered in `hops` unlocks `/watching/` DIRECTLY in 1 request without visiting `rm.freex2line.online`!
+  const firstFlowHops = out.itemFlows.ForeignMovie_Fall2?.hops || [];
+  const winningHop = firstFlowHops.find((h) => h.reqUrl?.includes("/watching/") && h.status === 200);
+  if (winningHop?.reqReferer) {
+    const directTest = await curlReq(
+      "https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad2-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/watching/",
+      { proxy: p0, referer: winningHop.reqReferer, follow: false }
+    );
+    out.oneShotRefererBypassTest = {
+      testedReferer: winningHop.reqReferer,
+      status: directTest.status,
+      hasWatch: directTest.text.includes('id="watch"') && directTest.text.includes("data-index"),
+      len: directTest.text.length,
+    };
+  }
 
   fs.writeFileSync("cimanow_recon.json", JSON.stringify(out, null, 2));
-  console.log("Wrote v6 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
+  console.log("Wrote v7 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
 }
 
 main();
