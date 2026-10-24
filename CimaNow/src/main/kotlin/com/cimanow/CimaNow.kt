@@ -168,6 +168,7 @@ class CimaNow : MainAPI() {
 
         val anchors = doc.select("section[aria-label=posts] article[aria-label=post] > a[href]")
             .ifEmpty { doc.select("article[aria-label=post] > a[href]") }
+            .ifEmpty { doc.select("section a[href]:has(li[aria-label=title]), section a[href]:has(ul.info), a[href]:has(li[aria-label=title])") }
             .ifEmpty { doc.select("section article > a[href], div.owl-carousel article > a[href], article > a[href]") }
 
         for (a in anchors) {
