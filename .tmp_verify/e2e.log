@@ -1,22 +1,26 @@
-Found 15 proxies: ['socks4://203.77.239.219:50574', 'socks4://202.79.35.143:4153', 'socks5h://103.100.158.115:10809', 'socks5h://43.245.199.34:1080', 'socks5h://45.74.31.42:8983', 'socks4://198.12.37.25:1080']
+Found 19 proxies: ['socks5h://45.74.31.46:13981', 'socks5h://42.115.72.47:1082', 'socks4://103.182.22.200:9000', 'socks5h://185.68.244.129:1080', 'socks5h://45.74.31.42:4765', 'socks4://200.108.50.254:4145']
 
 === USER PRIMARY TARGET: Tokyo Revengers Santen Sensou-hen Ep 4 (https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4) ===
-  [open_ws socks4://203.77.239.219:50574] GET watch=403 len=5175
-  [open_ws socks4://202.79.35.143:4153] GET watch=403 len=5175
-  [open_ws socks5h://103.100.158.115:10809] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
-  [open_ws socks5h://43.245.199.34:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
-  [open_ws socks5h://45.74.31.42:8983] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x7dac581f5d10>, 'Connection to witanime.site timed out. (connect timeout=12)'))
-  [open_ws socks4://198.12.37.25:1080] EXC ConnectionError: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by NewConnectionError("SOCKSHTTPSConnection(host='witanime.site', port=443): Failed to establish a new connection: [Errno 104] Connection reset by peer"))
-  [open_ws socks5h://89.22.229.195:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
-  [open_ws socks4://103.60.138.2:4153] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x7dac581f79d0>, 'Connection to witanime.site timed out. (connect timeout=12)'))
-  [open_ws socks5h://45.74.31.47:5561] EXC ReadTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Read timed out. (read timeout=12)
-  [open_ws socks5h://101.36.112.205:1081] GET watch=403 len=5175
-  [open_ws socks5h://45.74.31.46:9267] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x7dac581f4a50>, 'Connection to witanime.site timed out. (connect timeout=12)'))
-  [open_ws socks5h://45.74.31.46:5878] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
-  [open_ws socks5h://67.204.153.223:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://45.74.31.46:13981] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://42.115.72.47:1082] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14d310>, 'Connection to witanime.site timed out. (connect timeout=12)'))
+  [open_ws socks4://103.182.22.200:9000] GET watch=403 len=5591
+  [open_ws socks5h://185.68.244.129:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://45.74.31.42:4765] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14ead0>, 'Connection to witanime.site timed out. (connect timeout=12)'))
+  [open_ws socks4://200.108.50.254:4145] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14ee90>, 'Connection to witanime.site timed out. (connect timeout=12)'))
+  [open_ws socks5h://45.74.31.47:9698] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks4://203.77.239.219:50574] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14e710>, 'Connection to witanime.site timed out. (connect timeout=12)'))
+  [open_ws socks5h://176.65.132.138:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://80.79.241.118:1080] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14e850>, 'Connection to witanime.site timed out. (connect timeout=12)'))
   [open_ws socks5h://45.74.31.46:9589] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
-  [open_ws socks5h://5.191.253.56:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks4://171.241.15.131:42554] GET watch=403 len=5591
+  [open_ws socks4://185.157.111.3:5678] GET watch=403 len=5175
+  [open_ws socks5h://103.136.107.70:1080] EXC ConnectionError: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by NewConnectionError("SOCKSHTTPSConnection(host='witanime.site', port=443): Failed to establish a new connection: [Errno 104] Connection reset by peer"))
+  [open_ws socks5h://45.74.31.46:4952] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://67.204.153.223:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://103.71.23.31:1080] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://45.74.31.40:14237] POST /watch/tokyo-revengers-santen-sensou-hen/4/sources -> 404 body={"message":"Not Found."} cookies=dict_keys(['XSRF-TOKEN', 'witanime-session'])
+  [open_ws socks5h://42.115.72.47:1046] EXC ConnectTimeout: SOCKSHTTPSConnectionPool(host='witanime.site', port=443): Max retries exceeded with url: /watch/tokyo-revengers-santen-sensou-hen/4 (Caused by ConnectTimeoutError(<SOCKSHTTPSConnection(host='witanime.site', port=443) at 0x76714e14cf50>, 'Connection to witanime.site timed out. (connect timeout=12)'))
 Traceback (most recent call last):
-  File "<stdin>", line 354, in <module>
-  File "<stdin>", line 125, in resolve_all_gates
+  File "<stdin>", line 362, in <module>
+  File "<stdin>", line 133, in resolve_all_gates
 AssertionError: Could not open watch session for https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4
