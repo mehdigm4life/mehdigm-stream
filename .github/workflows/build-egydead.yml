@@ -32,54 +32,36 @@ jobs:
       - name: Live Cloudflare & Transport Forensics (Temporary Dev Probe)
         id: cf_probe
         run: |
-          python3 -m pip install --quiet patchright pillow curl_cffi
-          xvfb-run -a --server-args="-screen 0 412x915x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
+          python3 -m pip install --quiet -U "camoufox[geoip]" curl_cffi
+          python3 -m camoufox fetch
+          xvfb-run -a --server-args="-screen 0 1280x900x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
           import time, json
-          from PIL import Image
-          from patchright.sync_api import sync_playwright
+          from camoufox.sync_api import Camoufox
           from curl_cffi import requests as creq
 
-          UA = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch(
-                  channel="chrome",
-                  headless=False,
-                  args=[
-                      "--no-sandbox",
-                      "--disable-blink-features=AutomationControlled",
-                      "--window-size=412,915",
-                  ]
-              )
-              ctx = browser.new_context(
-                  viewport={"width": 412, "height": 915},
-                  locale="ar-EG"
-              )
-              page = ctx.new_page()
+          with Camoufox(headless="virtual", humanize=True, window=(412, 915), locale="ar-EG") as browser:
+              page = browser.new_page()
+              page.set_viewport_size({"width": 412, "height": 915})
               real_ua = page.evaluate("navigator.userAgent")
-              print(f"[PATCHRIGHT] native consistent UA = {real_ua}")
-              t0 = time.time()
-              resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=20000)
-              print(f"[PATCHRIGHT] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              webgl_rend = page.evaluate("""() => {
+                  const c = document.createElement('canvas');
+                  const gl = c.getContext('webgl');
+                  const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+                  return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'none';
+              }""")
+              print(f"[CAMOUFOX] UA={real_ua} | WebGL={webgl_rend}")
 
-              # Poll & auto-tap using exact dir-aware coordinate!
+              t0 = time.time()
+              resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=25000)
+              print(f"[CAMOUFOX] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+
               for attempt in range(1, 14):
                   time.sleep(2.2)
                   cards = page.locator("li.movieItem").count()
-                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in ctx.cookies()]
+                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in page.context.cookies()]
                   if cards > 0:
-                      print(f">>> SOLVED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
+                      print(f">>> LIVE CLOUDFLARE BYPASSED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
                       break
-                  if any(c[0] == "cf_clearance" for c in cookies_now):
-                      probe_h3 = page.evaluate("""async () => {
-                          const r = await fetch('/h3/', {credentials: 'include'});
-                          const txt = await r.text();
-                          return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem'), title: (txt.match(/<title>([^<]+)<\/title>/) || ['',''])[1]};
-                      }""")
-                      print(f"[CF_CLEARANCE PRESENT AT POLL #{attempt}!] fetch('/h3/') -> {probe_h3}")
-                      if probe_h3.get("movieItem"):
-                          page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=15000)
-                          break
                   info = page.evaluate("""() => {
                       const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
                       let target = null;
@@ -113,39 +95,28 @@ jobs:
                       page.mouse.click(click_x, cy)
 
               cards = page.locator("li.movieItem").count()
-              cookies = ctx.cookies()
-              print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], len(c['value'])) for c in cookies]}")
+              cookies = page.context.cookies()
+              print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], c['domain'], len(c['value'])) for c in cookies]}")
 
               if cards > 0:
-                  t_f = time.time()
-                  f_mov = page.evaluate("""async () => {
-                      const r = await fetch('/movies/', {credentials: 'include'});
-                      const txt = await r.text();
-                      return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
-                  }""")
-                  print(f"[TEST window.fetch('/movies/')] ({int((time.time()-t_f)*1000)}ms) -> {f_mov}")
+                  for path in ["/movies/", "/movies/page/2/", "/?s=Lupin"]:
+                      tf = time.time()
+                      res = page.evaluate("""async (p) => {
+                          const r = await fetch(p, {credentials: 'include'});
+                          const txt = await r.text();
+                          return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
+                      }""", path)
+                      print(f"[TEST window.fetch({path!r})] ({int((time.time()-tf)*1000)}ms) -> {res}")
 
-                  t_s = time.time()
-                  f_srch = page.evaluate("""async () => {
-                      const r = await fetch('/?s=Lupin', {credentials: 'include'});
-                      const txt = await r.text();
-                      return {status: r.status, len: txt.length, movieItem: txt.includes('movieItem')};
-                  }""")
-                  print(f"[TEST window.fetch('/?s=Lupin')] ({int((time.time()-t_s)*1000)}ms) -> {f_srch}")
-
-                  cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131", headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
-                  print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
-
+                  cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies if 'egydead' in c['domain'])
                   import urllib.request
                   req_std = urllib.request.Request("https://tv10.egydead.live/movies/", headers={"User-Agent": real_ua, "Cookie": cookie_hdr})
                   try:
                       with urllib.request.urlopen(req_std, timeout=8) as uresp:
                           ubody = uresp.read().decode("utf-8", "ignore")
-                          print(f"[TEST stdlib TLS + cf_clearance] -> status={uresp.status}, len={len(ubody)}, movieItem={'movieItem' in ubody}")
+                          print(f"[TEST non-browser TLS (stdlib/OkHttp analog) + cf_clearance] -> status={uresp.status}, len={len(ubody)}, movieItem={'movieItem' in ubody}")
                   except Exception as ue:
-                      print(f"[TEST stdlib TLS + cf_clearance] -> BLOCKED ({ue})")
-              browser.close()
+                      print(f"[TEST non-browser TLS (stdlib/OkHttp analog) + cf_clearance] -> BLOCKED ({ue})")
           PY
 
       - name: Configure Android SDK, test, and build EgyDead plugin
