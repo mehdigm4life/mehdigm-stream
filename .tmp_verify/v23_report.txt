@@ -2,73 +2,14 @@
 WitAnime.cs3 size=147092 entries=['manifest.json', 'classes.dex'] manifest={'requiresResources': False, 'version': 23, 'pluginClassName': 'com.witanime.WitAnimePlugin', 'name': 'WitAnime'}
 DEX symbol verification PASSED!
 plugins.json WitAnime entry: {"iconUrl": "https://witanime.site/favicon.ico", "apiVersion": 1, "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream", "fileSize": 147092, "status": 1, "language": "ar", "authors": ["mehdigm4life"], "tvTypes": ["Anime", "AnimeMovie", "OVA", "TvSeries", "Movie", "Cartoon"], "version": 23, "internalName": "WitAnime", "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/WitAnime.cs3", "name": "ويت أنمي (WitAnime)", "description": "ويت أنمي (WitAnime) — أنمي مترجم ومدبلج وأفلام أنمي بجودة عالية."}
-Found test transport proxy in 17.81s: http://144.124.251.24:10187
+Found 4 verified watch-page proxies in 13.55s: ['socks5h://176.65.132.138:1080', 'socks5h://45.74.31.42:12894', 'socks5h://45.74.31.40:7121', 'socks5h://45.74.31.40:12566']
 
 === 2. Testing v23 Streaming Pipeline on https://witanime.site/watch/black-clover-2nd-season/3 (simulating residential 429 at gate #6) ===
+First 8 ordered tokens: [('stream', 'videas', 'FHD'), ('stream', 'videa', 'FHD'), ('stream', 'ok', 'FHD'), ('stream', 'mp4upload', 'HD'), ('stream', 'hgcloud', 'FHD'), ('stream', 'mega', 'FHD'), ('stream', 'yonaplay', 'FHD'), ('download', 'gofile', 'FHD')]
+  Gate #1 transport skip: KeyError
+  Gate #2 transport skip: KeyError
+  [+1850ms] Real HTTP 429 at gate #3; v23 stops immediately!
+SUMMARY https://witanime.site/watch/black-clover-2nd-season/3: unlocked=0, playable_links=0, first_link=-1ms, total_loadLinks=1850ms
 Traceback (most recent call last):
-  File "/usr/lib/python3/dist-packages/urllib3/connectionpool.py", line 773, in urlopen
-    self._prepare_proxy(conn)
-    ~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/usr/lib/python3/dist-packages/urllib3/connectionpool.py", line 1054, in _prepare_proxy
-    conn.connect()
-    ~~~~~~~~~~~~^^
-  File "/usr/lib/python3/dist-packages/urllib3/connection.py", line 776, in connect
-    self._tunnel()
-    ~~~~~~~~~~~~^^
-  File "/usr/lib/python3.14/http/client.py", line 1000, in _tunnel
-    (version, code, message) = response._read_status()
-                               ~~~~~~~~~~~~~~~~~~~~~^^
-  File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
-    raise RemoteDisconnected("Remote end closed connection without"
-                             " response")
-http.client.RemoteDisconnected: Remote end closed connection without response
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/usr/lib/python3/dist-packages/requests/adapters.py", line 644, in send
-    resp = conn.urlopen(
-        method=request.method,
-    ...<9 lines>...
-        chunked=chunked,
-    )
-  File "/usr/lib/python3/dist-packages/urllib3/connectionpool.py", line 841, in urlopen
-    retries = retries.increment(
-        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
-    )
-  File "/usr/lib/python3/dist-packages/urllib3/util/retry.py", line 490, in increment
-    raise reraise(type(error), error, _stacktrace)
-          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3/dist-packages/urllib3/util/util.py", line 38, in reraise
-    raise value.with_traceback(tb)
-  File "/usr/lib/python3/dist-packages/urllib3/connectionpool.py", line 773, in urlopen
-    self._prepare_proxy(conn)
-    ~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/usr/lib/python3/dist-packages/urllib3/connectionpool.py", line 1054, in _prepare_proxy
-    conn.connect()
-    ~~~~~~~~~~~~^^
-  File "/usr/lib/python3/dist-packages/urllib3/connection.py", line 776, in connect
-    self._tunnel()
-    ~~~~~~~~~~~~^^
-  File "/usr/lib/python3.14/http/client.py", line 1000, in _tunnel
-    (version, code, message) = response._read_status()
-                               ~~~~~~~~~~~~~~~~~~~~~^^
-  File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
-    raise RemoteDisconnected("Remote end closed connection without"
-                             " response")
-urllib3.exceptions.ProtocolError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "<stdin>", line 255, in <module>
-  File "/usr/lib/python3/dist-packages/requests/sessions.py", line 602, in get
-    return self.request("GET", url, **kwargs)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3/dist-packages/requests/sessions.py", line 589, in request
-    resp = self.send(prep, **send_kwargs)
-  File "/usr/lib/python3/dist-packages/requests/sessions.py", line 703, in send
-    r = adapter.send(request, **kwargs)
-  File "/usr/lib/python3/dist-packages/requests/adapters.py", line 659, in send
-    raise ConnectionError(err, request=request)
-requests.exceptions.ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+  File "<stdin>", line 359, in <module>
+AssertionError: Expected >=5 links, got 0
