@@ -53,82 +53,74 @@ jobs:
               )
               ctx = browser.new_context(
                   viewport={"width": 412, "height": 915},
-                  device_scale_factor=2,
-                  user_agent=UA,
                   locale="ar-EG"
               )
               page = ctx.new_page()
+              real_ua = page.evaluate("navigator.userAgent")
+              print(f"[PATCHRIGHT] native consistent UA = {real_ua}")
               t0 = time.time()
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=20000)
               print(f"[PATCHRIGHT] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
-              time.sleep(3.5)
 
-              # Inspect exact DOM & screenshot of Turnstile box at y~378!
-              info = page.evaluate("""() => {
-                  const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
-                  let target = null;
-                  if (inp && inp.parentElement) {
-                      const r = inp.parentElement.getBoundingClientRect();
-                      if (r.width >= 200 && r.height >= 45) {
-                          target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, html: inp.parentElement.outerHTML.slice(0, 300)};
-                      }
-                  }
-                  if (!target) {
-                      const divs = document.querySelectorAll('div');
-                      for (let i = 0; i < divs.length; i++) {
-                          const d = divs[i];
-                          if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
-                          const r = d.getBoundingClientRect();
-                          if (d.children.length === 0 && r.width >= 200 && r.width <= 420 && r.height >= 45 && r.height <= 95 && r.top > 0) {
-                              target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height, parentHtml: d.parentElement ? d.parentElement.outerHTML.slice(0, 300) : ''};
-                              break;
-                          }
-                      }
-                  }
-                  return {title: document.title, dir: document.documentElement.dir, target};
-              }""")
-              print("[PATCHRIGHT +3.5s] info =", json.dumps(info, ensure_ascii=False))
-
-              page.screenshot(path="/tmp/turnstile.png")
-              im = Image.open("/tmp/turnstile.png").convert("RGB")
-              print(f"[SCREENSHOT] actual pixel size={im.size} (scale=2 -> 824x1830)")
-              if info["target"]:
-                  t = info["target"]
-                  # Inspect CSS row y = top + height/2 (multiply by 2 for device_scale_factor=2!)
-                  cy_css = t["top"] + t["height"] / 2.0
-                  py = int(cy_css * 2)
-                  # Find dark/border pixels across the widget width to pinpoint the exact checkbox X!
-                  dark_xs_css = []
-                  for cx in range(int(t["left"]), int(t["right"])):
-                      r, g, b = im.getpixel((cx * 2, py))
-                      if (r, g, b) not in ((255,255,255), (250,250,250), (34,34,34), (35,35,35), (249,249,249)):
-                          dark_xs_css.append((cx, (r,g,b)))
-                  print(f"[WIDGET PIXEL SCAN at y_css={cy_css}] active CSS X samples: first5={dark_xs_css[:8]}, last5={dark_xs_css[-8:]}")
-
-              # Now auto-tap using our exact selector!
-              for attempt in range(1, 6):
+              # Poll & auto-tap re-evaluating DOM every iteration!
+              for attempt in range(1, 9):
+                  time.sleep(2.5)
                   cards = page.locator("li.movieItem").count()
                   if cards > 0:
-                      print(f">>> SOLVED BEFORE TAP #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r} <<<")
+                      print(f">>> SOLVED AT ATTEMPT #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r} <<<")
                       break
+                  info = page.evaluate("""() => {
+                      const allRects = [];
+                      for (const el of document.querySelectorAll('div, iframe, input')) {
+                          const r = el.getBoundingClientRect();
+                          if (r.width >= 40 && r.height >= 20) {
+                              allRects.push({tag: el.tagName, id: el.id, name: el.getAttribute('name'), cls: (el.className||'').toString().slice(0,30), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), ch: el.children.length});
+                          }
+                      }
+                      const inp = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
+                      let target = null;
+                      if (inp && inp.parentElement) {
+                          const r = inp.parentElement.getBoundingClientRect();
+                          if (r.width >= 180 && r.height >= 40) {
+                              target = {via: 'inputParent', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height};
+                          }
+                      }
+                      if (!target) {
+                          const divs = document.querySelectorAll('div');
+                          for (let i = 0; i < divs.length; i++) {
+                              const d = divs[i];
+                              if (d.closest('.footer, footer, [role="contentinfo"]')) continue;
+                              const r = d.getBoundingClientRect();
+                              if (d.children.length === 0 && r.width >= 180 && r.width <= 420 && r.height >= 45 && r.height <= 95 && r.top > 0) {
+                                  target = {via: 'leafDiv', left: r.left, right: r.right, top: r.top, width: r.width, height: r.height};
+                                  break;
+                              }
+                          }
+                      }
+                      return {title: document.title, dir: document.documentElement.dir, bodyText: (document.body ? document.body.innerText.slice(0, 180).replace(/\\n+/g, ' | ') : ''), target, rects: allRects.slice(0, 15)};
+                  }""")
+                  print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] info={json.dumps(info, ensure_ascii=False)}")
                   t = info["target"]
                   if t:
-                      # In RTL (<html dir="rtl">), check if checkbox is on right (right - 28) or left (left + 28)
+                      if attempt == 2:
+                          page.screenshot(path="/tmp/turnstile.png")
+                          im = Image.open("/tmp/turnstile.png").convert("RGB")
+                          cy_px = int(t["top"] + t["height"] / 2.0)
+                          xs = [x for x in range(int(t["left"]), int(t["right"])) if im.getpixel((x, cy_px)) not in ((255,255,255),(250,250,250),(249,249,249),(34,34,34),(35,35,35))]
+                          print(f"[PIXEL SCAN y={cy_px}] w={im.size}, non-bg xs first8={xs[:8]}, last8={xs[-8:]}")
                       is_rtl = (info.get("dir") or "").lower() == "rtl"
                       x1 = (t["right"] - 28) if is_rtl else (t["left"] + 28)
                       x2 = (t["left"] + 28) if is_rtl else (t["right"] - 28)
                       cy = t["top"] + t["height"] / 2.0
-                      click_x = x1 if attempt % 2 == 1 else x2
+                      click_x = x1 if attempt % 2 == 0 else x2
                       print(f"[TAP #{attempt}] clicking ({click_x}, {cy}) (is_rtl={is_rtl})")
                       page.mouse.click(click_x, cy)
-                  time.sleep(3.5)
 
               cards = page.locator("li.movieItem").count()
               cookies = ctx.cookies()
               print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], len(c['value'])) for c in cookies]}")
 
               if cards > 0:
-                  # Test 1: window.fetch inside solved browser (Tier 3A persistent WebView model!)
                   t_f = time.time()
                   f_mov = page.evaluate("""async () => {
                       const r = await fetch('/movies/', {credentials: 'include'});
@@ -145,13 +137,12 @@ jobs:
                   }""")
                   print(f"[TEST window.fetch('/?s=Lupin')] ({int((time.time()-t_s)*1000)}ms) -> {f_srch}")
 
-                  # Test 2: Does curl_cffi or Python urllib (non-Chrome TLS) work with extracted cf_clearance?
                   cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
-                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131_android", headers={"User-Agent": UA, "Cookie": cookie_hdr}, timeout=8)
+                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131", headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
                   print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
 
                   import urllib.request
-                  req_std = urllib.request.Request("https://tv10.egydead.live/movies/", headers={"User-Agent": UA, "Cookie": cookie_hdr})
+                  req_std = urllib.request.Request("https://tv10.egydead.live/movies/", headers={"User-Agent": real_ua, "Cookie": cookie_hdr})
                   try:
                       with urllib.request.urlopen(req_std, timeout=8) as uresp:
                           ubody = uresp.read().decode("utf-8", "ignore")
