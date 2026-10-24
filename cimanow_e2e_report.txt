@@ -1,4 +1,6 @@
 === STEP 1: :CimaNow:make ===
+Downloading https://services.gradle.org/distributions/gradle-8.12-bin.zip
+.............10%.............20%.............30%.............40%.............50%.............60%.............70%.............80%.............90%.............100%
 
 Welcome to Gradle 8.12!
 
@@ -11,6 +13,10 @@ For more details see https://docs.gradle.org/8.12/release-notes.html
 
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.12/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Daemon will be stopped at the end of the build 
+
+> Configure project :Anime3rb
+Fetching JAR: cloudstream.jar
+
 > Task :CimaNow:clean UP-TO-DATE
 > Task :CimaNow:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :CimaNow:preBuild UP-TO-DATE
@@ -30,7 +36,7 @@ Compiled dex to /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/in
 > Task :CimaNow:make
 Made CloudStream package at /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/CimaNow.cs3
 
-BUILD SUCCESSFUL in 41s
+BUILD SUCCESSFUL in 1m 38s
 10 actionable tasks: 9 executed, 1 up-to-date
 MAKE_RC=0
 === STEP 2: :CimaNow:testDebugUnitTest (CIMANOW_LIVE_E2E=1) ===
@@ -39,8 +45,8 @@ Initialized jansi services in: /home/runner/.gradle/native
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.12/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Starting process 'Gradle build daemon'. Working directory: /home/runner/.gradle/daemon/8.12 Command: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.prefs/java.util.prefs=ALL-UNNAMED --add-opens=java.base/java.nio.charset=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.xml/javax.xml.namespace=ALL-UNNAMED -Xmx2048m -Dfile.encoding=UTF-8 -Duser.country -Duser.language=en -Duser.variant -cp /home/runner/.gradle/wrapper/dists/gradle-8.12-bin/cetblhg4pflnnks72fxwobvgv/gradle-8.12/lib/gradle-daemon-main-8.12.jar -javaagent:/home/runner/.gradle/wrapper/dists/gradle-8.12-bin/cetblhg4pflnnks72fxwobvgv/gradle-8.12/lib/agents/gradle-instrumentation-agent-8.12.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.12
 Successfully started process 'Gradle build daemon'
-An attempt to start the daemon took 1.011 secs.
-The client will now receive all logging from the daemon (pid: 2567). The daemon log file: /home/runner/.gradle/daemon/8.12/daemon-2567.out.log
+An attempt to start the daemon took 0.986 secs.
+The client will now receive all logging from the daemon (pid: 2618). The daemon log file: /home/runner/.gradle/daemon/8.12/daemon-2618.out.log
 Daemon will be stopped at the end of the build 
 Using 4 worker leases.
 Received JVM installation metadata from '/usr/lib/jvm/temurin-17-jdk-amd64': {JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64, JAVA_VERSION=17.0.20.1, JAVA_VENDOR=Eclipse Adoptium, RUNTIME_NAME=OpenJDK Runtime Environment, RUNTIME_VERSION=17.0.20.1+1, VM_NAME=OpenJDK 64-Bit Server VM, VM_VERSION=17.0.20.1+1, VM_VENDOR=Eclipse Adoptium, OS_ARCH=amd64}
@@ -55,7 +61,7 @@ Included projects: [root project 'MehdigmStream', project ':Anime3rb', project '
 > Configure project :
 Evaluating root project 'MehdigmStream' using build file '/home/runner/work/mehdigm-stream/mehdigm-stream/build.gradle.kts'.
 Using default execution profile
-Build 44801fc3-3e72-49ac-9e41-9451254ac27e is started
+Build 6a8cb2f4-5e6d-4041-a35c-ed71bfedc2a1 is started
 Using Kotlin Gradle Plugin gradle85 variant
 Using default execution profile
 Using Kotlin Gradle Plugin gradle85 variant
@@ -178,17 +184,17 @@ Resolve mutations for :CimaNow:checkKotlinGradlePluginConfigurationErrors (Threa
 
 > Task :CimaNow:checkKotlinGradlePluginConfigurationErrors SKIPPED
 Skipping task ':CimaNow:checkKotlinGradlePluginConfigurationErrors' as task onlyIf 'errorDiagnostics are present' is false.
-Resolve mutations for :CimaNow:preBuild (Thread[Execution worker,5,main]) started.
-:CimaNow:preBuild (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:preBuild (Thread[included builds,5,main]) started.
+:CimaNow:preBuild (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:preBuild UP-TO-DATE
 Skipping task ':CimaNow:preBuild' as it has no actions.
-Resolve mutations for :CimaNow:preDebugBuild (Thread[Execution worker,5,main]) started.
-:CimaNow:preDebugBuild (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:preDebugBuild (Thread[included builds,5,main]) started.
+:CimaNow:preDebugBuild (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:preDebugBuild UP-TO-DATE
 Skipping task ':CimaNow:preDebugBuild' as it has no actions.
-Resolve mutations for :CimaNow:generateDebugResValues (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:generateDebugResValues (Thread[included builds,5,main]) started.
 :CimaNow:generateDebugResValues (Thread[Execution worker,5,main]) started.
 
 > Task :CimaNow:generateDebugResValues UP-TO-DATE
@@ -196,14 +202,14 @@ Caching disabled for task ':CimaNow:generateDebugResValues' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugResValues' as it is up-to-date.
 Resolve mutations for :CimaNow:generateDebugResources (Thread[Execution worker,5,main]) started.
-:CimaNow:generateDebugResources (Thread[Execution worker,5,main]) started.
+:CimaNow:generateDebugResources (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:generateDebugResources UP-TO-DATE
 Caching disabled for task ':CimaNow:generateDebugResources' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugResources' as it is up-to-date.
-Resolve mutations for :CimaNow:packageDebugResources (Thread[Execution worker,5,main]) started.
-:CimaNow:packageDebugResources (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:packageDebugResources (Thread[included builds,5,main]) started.
+:CimaNow:packageDebugResources (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:packageDebugResources UP-TO-DATE
 Caching disabled for task ':CimaNow:packageDebugResources' because:
@@ -223,48 +229,144 @@ Resolve mutations for :CimaNow:generateDebugRFile (Thread[Execution worker,5,mai
 Caching disabled for task ':CimaNow:generateDebugRFile' because:
   Build cache is disabled
 Skipping task ':CimaNow:generateDebugRFile' as it is up-to-date.
-work action resolve package-aware-r.txt (project :CimaNow) (Thread[Execution worker,5,main]) started.
-Resolve mutations for :CimaNow:compileDebugKotlin (Thread[Execution worker,5,main]) started.
-:CimaNow:compileDebugKotlin (Thread[Execution worker,5,main]) started.
+work action resolve package-aware-r.txt (project :CimaNow) (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:compileDebugKotlin (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:compileDebugKotlin (Thread[Execution worker Thread 2,5,main]) started.
 
 > Task :CimaNow:compileDebugKotlin UP-TO-DATE
 Caching disabled for task ':CimaNow:compileDebugKotlin' because:
   Build cache is disabled
 Skipping task ':CimaNow:compileDebugKotlin' as it is up-to-date.
-Resolve mutations for :CimaNow:javaPreCompileDebug (Thread[included builds,5,main]) started.
-:CimaNow:javaPreCompileDebug (Thread[Execution worker,5,main]) started.
-Resolve mutations for :CimaNow:preDebugUnitTestBuild (Thread[included builds,5,main]) started.
-:CimaNow:preDebugUnitTestBuild (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:javaPreCompileDebug (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:javaPreCompileDebug (Thread[Execution worker Thread 2,5,main]) started.
+Resolve mutations for :CimaNow:preDebugUnitTestBuild (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:preDebugUnitTestBuild (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:preDebugUnitTestBuild UP-TO-DATE
 Skipping task ':CimaNow:preDebugUnitTestBuild' as it has no actions.
-Resolve mutations for :CimaNow:generateDebugUnitTestStubRFile (Thread[included builds,5,main]) started.
-:CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker Thread 2,5,main]) started.
+Resolve mutations for :CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker,5,main]) started.
+:CimaNow:generateDebugUnitTestStubRFile (Thread[Execution worker,5,main]) started.
 
 > Task :CimaNow:javaPreCompileDebug
 Caching disabled for task ':CimaNow:javaPreCompileDebug' because:
   Build cache is disabled
 Task ':CimaNow:javaPreCompileDebug' is not up-to-date because:
   No history is available.
-Resolve mutations for :CimaNow:compileDebugJavaWithJavac (Thread[Execution worker,5,main]) started.
-:CimaNow:compileDebugJavaWithJavac (Thread[Execution worker,5,main]) started.
+
+> Task :CimaNow:generateDebugUnitTestStubRFile
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/junit/junit/4.13.2/junit-4.13.2.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-core/0.5.0/cryptography-core-0.5.0.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/json/json/20240303/json-20240303.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk/0.5.0/cryptography-provider-jdk-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom to /home/runner/.gradle/.tmp/gradle_download1354655682663755842bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-core/0.5.0/cryptography-core-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download9602041629660288972bin
+Downloading https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.pom to /home/runner/.gradle/.tmp/gradle_download16857090342547582728bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk/0.5.0/cryptography-provider-jdk-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download3782833766920448428bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-core/0.5.0/cryptography-core-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download8325953296408756193bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk/0.5.0/cryptography-provider-jdk-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download16307754249676084584bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom]
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom to /home/runner/.gradle/.tmp/gradle_download5284165341226661748bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/hamcrest/hamcrest-parent/1.3/hamcrest-parent-1.3.pom]
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-parent/1.3/hamcrest-parent-1.3.pom to /home/runner/.gradle/.tmp/gradle_download10602246509686599274bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-core-jvm/0.5.0/cryptography-core-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-core-jvm/0.5.0/cryptography-core-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download18124294007146448208bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-bom/0.5.0/cryptography-bom-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bom/0.5.0/cryptography-bom-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download14730559869127704132bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bom/0.5.0/cryptography-bom-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download9987484270536127305bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-core-jvm/0.5.0/cryptography-core-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download12205271296967519167bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk-jvm/0.5.0/cryptography-provider-jdk-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk-jvm/0.5.0/cryptography-provider-jdk-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download2284826547498155130bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk-jvm/0.5.0/cryptography-provider-jdk-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download17634162509335887871bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.0/kotlin-stdlib-2.2.0.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.0/kotlin-stdlib-2.2.0.pom to /home/runner/.gradle/.tmp/gradle_download13989945199734204233bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.0/kotlin-stdlib-2.2.0.module to /home/runner/.gradle/.tmp/gradle_download17732785898735287209bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-bigint/0.5.0/cryptography-bigint-0.5.0.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-random/0.5.0/cryptography-random-0.5.0.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-io-core/0.8.0/kotlinx-io-core-0.8.0.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-core/0.8.0/kotlinx-io-core-0.8.0.pom to /home/runner/.gradle/.tmp/gradle_download1157400081105900309bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-random/0.5.0/cryptography-random-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download4327029902026826050bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bigint/0.5.0/cryptography-bigint-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download17514547929496819617bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-core/0.8.0/kotlinx-io-core-0.8.0.module to /home/runner/.gradle/.tmp/gradle_download15927450497893069264bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bigint/0.5.0/cryptography-bigint-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download9770789285606008137bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-random/0.5.0/cryptography-random-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download4079358577689169028bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-provider-base/0.5.0/cryptography-provider-base-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-base/0.5.0/cryptography-provider-base-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download9135534982538580597bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-base/0.5.0/cryptography-provider-base-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download528865346787373988bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-bigint-jvm/0.5.0/cryptography-bigint-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bigint-jvm/0.5.0/cryptography-bigint-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download10155742004513935920bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bigint-jvm/0.5.0/cryptography-bigint-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download243144006716961725bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-random-jvm/0.5.0/cryptography-random-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-random-jvm/0.5.0/cryptography-random-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download11756275426641657663bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-random-jvm/0.5.0/cryptography-random-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download18442247661885535289bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-io-core-jvm/0.8.0/kotlinx-io-core-jvm-0.8.0.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-core-jvm/0.8.0/kotlinx-io-core-jvm-0.8.0.pom to /home/runner/.gradle/.tmp/gradle_download10333788860287938618bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-core-jvm/0.8.0/kotlinx-io-core-jvm-0.8.0.module to /home/runner/.gradle/.tmp/gradle_download278969561171326803bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-provider-base-jvm/0.5.0/cryptography-provider-base-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-base-jvm/0.5.0/cryptography-provider-base-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download13171779366376001285bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-base-jvm/0.5.0/cryptography-provider-base-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download3439573497396023279bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring/0.8.0/kotlinx-io-bytestring-0.8.0.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring/0.8.0/kotlinx-io-bytestring-0.8.0.pom to /home/runner/.gradle/.tmp/gradle_download3061311784216186098bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring/0.8.0/kotlinx-io-bytestring-0.8.0.module to /home/runner/.gradle/.tmp/gradle_download2112001021979004661bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1/0.5.0/cryptography-serialization-asn1-0.5.0.pom]
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules/0.5.0/cryptography-serialization-asn1-modules-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules/0.5.0/cryptography-serialization-asn1-modules-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download16877754256474420890bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1/0.5.0/cryptography-serialization-asn1-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download6066353872261428010bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem/0.5.0/cryptography-serialization-pem-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules/0.5.0/cryptography-serialization-asn1-modules-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download3140531273351875130bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1/0.5.0/cryptography-serialization-asn1-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download2140416345069458802bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem/0.5.0/cryptography-serialization-pem-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download282720048675656809bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem/0.5.0/cryptography-serialization-pem-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download2665056021291565128bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring-jvm/0.8.0/kotlinx-io-bytestring-jvm-0.8.0.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring-jvm/0.8.0/kotlinx-io-bytestring-jvm-0.8.0.pom to /home/runner/.gradle/.tmp/gradle_download3596599393334668874bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring-jvm/0.8.0/kotlinx-io-bytestring-jvm-0.8.0.module to /home/runner/.gradle/.tmp/gradle_download16268698635653748674bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem-jvm/0.5.0/cryptography-serialization-pem-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem-jvm/0.5.0/cryptography-serialization-pem-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download1021164682745381425bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem-jvm/0.5.0/cryptography-serialization-pem-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download11149586611145573211bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-jvm/0.5.0/cryptography-serialization-asn1-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-jvm/0.5.0/cryptography-serialization-asn1-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download956328045466282524bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-jvm/0.5.0/cryptography-serialization-asn1-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download2548714329275811938bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules-jvm/0.5.0/cryptography-serialization-asn1-modules-jvm-0.5.0.pom]
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules-jvm/0.5.0/cryptography-serialization-asn1-modules-jvm-0.5.0.pom to /home/runner/.gradle/.tmp/gradle_download10385650226362793156bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules-jvm/0.5.0/cryptography-serialization-asn1-modules-jvm-0.5.0.module to /home/runner/.gradle/.tmp/gradle_download2345230019347117317bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core/1.8.1/kotlinx-serialization-core-1.8.1.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core/1.8.1/kotlinx-serialization-core-1.8.1.pom to /home/runner/.gradle/.tmp/gradle_download11484419819140961851bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-serialization-bom/1.8.1/kotlinx-serialization-bom-1.8.1.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-bom/1.8.1/kotlinx-serialization-bom-1.8.1.pom to /home/runner/.gradle/.tmp/gradle_download12203797198835433251bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core/1.8.1/kotlinx-serialization-core-1.8.1.module to /home/runner/.gradle/.tmp/gradle_download915358484724939813bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.8.1/kotlinx-serialization-core-jvm-1.8.1.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.8.1/kotlinx-serialization-core-jvm-1.8.1.pom to /home/runner/.gradle/.tmp/gradle_download17543365600835504566bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.8.1/kotlinx-serialization-core-jvm-1.8.1.module to /home/runner/.gradle/.tmp/gradle_download13786550045612617656bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.8.1/kotlinx-serialization-json-jvm-1.8.1.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.8.1/kotlinx-serialization-json-jvm-1.8.1.pom to /home/runner/.gradle/.tmp/gradle_download2933814559231592934bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.8.1/kotlinx-serialization-json-jvm-1.8.1.module to /home/runner/.gradle/.tmp/gradle_download11362761261102152709bin
+Resource missing. [HTTP GET: https://dl.google.com/dl/android/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json/1.8.1/kotlinx-serialization-json-1.8.1.pom]
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json/1.8.1/kotlinx-serialization-json-1.8.1.pom to /home/runner/.gradle/.tmp/gradle_download10210398473506903461bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json/1.8.1/kotlinx-serialization-json-1.8.1.module to /home/runner/.gradle/.tmp/gradle_download14589673140494983853bin
+Caching disabled for task ':CimaNow:generateDebugUnitTestStubRFile' because:
+  Build cache is disabled
+Task ':CimaNow:generateDebugUnitTestStubRFile' is not up-to-date because:
+  No history is available.
+The input changes require a full rebuild for incremental task ':CimaNow:generateDebugUnitTestStubRFile'.
+
+Resolve mutations for :CimaNow:compileDebugJavaWithJavac (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:compileDebugJavaWithJavac (Thread[included builds,5,main]) started.
 
 > Task :CimaNow:compileDebugJavaWithJavac NO-SOURCE
 Skipping task ':CimaNow:compileDebugJavaWithJavac' as it has no source files and no previous output files.
-Resolve mutations for :CimaNow:bundleLibRuntimeToJarDebug (Thread[Execution worker,5,main]) started.
-:CimaNow:bundleLibRuntimeToJarDebug (Thread[Execution worker,5,main]) started.
-Resolve mutations for :CimaNow:bundleLibCompileToJarDebug (Thread[Execution worker Thread 3,5,main]) started.
-:CimaNow:bundleLibCompileToJarDebug (Thread[Execution worker Thread 3,5,main]) started.
-Resolve mutations for :CimaNow:javaPreCompileDebugUnitTest (Thread[included builds,5,main]) started.
-:CimaNow:javaPreCompileDebugUnitTest (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:bundleLibRuntimeToJarDebug (Thread[Execution worker Thread 2,5,main]) started.
+:CimaNow:bundleLibRuntimeToJarDebug (Thread[Execution worker Thread 2,5,main]) started.
+Resolve mutations for :CimaNow:bundleLibCompileToJarDebug (Thread[included builds,5,main]) started.
+:CimaNow:bundleLibCompileToJarDebug (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:javaPreCompileDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:javaPreCompileDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:javaPreCompileDebugUnitTest
 Caching disabled for task ':CimaNow:javaPreCompileDebugUnitTest' because:
   Build cache is disabled
 Task ':CimaNow:javaPreCompileDebugUnitTest' is not up-to-date because:
   No history is available.
-Resolve mutations for :CimaNow:processDebugJavaRes (Thread[included builds,5,main]) started.
-:CimaNow:processDebugJavaRes (Thread[included builds,5,main]) started.
+Resolve mutations for :CimaNow:processDebugJavaRes (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:processDebugJavaRes (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:bundleLibRuntimeToJarDebug
 Caching disabled for task ':CimaNow:bundleLibRuntimeToJarDebug' because:
@@ -280,13 +382,6 @@ Caching disabled for task ':CimaNow:bundleLibCompileToJarDebug' because:
 Task ':CimaNow:bundleLibCompileToJarDebug' is not up-to-date because:
   No history is available.
 
-> Task :CimaNow:generateDebugUnitTestStubRFile
-Caching disabled for task ':CimaNow:generateDebugUnitTestStubRFile' because:
-  Build cache is disabled
-Task ':CimaNow:generateDebugUnitTestStubRFile' is not up-to-date because:
-  No history is available.
-The input changes require a full rebuild for incremental task ':CimaNow:generateDebugUnitTestStubRFile'.
-
 > Task :CimaNow:processDebugJavaRes
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
@@ -301,14 +396,112 @@ file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/m
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/main/resources', not found
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/debug/resources', not found
-work action resolve classes.jar (project :CimaNow) (Thread[included builds,5,main]) started.
-work action resolve out (project :CimaNow) (Thread[included builds,5,main]) started.
-work action resolve classes.jar (project :CimaNow) (Thread[included builds,5,main]) started.
-Resolve mutations for :CimaNow:compileDebugUnitTestKotlin (Thread[included builds,5,main]) started.
-:CimaNow:compileDebugUnitTestKotlin (Thread[included builds,5,main]) started.
+work action resolve classes.jar (project :CimaNow) (Thread[Execution worker,5,main]) started.
+work action resolve out (project :CimaNow) (Thread[Execution worker Thread 3,5,main]) started.
+work action resolve classes.jar (project :CimaNow) (Thread[Execution worker Thread 3,5,main]) started.
+Resolve mutations for :CimaNow:compileDebugUnitTestKotlin (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:compileDebugUnitTestKotlin (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:compileDebugUnitTestKotlin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.8.1/kotlinx-serialization-core-jvm-1.8.1.jar to /home/runner/.gradle/.tmp/gradle_download10901445079996522703bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-random-jvm/0.5.0/cryptography-random-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download14777814133337910491bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.8.1/kotlinx-serialization-json-jvm-1.8.1.jar to /home/runner/.gradle/.tmp/gradle_download10313299530674692799bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-bigint-jvm/0.5.0/cryptography-bigint-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download9412973311608777996bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-random-jvm/0.5.0/8e77668891b60f6058f1262e032d8b06d137bdde/cryptography-random-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-bigint-jvm/0.5.0/97ac3202bf7f3792b3c8bc788a7bbb1b33ca2485/cryptography-bigint-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-json-jvm/1.8.1/4de3bace4b175753df5484d2acd74c14bfeb5be9/kotlinx-serialization-json-jvm-1.8.1.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-serialization-core-jvm/1.8.1/510cb839cce9a3e708052d480a6fbf4a7274dfcd/kotlinx-serialization-core-jvm-1.8.1.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/d2c38b85930fc4ea9bac2da67231c18d/transformed/jetified-cryptography-random-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/0ce41f7f2ba5d39b09d810232cf258c3/transformed/jetified-cryptography-bigint-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-jdk-jvm/0.5.0/cryptography-provider-jdk-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download1033828055990409495bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-core-jvm/0.5.0/cryptography-core-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download14882899225824149928bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-provider-jdk-jvm/0.5.0/3a2721ac930c182a0e424f2d558cfa9d52cc1b3/cryptography-provider-jdk-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-core-jvm/0.5.0/d0fc25786ede38c33893236eacc3d6ab11d2ad10/cryptography-core-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/db69b2a89df520c61c7ef31219b911aa/transformed/jetified-cryptography-core-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/01a663f53abad4ba90760cec112ad601/transformed/jetified-cryptography-provider-jdk-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/1f35688051e4f2b5a9d1f3734faf7627/transformed/jetified-kotlinx-serialization-json-jvm-1.8.1.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-core-jvm/0.8.0/kotlinx-io-core-jvm-0.8.0.jar to /home/runner/.gradle/.tmp/gradle_download4423978883461306184bin
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-io-bytestring-jvm/0.8.0/kotlinx-io-bytestring-jvm-0.8.0.jar to /home/runner/.gradle/.tmp/gradle_download12522607222129208900bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-io-core-jvm/0.8.0/358a9f2ba2dc81c5dc84c3d1853f6e5efba63be1/kotlinx-io-core-jvm-0.8.0.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-io-bytestring-jvm/0.8.0/89c5399596250e71f2bba6d2415972a078a525c7/kotlinx-io-bytestring-jvm-0.8.0.jar because:
+  Build cache is disabled
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.0/kotlin-stdlib-2.2.0.jar to /home/runner/.gradle/.tmp/gradle_download12873373457379223391bin
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/f49a893b6967f532c418bd7ea36d65db/transformed/jetified-kotlinx-io-bytestring-jvm-0.8.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/9fca50210bf9fb4429223dfec60f8e28/transformed/jetified-kotlinx-serialization-core-jvm-1.8.1.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar to /home/runner/.gradle/.tmp/gradle_download7427890240790176380bin
+Downloading https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar to /home/runner/.gradle/.tmp/gradle_download3757287987731457159bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12/junit-4.13.2.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.json/json/20240303/ebb88e8fb5122b7506d5cf1d69f1ccdb790d22a/json-20240303.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.0/fdfc65fbc42fda253a26f61dac3c0aca335fae96/kotlin-stdlib-2.2.0.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/7f332272966b6c20a894dfd950d328f8/transformed/jetified-kotlinx-io-core-jvm-0.8.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar to /home/runner/.gradle/.tmp/gradle_download16369809242728858950bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/42a25dc3219429f0e5d060061f71acb49bf010a0/hamcrest-core-1.3.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/9d74efe5cdf0569441ef8595a2a8b1d2/transformed/jetified-hamcrest-core-1.3.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/16f29579e2e4bc2578b1d96318f86c93/transformed/jetified-json-20240303.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/3d299e4d4c18ca267cd2704259384969/transformed/jetified-junit-4.13.2.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/34ad7b8d311d303c7e7adfcba1b52c2e/transformed/jetified-kotlin-stdlib-2.2.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/debugUnitTest/generateDebugUnitTestStubRFile/R.jar because:
+  Build cache is disabled
 Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/1f35688051e4f2b5a9d1f3734faf7627/transformed/jetified-kotlinx-serialization-json-jvm-1.8.1.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/9fca50210bf9fb4429223dfec60f8e28/transformed/jetified-kotlinx-serialization-core-jvm-1.8.1.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/0ce41f7f2ba5d39b09d810232cf258c3/transformed/jetified-cryptography-bigint-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/d2c38b85930fc4ea9bac2da67231c18d/transformed/jetified-cryptography-random-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/01a663f53abad4ba90760cec112ad601/transformed/jetified-cryptography-provider-jdk-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/db69b2a89df520c61c7ef31219b911aa/transformed/jetified-cryptography-core-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/7f332272966b6c20a894dfd950d328f8/transformed/jetified-kotlinx-io-core-jvm-0.8.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/f49a893b6967f532c418bd7ea36d65db/transformed/jetified-kotlinx-io-bytestring-jvm-0.8.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/3d299e4d4c18ca267cd2704259384969/transformed/jetified-junit-4.13.2.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/16f29579e2e4bc2578b1d96318f86c93/transformed/jetified-json-20240303.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/34ad7b8d311d303c7e7adfcba1b52c2e/transformed/jetified-kotlin-stdlib-2.2.0.jar because:
+  Build cache is disabled
+Caching disabled for BuildToolsApiClasspathEntrySnapshotTransform: /home/runner/.gradle/caches/8.12/transforms/9d74efe5cdf0569441ef8595a2a8b1d2/transformed/jetified-hamcrest-core-1.3.jar because:
   Build cache is disabled
 Caching disabled for task ':CimaNow:compileDebugUnitTestKotlin' because:
   Build cache is disabled
@@ -362,17 +555,17 @@ Script source files:
 Script file extensions: 
 Using Kotlin/JVM incremental compilation
 [KOTLIN] Kotlin compilation 'jdkHome' argument: null
-i: starting the daemon as: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java -cp /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar -Djava.awt.headless=true -Djava.rmi.server.hostname=127.0.0.1 -Xmx2048m -XX:ReservedCodeCacheSize=320m -Dkotlin.environment.keepalive -ea -XX:+UseCodeCacheFlushing -XX:+UseParallelGC -Dkotlin.daemon.initiator.marker.file=/tmp/kotlin-compiler-in-ehdigmtream-11447045454680305582.alive --add-exports java.base/sun.nio.ch=ALL-UNNAMED org.jetbrains.kotlin.daemon.KotlinCompileDaemon --daemon-runFilesPath /home/runner/.kotlin/daemon --daemon-autoshutdownIdleSeconds=7200 --daemon-compilerClasspath /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar
+i: starting the daemon as: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java -cp /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar -Djava.awt.headless=true -Djava.rmi.server.hostname=127.0.0.1 -Xmx2048m -XX:ReservedCodeCacheSize=320m -Dkotlin.environment.keepalive -ea -XX:+UseCodeCacheFlushing -XX:+UseParallelGC -Dkotlin.daemon.initiator.marker.file=/tmp/kotlin-compiler-in-ehdigmtream-5968175500984465943.alive --add-exports java.base/sun.nio.ch=ALL-UNNAMED org.jetbrains.kotlin.daemon.KotlinCompileDaemon --daemon-runFilesPath /home/runner/.kotlin/daemon --daemon-autoshutdownIdleSeconds=7200 --daemon-compilerClasspath /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.1.21/70a69b95905e33806fbee6c6c9c48e2b2b2b4da4/kotlin-compiler-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.1.21/97a0975aa19d925e109537af60eb46902920015c/kotlin-stdlib-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-script-runtime/2.1.21/e274d560d10526099330411c45961f04d85e77b9/kotlin-script-runtime-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-reflect/1.6.10/1cbe9c92c12a94eea200d23c2bbaedaf3daf5132/kotlin-reflect-1.6.10.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-daemon-embeddable/2.1.21/2376f98b59395adad949ca19811283fafb1b2e31/kotlin-daemon-embeddable-2.1.21.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.intellij.deps/trove4j/1.0.20200330/3afb14d5f9ceb459d724e907a21145e8ff394f02/trove4j-1.0.20200330.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.8.0/ac1dc37a30a93150b704022f8d895ee1bd3a36b3/kotlinx-coroutines-core-jvm-1.8.0.jar:/home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar
 i: #1 retrying connecting to the daemon 
-Options for KOTLIN DAEMON: IncrementalCompilationOptions(super=CompilationOptions(compilerMode=INCREMENTAL_COMPILER, targetPlatform=JVM, reportCategories=[0, 3], reportSeverity=2, requestedCompilationResults=[0], kotlinScriptExtensions=[]), sourceChanges=org.jetbrains.kotlin.buildtools.api.SourcesChanges$Unknown@2858fb85, classpathChanges=NotAvailableForNonIncrementalRun, workingDir=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, multiModuleICSettings=MultiModuleICSettings(buildHistoryFile=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state/build-history.bin, useModuleDetection=true), usePreciseJavaTracking=true, icFeatures=IncrementalCompilationFeatures(withAbiSnapshot=false, preciseCompilationResultsBackup=true, keepIncrementalCompilationCachesInMemory=true, enableUnsafeIncrementalCompilationForMultiplatform=false, enableMonotonousIncrementalCompileSetExpansion=true), outputFiles=[/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/tmp/kotlin-classes/debugUnitTest, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state])
+Options for KOTLIN DAEMON: IncrementalCompilationOptions(super=CompilationOptions(compilerMode=INCREMENTAL_COMPILER, targetPlatform=JVM, reportCategories=[0, 3], reportSeverity=2, requestedCompilationResults=[0], kotlinScriptExtensions=[]), sourceChanges=org.jetbrains.kotlin.buildtools.api.SourcesChanges$Unknown@6724b37d, classpathChanges=NotAvailableForNonIncrementalRun, workingDir=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, multiModuleICSettings=MultiModuleICSettings(buildHistoryFile=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state/build-history.bin, useModuleDetection=true), usePreciseJavaTracking=true, icFeatures=IncrementalCompilationFeatures(withAbiSnapshot=false, preciseCompilationResultsBackup=true, keepIncrementalCompilationCachesInMemory=true, enableUnsafeIncrementalCompilationForMultiplatform=false, enableMonotonousIncrementalCompileSetExpansion=true), outputFiles=[/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/tmp/kotlin-classes/debugUnitTest, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/cacheable, /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/kotlin/compileDebugUnitTestKotlin/local-state])
 Finished executing kotlin compiler using DAEMON strategy
-Resolve mutations for :CimaNow:compileDebugUnitTestJavaWithJavac (Thread[included builds,5,main]) started.
-:CimaNow:compileDebugUnitTestJavaWithJavac (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:compileDebugUnitTestJavaWithJavac (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:compileDebugUnitTestJavaWithJavac (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:compileDebugUnitTestJavaWithJavac NO-SOURCE
 Skipping task ':CimaNow:compileDebugUnitTestJavaWithJavac' as it has no source files and no previous output files.
-Resolve mutations for :CimaNow:processDebugUnitTestJavaRes (Thread[Execution worker,5,main]) started.
-:CimaNow:processDebugUnitTestJavaRes (Thread[Execution worker,5,main]) started.
+Resolve mutations for :CimaNow:processDebugUnitTestJavaRes (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:processDebugUnitTestJavaRes (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:processDebugUnitTestJavaRes
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/resources', not found
@@ -388,31 +581,55 @@ file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/t
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/resources', not found
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/resources', not found
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/resources', not found
-Resolve mutations for :CimaNow:testDebugUnitTest (Thread[included builds,5,main]) started.
-:CimaNow:testDebugUnitTest (Thread[Execution worker Thread 2,5,main]) started.
+Resolve mutations for :CimaNow:testDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
+:CimaNow:testDebugUnitTest (Thread[Execution worker Thread 3,5,main]) started.
 
 > Task :CimaNow:testDebugUnitTest
-Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/1.9.22/kotlin-stdlib-jdk8-1.9.22.jar to /home/runner/.gradle/.tmp/gradle_download1292646725089458173bin
-Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/1.9.22/kotlin-stdlib-jdk7-1.9.22.jar to /home/runner/.gradle/.tmp/gradle_download7169585861267856510bin
-Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.9.22/c4b17283ad7939e778989663f8301d871987fa5e/kotlin-stdlib-jdk7-1.9.22.jar because:
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-provider-base-jvm/0.5.0/cryptography-provider-base-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download3418878287268147021bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-pem-jvm/0.5.0/cryptography-serialization-pem-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download1880775937847526680bin
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-jvm/0.5.0/cryptography-serialization-asn1-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download12560273420356977477bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-provider-base-jvm/0.5.0/e03b79926494512ac452ca00cfa5e27135262d32/cryptography-provider-base-jvm-0.5.0.jar because:
   Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-serialization-pem-jvm/0.5.0/7b5cb41c77698e6fb3fab21e67bf7b9e988e11a2/cryptography-serialization-pem-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-serialization-asn1-jvm/0.5.0/242a38b98c1dd201f499485925f22c972858c153/cryptography-serialization-asn1-jvm-0.5.0.jar because:
+  Build cache is disabled
+Downloading https://repo.maven.apache.org/maven2/dev/whyoleg/cryptography/cryptography-serialization-asn1-modules-jvm/0.5.0/cryptography-serialization-asn1-modules-jvm-0.5.0.jar to /home/runner/.gradle/.tmp/gradle_download10474424251002154128bin
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/053bbabc65136f5eb5ba1173c6c222f1/transformed/jetified-cryptography-serialization-pem-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/c502de22ddda2f35408bf33be026b3d1/transformed/jetified-cryptography-provider-base-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/dev.whyoleg.cryptography/cryptography-serialization-asn1-modules-jvm/0.5.0/9308027088c76026a5b96f5b5b400859310ca1af/cryptography-serialization-asn1-modules-jvm-0.5.0.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/b69ca1dcf2322db9c7be6bdd48b8f955/transformed/jetified-cryptography-serialization-asn1-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/1.9.22/kotlin-stdlib-jdk8-1.9.22.jar to /home/runner/.gradle/.tmp/gradle_download14149784104827243210bin
 Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.9.22/dea0c11e2fa503ab891c8a090e3b54754472975d/kotlin-stdlib-jdk8-1.9.22.jar because:
+  Build cache is disabled
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/477f5fc23ca2db0368e2404bc9c0c0ee/transformed/jetified-kotlin-stdlib-jdk8-1.9.22.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/1b9f65ec38c6630f7859ff039399eec5/transformed/jetified-cryptography-serialization-asn1-modules-jvm-0.5.0.jar because:
+  Build cache is disabled
+  Caching not enabled.
+Downloading https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/1.9.22/kotlin-stdlib-jdk7-1.9.22.jar to /home/runner/.gradle/.tmp/gradle_download8837132619029175132bin
+Caching disabled for JetifyTransform: /home/runner/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.9.22/c4b17283ad7939e778989663f8301d871987fa5e/kotlin-stdlib-jdk7-1.9.22.jar because:
   Build cache is disabled
 Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/62b2e00810d93db602d32d8c7e4cfdf4/transformed/jetified-kotlin-stdlib-jdk7-1.9.22.jar because:
   Build cache is disabled
   Caching not enabled.
-Caching disabled for IdentityTransform: /home/runner/.gradle/caches/8.12/transforms/477f5fc23ca2db0368e2404bc9c0c0ee/transformed/jetified-kotlin-stdlib-jdk8-1.9.22.jar because:
-  Build cache is disabled
-  Caching not enabled.
 Caching disabled for MockableJarTransform: /usr/local/lib/android/sdk/platforms/android-35/android.jar because:
   Build cache is disabled
-Calling mockable JAR artifact transform to create file: /home/runner/.gradle/caches/8.12/transforms/0274b2ce88a25b926ee0301df14c81b3-f1ce6e8c-d83a-4c5b-b512-bc5e3022989e/transformed/android.jar with input /usr/local/lib/android/sdk/platforms/android-35/android.jar
+Calling mockable JAR artifact transform to create file: /home/runner/.gradle/caches/8.12/transforms/0274b2ce88a25b926ee0301df14c81b3-8c581b44-752d-4d2b-ae5b-614d6e504b47/transformed/android.jar with input /usr/local/lib/android/sdk/platforms/android-35/android.jar
 Caching disabled for task ':CimaNow:testDebugUnitTest' because:
   Build cache is disabled
 Task ':CimaNow:testDebugUnitTest' is not up-to-date because:
   No history is available.
 file or directory '/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/intermediates/javac/debugUnitTest/compileDebugUnitTestJavaWithJavac/classes', not found
-Starting process 'Gradle Test Executor 1'. Working directory: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow Command: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java -Djava.awt.headless=true -Djava.library.path=/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib:/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/jniLibs:/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/jniLibs -Dorg.gradle.internal.worker.tmpdir=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/tmp/testDebugUnitTest/work --add-opens=java.base/java.io=ALL-UNNAMED @/home/runner/.gradle/.tmp/gradle-worker-classpath8377269255919186788txt -Xmx512m -Dfile.encoding=UTF-8 -Duser.country -Duser.language=en -Duser.variant -ea worker.org.gradle.process.internal.worker.GradleWorkerMain 'Gradle Test Executor 1'
+Starting process 'Gradle Test Executor 1'. Working directory: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow Command: /usr/lib/jvm/temurin-17-jdk-amd64/bin/java -Djava.awt.headless=true -Djava.library.path=/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib:/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/testDebug/jniLibs:/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/src/test/jniLibs -Dorg.gradle.internal.worker.tmpdir=/home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/tmp/testDebugUnitTest/work --add-opens=java.base/java.io=ALL-UNNAMED @/home/runner/.gradle/.tmp/gradle-worker-classpath8177209658682739384txt -Xmx512m -Dfile.encoding=UTF-8 -Duser.country -Duser.language=en -Duser.variant -ea worker.org.gradle.process.internal.worker.GradleWorkerMain 'Gradle Test Executor 1'
 Successfully started process 'Gradle Test Executor 1'
 
 Gradle Test Executor 1 started executing tests.
@@ -436,232 +653,51 @@ CimaNowLiveE2ETest > testFullLiveEndToEndSuite STANDARD_OUT
     [E2E][Load Movie] title='Fall 2: Deadpoint' year=2026 dur=97m tags=9 actors=3 recs=8 poster=https://media6.cimanow.cc/wp-content/uploads/2026/10/%D9%81%D9%8A%D9%84%D9%85-Fall-2-Deadpoint-2026-%D9%85%D8%AA%D8%B1%D8%AC%D9%85-%D9%83%D9%84%D9%8A%D9%86.jpg
     [E2E][Load Series Root] title='Lupin' seasons=[1, 2, 3, 4] totalEpisodes=25 plotLen=84 actors=3
     [E2E][Load Series S4] title='Lupin' seasons=[1, 2, 3, 4] totalEpisodes=25
-        [E2E][Trace] [socks5://77.221.148.116:10808] unlocked watching! initial=true tabs=6 downloads=19 coreTokLen=64
+        [E2E][Trace] [socks5://193.25.215.182:22222] unlocked watching! initial=true tabs=6 downloads=19 coreTokLen=64
+    DEBUG ApiError: -------------------------------------------------------------------
+    DEBUG ApiError: safeApiCall: Video not found
+
+CimaNowLiveE2ETest > testFullLiveEndToEndSuite STANDARD_ERROR
+    com.lagradost.cloudstream3.ErrorLoadingException: Video not found
+    	at com.lagradost.cloudstream3.extractors.Odnoklassniki.getUrl$suspendImpl(OdnoklassnikiExtractor.kt:46)
+    	at com.lagradost.cloudstream3.extractors.Odnoklassniki$getUrl$1.invokeSuspend(OdnoklassnikiExtractor.kt)
+    	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+    	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+    	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+    	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+    	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:586)
+    	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:820)
+    	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:717)
+    	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:704)
+
+CimaNowLiveE2ETest > testFullLiveEndToEndSuite STANDARD_OUT
+    DEBUG ApiError: -------------------------------------------------------------------
+    [E2E][LoadLinks Movie] ok=true links=10 subs=0 providers=[UpnShare, SaveFiles, Jetload]
+      -> [UpnShare] UpnShare [HLS] q=1040 type=M3U8 url=https://cimanow.upns.online/v4/pl/sxhg.velonaacademy.online/qtd/otni3k/index-f1-v1-a1.m3u8?k=b58IDw4
+      -> [UpnShare] UpnShare [HLS] q=692 type=M3U8 url=https://cimanow.upns.online/v4/pl/sxhg.velonaacademy.online/qtd/otni3k/index-f2-v1-a1.m3u8?k=b58IDw4
+      -> [SaveFiles] SaveFiles [HLS] q=692 type=M3U8 url=https://s1.savefiles.com/hls2/01/00487/z4xjptsb7a38_n/index-v1-a1.m3u8?t=cfvWJXY7LpcVnPhXqJJ54lPpDJf
+      -> [UpnShare] UpnShare [HLS] q=1040 type=M3U8 url=https://94.131.217.51/v4/j8c9XqI9AM-lhIf2k_fZng/1792867075/qtd/otni3k/index-f1-v1-a1.m3u8
+      -> [UpnShare] UpnShare [HLS] q=692 type=M3U8 url=https://94.131.217.51/v4/j8c9XqI9AM-lhIf2k_fZng/1792867075/qtd/otni3k/index-f2-v1-a1.m3u8
+      -> [Jetload] Jetload [MP4] q=360 type=VIDEO url=https://cdn4.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-360p.mp4?t=70d0005d10ddd5df51
+      -> [Jetload] Jetload [MP4] q=480 type=VIDEO url=https://cdn3.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-480p.mp4?t=c3242c5e45a6a543b6
+      -> [Jetload] Jetload [MP4] q=1080 type=VIDEO url=https://cdn1.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-1080p.mp4?t=94656ab91badd7dcc
+      -> [Jetload] Jetload [MP4] q=720 type=VIDEO url=https://cdn1.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-720p.mp4?t=105a917d14a6c66e52
+      -> [UpnShare] UpnShare [HLS] q=400 type=M3U8 url=https://sxhg.velonaacademy.online/v4/qtd/otni3k/cf-master.1791311118.txt
+      [StreamProbe] provider=UpnShare playable=true url=https://cimanow.upns.online/v4/pl/sxhg.velonaacademy.online/qtd/otni3k/index-f1-v1-a1.m3u8
+      [StreamProbe] provider=SaveFiles playable=true url=https://s1.savefiles.com/hls2/01/00487/z4xjptsb7a38_n/index-v1-a1.m3u8?t=cfvWJXY7LpcVnPhXq
+      [StreamProbe] provider=Jetload playable=true url=https://cdn4.jetload.top/%5BCima-Now.CoM%5D%20Fall.2.Deadpoint.2026.HD-360p.mp4?t=70d0005d
+        [E2E][Trace] [socks5://193.25.215.182:22222] unlocked watching! initial=true tabs=6 downloads=11 coreTokLen=64
+    [E2E][LoadLinks Episode] ep='الحلقة 8' S4E8 ok=true links=24 providers=[OkRu, UpnShare, VK, SaveFiles, Vk Dash, Vk HLS, Jetload]
 
 Gradle Test Executor 1 finished executing tests.
 
 > Task :CimaNow:testDebugUnitTest
-
-CimaNowLiveE2ETest > testFullLiveEndToEndSuite FAILED
-    java.lang.NoClassDefFoundError: Could not initialize class com.lagradost.cloudstream3.utils.ExtractorApiKt
-        at com.cimanow.CimaNowExtractors$extractJetload$2.invokeSuspend(CimaNowExtractors.kt:601)
-        at _COROUTINE._BOUNDARY._(CoroutineDebugging.kt:42)
-        at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$jetJobs$1$1$1.invokeSuspend(CimaNowExtractors.kt:152)
-        at kotlinx.coroutines.TimeoutKt.withTimeoutOrNull(Timeout.kt:102)
-        at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$jetJobs$1$1.invokeSuspend(CimaNowExtractors.kt:151)
-        at com.cimanow.CimaNowExtractors$loadAllLinks$2$2.invokeSuspend(CimaNowExtractors.kt:138)
-        at kotlinx.coroutines.TimeoutKt.withTimeoutOrNull(Timeout.kt:102)
-        at com.cimanow.CimaNowExtractors$loadAllLinks$2.invokeSuspend(CimaNowExtractors.kt:137)
-        at com.cimanow.CimaNowLiveE2ETest$testFullLiveEndToEndSuite$1.invokeSuspend(CimaNowLiveE2ETest.kt:146)
-
-        Caused by:
-        java.lang.NoClassDefFoundError: Could not initialize class com.lagradost.cloudstream3.utils.ExtractorApiKt
-            at com.cimanow.CimaNowExtractors$extractJetload$2.invokeSuspend(CimaNowExtractors.kt:601)
-            at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
-            at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
-            at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
-            at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
-            at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:586)
-            at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:820)
-            at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:717)
-            at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:704)
-
-            Caused by:
-            java.lang.ExceptionInInitializerError: Exception java.lang.NoClassDefFoundError: dev/whyoleg/cryptography/CryptographyProvider [in thread "DefaultDispatcher-worker-31 @coroutine#79"]
-                at com.lagradost.cloudstream3.extractors.Rabbitstream.<init>(Rabbitstream.kt:84)
-                at com.lagradost.cloudstream3.utils.ExtractorApiKt.<clinit>(ExtractorApi.kt:1233)
-                at com.cimanow.CimaNowExtractors.dispatchCandidate(CimaNowExtractors.kt:438)
-                at com.cimanow.CimaNowExtractors.access$dispatchCandidate(CimaNowExtractors.kt:59)
-                at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$stdJobs$1$1$1$1.invokeSuspend(CimaNowExtractors.kt:144)
-                at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$stdJobs$1$1$1$1.invoke(CimaNowExtractors.kt)
-                at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$stdJobs$1$1$1$1.invoke(CimaNowExtractors.kt)
-                at kotlinx.coroutines.intrinsics.UndispatchedKt.startUndispatchedOrReturnIgnoreTimeout(Undispatched.kt:54)
-                at kotlinx.coroutines.TimeoutKt.setupTimeout(Timeout.kt:149)
-                at kotlinx.coroutines.TimeoutKt.withTimeoutOrNull(Timeout.kt:105)
-                at com.cimanow.CimaNowExtractors$loadAllLinks$2$2$1$stdJobs$1$1.invokeSuspend(CimaNowExtractors.kt:143)
-                ... 8 more
-
-2 tests completed, 1 failed
-Finished generating test XML results (0.009 secs) into: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/test-results/testDebugUnitTest
+Finished generating test XML results (0.011 secs) into: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/test-results/testDebugUnitTest
 Generating HTML test report...
-Finished generating test html results (0.037 secs) into: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/reports/tests/testDebugUnitTest
+Finished generating test html results (0.022 secs) into: /home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/reports/tests/testDebugUnitTest
+Build 6a8cb2f4-5e6d-4041-a35c-ed71bfedc2a1 is closed
 
-> Task :CimaNow:testDebugUnitTest FAILED
-Build 44801fc3-3e72-49ac-9e41-9451254ac27e is closed
-
-FAILURE: Build failed with an exception.
-
-* What went wrong:
-Execution failed for task ':CimaNow:testDebugUnitTest'.
-> There were failing tests. See the report at: file:///home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/reports/tests/testDebugUnitTest/index.html
-
-* Try:
-> Run with --scan to get full insights.
-
-* Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':CimaNow:testDebugUnitTest'.
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:130)
-	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:293)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:128)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
-	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:40)
-	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
-	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
-	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
-	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
-	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
-	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:42)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:331)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:318)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:314)
-	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:85)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:314)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:303)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
-	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
-	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
-Caused by: org.gradle.api.internal.exceptions.MarkedVerificationException: There were failing tests. See the report at: file:///home/runner/work/mehdigm-stream/mehdigm-stream/CimaNow/build/reports/tests/testDebugUnitTest/index.html
-	at org.gradle.api.tasks.testing.AbstractTestTask.handleTestFailures(AbstractTestTask.java:714)
-	at org.gradle.api.tasks.testing.AbstractTestTask.handleCollectedResults(AbstractTestTask.java:545)
-	at org.gradle.api.tasks.testing.AbstractTestTask.executeTests(AbstractTestTask.java:540)
-	at org.gradle.api.tasks.testing.Test.executeTests(Test.java:731)
-	at com.android.build.gradle.tasks.factory.AndroidUnitTest.executeTests(AndroidUnitTest.java:171)
-	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
-	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
-	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
-	at org.gradle.internal.reflect.JavaMethod.invoke(JavaMethod.java:125)
-	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.doExecute(StandardTaskAction.java:58)
-	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.execute(StandardTaskAction.java:51)
-	at org.gradle.api.internal.project.taskfactory.StandardTaskAction.execute(StandardTaskAction.java:29)
-	at org.gradle.api.internal.tasks.execution.TaskExecution$3.run(TaskExecution.java:244)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:29)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:26)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:47)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeAction(TaskExecution.java:229)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeActions(TaskExecution.java:212)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeWithPreviousOutputFiles(TaskExecution.java:195)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.execute(TaskExecution.java:162)
-	at org.gradle.internal.execution.steps.ExecuteStep.executeInternal(ExecuteStep.java:105)
-	at org.gradle.internal.execution.steps.ExecuteStep.access$000(ExecuteStep.java:44)
-	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:59)
-	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:56)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:56)
-	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:44)
-	at org.gradle.internal.execution.steps.CancelExecutionStep.execute(CancelExecutionStep.java:42)
-	at org.gradle.internal.execution.steps.TimeoutStep.executeWithoutTimeout(TimeoutStep.java:75)
-	at org.gradle.internal.execution.steps.TimeoutStep.execute(TimeoutStep.java:55)
-	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:50)
-	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:28)
-	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:67)
-	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:37)
-	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:61)
-	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:26)
-	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:69)
-	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:46)
-	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:40)
-	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:29)
-	at org.gradle.internal.execution.steps.BuildCacheStep.executeWithoutCache(BuildCacheStep.java:189)
-	at org.gradle.internal.execution.steps.BuildCacheStep.lambda$execute$1(BuildCacheStep.java:75)
-	at org.gradle.internal.Either$Right.fold(Either.java:175)
-	at org.gradle.internal.execution.caching.CachingState.fold(CachingState.java:62)
-	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:73)
-	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:48)
-	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:46)
-	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:35)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.executeBecause(SkipUpToDateStep.java:75)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.lambda$execute$2(SkipUpToDateStep.java:53)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:53)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:35)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:37)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:27)
-	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:49)
-	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:27)
-	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:71)
-	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:39)
-	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:65)
-	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:36)
-	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:107)
-	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:56)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:64)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:43)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:125)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:61)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:36)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
-	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
-	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:23)
-	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:75)
-	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:41)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.lambda$execute$0(AssignMutableWorkspaceStep.java:35)
-	at org.gradle.api.internal.tasks.execution.TaskExecution$4.withWorkspace(TaskExecution.java:289)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:31)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:22)
-	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:40)
-	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:23)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.lambda$execute$2(ExecuteWorkBuildOperationFiringStep.java:67)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:67)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:39)
-	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:46)
-	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:34)
-	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:48)
-	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:35)
-	at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:61)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:127)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:116)
-	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:40)
-	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
-	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
-	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
-	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
-	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
-	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:42)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:331)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:318)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:314)
-	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:85)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:314)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:303)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
-	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
-	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
-
-
-BUILD FAILED in 1m 37s
+BUILD SUCCESSFUL in 2m 49s
 15 actionable tasks: 9 executed, 6 up-to-date
-TEST_RC=1
-MAKE_RC=0 TEST_RC=1
+TEST_RC=0
+MAKE_RC=0 TEST_RC=0
