@@ -1,18 +1,17 @@
 import fs from "fs";
-import vm from "vm";
-import crypto from "crypto";
-import { execFile } from "child_process";
+import { spawn, execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
 const PROXY_FEEDS = [
-  ["socks5h", "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt"],
+  ["socks5", "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt"],
   ["http", "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/https.txt"],
-  ["socks5h", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"],
-  ["socks5h", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"],
+  ["socks5", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"],
+  ["socks5", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"],
 ];
 
 function isCimaBlock(body) {
@@ -25,63 +24,31 @@ function isCimaBlock(body) {
 }
 
 async function curlReq(url, opts = {}) {
-  const {
-    method = "GET",
-    postData = null,
-    proxy = null,
-    referer = null,
-    cookieJarFile = null,
-    extraHeaders = [],
-    follow = true,
-    timeoutSec = 18,
-    includeHeaders = false,
-  } = opts;
-
-  const hdrFile = includeHeaders ? `/tmp/curl_h_${Math.random().toString(36).slice(2)}.txt` : null;
+  const { proxy = null, referer = null, timeoutSec = 14 } = opts;
   const args = [
     "-sS",
     "-k",
     "--compressed",
+    "-L",
+    "--max-redirs",
+    "5",
     "--max-time",
     String(timeoutSec),
     "--connect-timeout",
-    "8",
-    "-X",
-    method,
+    "7",
     "-A",
     UA,
-    "-H",
-    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "-H",
-    "Accept-Language: ar,en-US;q=0.9,en;q=0.8",
+    "-w",
+    "\n__CURL_META__:%{http_code}|%{url_effective}",
   ];
-  if (follow) args.push("-L", "--max-redirs", "6");
-  if (hdrFile) args.push("-D", hdrFile);
-  args.push("-w", "\n__CURL_META__:%{http_code}|%{url_effective}|%{redirect_url}");
-  if (proxy) args.push("-x", proxy);
+  if (proxy) args.push("-x", proxy.replace(/^socks5:\/\//, "socks5h://"));
   if (referer) args.push("-e", referer);
-  if (cookieJarFile) args.push("-b", cookieJarFile, "-c", cookieJarFile);
-  for (const h of extraHeaders) args.push("-H", h);
-  if (postData !== null) args.push("--data-raw", postData);
   args.push(url);
-
-  try {
-    const { stdout } = await execFileAsync("curl", args, { maxBuffer: 40 * 1024 * 1024 });
-    const idx = stdout.lastIndexOf("\n__CURL_META__:");
-    const body = idx >= 0 ? stdout.slice(0, idx) : stdout;
-    const meta = idx >= 0 ? stdout.slice(idx + 15).trim() : "0||";
-    const [codeStr, effectiveUrl, redirectUrl] = meta.split("|");
-    let respHeaders = "";
-    if (hdrFile && fs.existsSync(hdrFile)) {
-      respHeaders = fs.readFileSync(hdrFile, "utf8");
-      fs.unlinkSync(hdrFile);
-    }
-    return { status: Number(codeStr) || 0, effectiveUrl, redirectUrl, respHeaders, text: body };
-  } finally {
-    if (hdrFile && fs.existsSync(hdrFile)) {
-      try { fs.unlinkSync(hdrFile); } catch {}
-    }
-  }
+  const { stdout } = await execFileAsync("curl", args, { maxBuffer: 25 * 1024 * 1024 });
+  const idx = stdout.lastIndexOf("\n__CURL_META__:");
+  const text = idx >= 0 ? stdout.slice(0, idx) : stdout;
+  const [codeStr, effectiveUrl] = (idx >= 0 ? stdout.slice(idx + 15).trim() : "0|").split("|");
+  return { status: Number(codeStr) || 0, effectiveUrl, text };
 }
 
 async function getWorkingProxies() {
@@ -98,16 +65,19 @@ async function getWorkingProxies() {
     } catch {}
   }
   const working = [];
-  const batchSize = 25;
-  for (let i = 0; i < candidates.length && working.length < 6; i += batchSize) {
-    const batch = candidates.slice(i, i + batchSize);
+  for (let i = 0; i < candidates.length && working.length < 8; i += 25) {
+    const batch = candidates.slice(i, i + 25);
     await Promise.all(
       batch.map(async (p) => {
-        if (working.length >= 6) return;
+        if (working.length >= 8) return;
         try {
-          const r = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 9 });
-          if (r.status === 200 && !isCimaBlock(r.text) && r.text.includes("cimanow")) {
-            working.push(p);
+          // Test BOTH cimanow.cc AND rm.freex2line.online so Chrome proxy works for both!
+          const r1 = await curlReq("https://cimanow.cc/home/", { proxy: p, timeoutSec: 9 });
+          if (r1.status === 200 && !isCimaBlock(r1.text) && r1.text.includes("cimanow")) {
+            const r2 = await curlReq("https://rm.freex2line.online/redirectingfree/", { proxy: p, timeoutSec: 9 });
+            if (r2.status > 0 && !r2.text.includes("Just a moment...")) {
+              working.push(p);
+            }
           }
         } catch {}
       })
@@ -116,390 +86,379 @@ async function getWorkingProxies() {
   return working;
 }
 
-async function smartReq(url, proxies, opts = {}) {
-  let lastErr = null;
-  for (const p of proxies) {
-    try {
-      const r = await curlReq(url, { ...opts, proxy: p });
-      if (r.status > 0 && !isCimaBlock(r.text)) return { ...r, usedProxy: p };
-    } catch (e) {
-      lastErr = e;
-    }
+class CDPClient {
+  constructor(wsUrl) {
+    this.wsUrl = wsUrl;
+    this.id = 0;
+    this.pending = new Map();
+    this.listeners = new Map();
   }
-  throw lastErr || new Error(`All proxies failed for ${url}`);
+  async connect() {
+    this.ws = new WebSocket(this.wsUrl);
+    await new Promise((resolve, reject) => {
+      this.ws.addEventListener("open", resolve, { once: true });
+      this.ws.addEventListener("error", reject, { once: true });
+    });
+    this.ws.addEventListener("message", (ev) => {
+      const msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString());
+      if (msg.id && this.pending.has(msg.id)) {
+        const { resolve, reject } = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error.message));
+        else resolve(msg.result);
+      } else if (msg.method) {
+        const arr = this.listeners.get(msg.method) || [];
+        for (const fn of arr) fn(msg.params);
+      }
+    });
+  }
+  send(method, params = {}) {
+    const id = ++this.id;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP timeout: ${method}`));
+      }, 20000);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+  on(method, fn) {
+    if (!this.listeners.has(method)) this.listeners.set(method, []);
+    this.listeners.get(method).push(fn);
+  }
+  close() {
+    try { this.ws.close(); } catch {}
+  }
 }
 
-// Fetch the encrypted `/watching/` vault from `rm.freex2line.online`!
-async function fetchGatewayVault(shineUrl, itemUrl, proxies) {
-  const jar = `/tmp/cn_vault_${Math.random().toString(36).slice(2)}.txt`;
+async function runChromeFlow(item, proxyUrl, port) {
+  const userDataDir = `/tmp/chrome_cn_${port}_${Math.random().toString(36).slice(2)}`;
+  const chromeBin = fs.existsSync("/usr/bin/google-chrome")
+    ? "/usr/bin/google-chrome"
+    : "/usr/bin/google-chrome-stable";
+
+  const proc = spawn(
+    chromeBin,
+    [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled",
+      "--window-size=1280,800",
+      `--user-agent=${UA}`,
+      `--proxy-server=${proxyUrl}`,
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${userDataDir}`,
+      "about:blank",
+    ],
+    { stdio: "ignore" }
+  );
+
+  const netEvents = [];
+  const reqMap = new Map();
+  let cdp = null;
+
   try {
-    for (const p of proxies) {
+    // Wait for /json/list
+    let wsUrl = null;
+    for (let i = 0; i < 30; i++) {
+      await sleep(300);
       try {
-        // Step 0: GET loadon/?link=<b64> -> sets PHPSESSID
-        const r0 = await curlReq(shineUrl, {
-          proxy: p,
-          referer: itemUrl,
-          cookieJarFile: jar,
-          follow: false,
-          timeoutSec: 15,
-        });
-        if (r0.status !== 200) continue;
-
-        // Step 1: GET /redirectingfree/ (no Referer, with PHPSESSID)
-        const r1 = await curlReq("https://rm.freex2line.online/redirectingfree/", {
-          proxy: p,
-          referer: null,
-          cookieJarFile: jar,
-          follow: false,
-          timeoutSec: 15,
-        });
-        const nextMatch = r1.text.match(/location(?:\.href)?\s*=\s*["']([^"']+)["']/i);
-        const blogUrl = nextMatch ? new URL(nextMatch[1].trim(), "https://rm.freex2line.online/redirectingfree/").toString() : "https://rm.freex2line.online/2020/02/blog-post.html/";
-
-        // Step 2: GET /2020/02/blog-post.html/ (follow 301 -> /blog-post.html/)
-        const r2 = await curlReq(blogUrl, {
-          proxy: p,
-          referer: "https://rm.freex2line.online/redirectingfree/",
-          cookieJarFile: jar,
-          follow: true,
-          timeoutSec: 22,
-        });
-        if (r2.status === 200 && r2.text.length > 100000) {
-          return { ok: true, usedProxy: p, vaultHtml: r2.text };
+        const res = await fetch(`http://127.0.0.1:${port}/json/list`);
+        const pages = await res.json();
+        const page = pages.find((p) => p.type === "page" && p.webSocketDebuggerUrl);
+        if (page) {
+          wsUrl = page.webSocketDebuggerUrl;
+          break;
         }
       } catch {}
     }
-    return { ok: false, err: "Failed across all proxies" };
-  } finally {
-    if (fs.existsSync(jar)) try { fs.unlinkSync(jar); } catch {}
-  }
-}
+    if (!wsUrl) throw new Error("Chrome CDP failed to start");
 
-// Decode the `rm.freex2line.online/2020/02/blog-post.html/` vault HTML!
-function decodeVaultHtml(vaultHtml) {
-  const headSample = vaultHtml.slice(0, 800);
+    cdp = new CDPClient(wsUrl);
+    await cdp.connect();
+    await cdp.send("Page.enable");
+    await cdp.send("Network.enable");
+    await cdp.send("Runtime.enable");
 
-  // Extract the big base64 string array `window["..."] = ["...", "...", ...];`
-  const arrStart = vaultHtml.search(/window\["[^"]+"\]\s*=\s*\[/);
-  const openBracket = arrStart >= 0 ? vaultHtml.indexOf("[", vaultHtml.indexOf("=", arrStart)) : -1;
-  const arrEnd = openBracket >= 0 ? vaultHtml.indexOf("];", openBracket) : -1;
-  const arrSlice = openBracket >= 0 && arrEnd > openBracket ? vaultHtml.slice(openBracket + 1, arrEnd) : "";
-  const afterArr = arrEnd > 0 ? vaultHtml.slice(arrEnd + 2) : "";
-
-  // Decode the `e=[...],k=...` stage-2 loader right after `];` so we have the exact author code!
-  let outerDecoderJs = "";
-  const eMatch = afterArr.match(/e\s*=\s*\[([\d,\s]+)\]\s*,\s*k\s*=\s*(\d+)/);
-  if (eMatch) {
-    const kVal = Number(eMatch[2]);
-    const nums = eMatch[1].split(",").map((x) => Number(x.trim()));
-    outerDecoderJs = nums.map((n) => String.fromCharCode(n ^ kVal)).join("");
-  }
-
-  const b64Joined = [...arrSlice.matchAll(/"([A-Za-z0-9+/=]+)"/g)].map((m) => m[1]).join("");
-  const raw = Buffer.from(b64Joined, "base64");
-
-  let decoded = "";
-  let keyUsed = "";
-
-  // Exact O(1) known-plaintext solver: decoded HTML starts (within first 8 bytes of whitespace/BOM) with `<script>` followed by `window.`!
-  const needle = Buffer.from("<script>");
-  outer: for (let off = 0; off <= 8; off++) {
-    for (let klen = 1; klen <= 10; klen++) {
-      const key = Buffer.alloc(klen);
-      for (let j = 0; j < klen; j++) {
-        if (j < needle.length) {
-          key[(off + j) % klen] = raw[off + j] ^ needle[j];
-        }
-      }
-      // Verify `<script>` matches across all 8 bytes AND `window.` appears in first 96 bytes!
-      let ok = true;
-      for (let j = 0; j < needle.length; j++) {
-        if ((raw[off + j] ^ key[(off + j) % klen]) !== needle[j]) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) continue;
-      const probe = Buffer.from(raw.slice(0, 96).map((v, i) => v ^ key[i % klen])).toString("utf8");
-      if (probe.includes("<script>") && probe.includes("window.")) {
-        keyUsed = key.toString("utf8");
-        decoded = Buffer.from(raw.map((v, i) => v ^ key[i % klen])).toString("utf8");
-        break outer;
-      }
-    }
-  }
-
-  return { headSample, outerDecoderJs, keyUsed, decodedLen: decoded.length, decoded };
-}
-
-// Deobfuscate / execute `nbm2oHaQcN60y6Ozwm.js` + watching inline scripts in a rich VM to get `_getCoreToken()` AND log its exact inputs/algorithm!
-function analyzeNbmAndToken(nbmJsCode, watchingHtml, watchUrl) {
-  const report = {};
-
-  try {
-    const allWatchScripts = [...watchingHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].map((m, idx) => ({
-      idx,
-      attrs: m[1].trim(),
-      len: m[2].length,
-      preview: m[2].slice(0, 500),
-      code: m[2],
-    }));
-    report.watchingScriptsSummary = allWatchScripts.map(({ idx, attrs, len, preview }) => ({ idx, attrs, len, preview }));
-
-    // Save FULL code of all inline scripts under 80KB (excluding JSON-LD and known x19WCM90B19F if desired, actually include all under 40KB!)
-    report.watchingInlineScriptsFull = allWatchScripts
-      .filter((s) => !s.attrs.includes("src=") && !s.attrs.includes("ld+json") && s.len < 60000)
-      .map((s) => ({ idx: s.idx, attrs: s.attrs, len: s.len, code: s.code }));
-
-    // Check any external script `src` in `watchingHtml`!
-    report.watchingExternalSrcs = allWatchScripts
-      .map((s) => s.attrs.match(/src=["']([^"']+)["']/i)?.[1])
-      .filter(Boolean);
-
-    const domListeners = [];
-    const timers = [];
-    const dummyEl = () => ({
-      style: {},
-      classList: { add() {}, remove() {}, contains: () => false },
-      setAttribute() {},
-      getAttribute: () => null,
-      hasAttribute: () => false,
-      appendChild() {},
-      removeChild() {},
-      insertBefore() {},
-      addEventListener: (ev, fn) => { domListeners.push({ ev, fn }); },
-      querySelectorAll: () => [],
-      querySelector: () => null,
-      children: [],
-      childNodes: [],
-      innerHTML: "",
-      textContent: "",
+    // Ensure `navigator.webdriver` is completely absent on prototype (no own property!)
+    await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `
+        try {
+          delete Object.getPrototypeOf(navigator).webdriver;
+        } catch (e) {}
+      `,
     });
 
-    const locObj = new URL(watchUrl);
-    const sb = {
-      console: { log() {}, warn() {}, error() {} },
-      setTimeout: (fn, ms) => {
-        if (typeof fn === "function" && (!ms || ms < 500)) timers.push(fn);
-        return timers.length;
-      },
-      clearTimeout() {},
-      setInterval: () => 1,
-      clearInterval() {},
-      MutationObserver: class {
-        observe() {}
-        disconnect() {}
-      },
-      XMLHttpRequest: function () {},
-      fetch: async () => ({ ok: true, text: async () => "", json: async () => ({}) }),
-      TextEncoder,
-      TextDecoder,
-      Uint8Array,
-      ArrayBuffer,
-      DataView,
-      Promise,
-      Date,
-      Math,
-      JSON,
-      parseInt,
-      parseFloat,
-      encodeURIComponent,
-      decodeURIComponent,
-      atob: (b) => Buffer.from(b, "base64").toString("binary"),
-      btoa: (b) => Buffer.from(b, "binary").toString("base64"),
-      crypto: {
-        getRandomValues: (arr) => crypto.webcrypto.getRandomValues(arr),
-        subtle: crypto.webcrypto.subtle,
-      },
-      navigator: {
-        userAgent: UA,
-        webdriver: false,
-        languages: ["ar", "en-US", "en"],
-        platform: "Linux armv8l",
-      },
-      location: {
-        href: locObj.href,
-        hostname: locObj.hostname,
-        pathname: locObj.pathname,
-        origin: locObj.origin,
-        protocol: locObj.protocol,
-        search: locObj.search,
-      },
-      document: {
-        cookie: "",
-        readyState: "complete",
-        documentElement: dummyEl(),
-        head: dummyEl(),
-        body: dummyEl(),
-        createElement: dummyEl,
-        createDocumentFragment: dummyEl,
-        getElementById: () => null,
-        querySelector: () => null,
-        querySelectorAll: () => [],
-        getElementsByTagName: () => [dummyEl()],
-        addEventListener: (ev, fn) => { domListeners.push({ ev, fn }); },
-      },
-    };
-    sb.XMLHttpRequest.prototype = { open() {}, send() {}, setRequestHeader() {} };
-    sb.window = sb;
-    sb.self = sb;
-    sb.globalThis = sb;
-    sb.top = sb;
-    sb.parent = sb;
-
-    vm.createContext(sb);
-
-    // Run inline scripts that set `window._0x_cfg`, `ctx_...`, `ptr_...`, `map_...` or `_getCoreToken`!
-    for (const s of allWatchScripts) {
-      if (!s.attrs.includes("src=") && !s.attrs.includes("ld+json") && !s.code.includes("jQuery") && !s.code.includes("$(")) {
-        try {
-          vm.runInContext(s.code, sb, { timeout: 2500 });
-        } catch (e) {
-          // ignore DOM errors in non-token inline scripts
+    cdp.on("Network.requestWillBeSent", (p) => {
+      const u = p.request.url;
+      if (
+        u.includes("freex2line") ||
+        u.includes("cimanow") ||
+        u.includes("href.li") ||
+        p.type === "XHR" ||
+        p.type === "Fetch" ||
+        p.type === "Document"
+      ) {
+        if (!u.match(/\.(png|jpg|jpeg|gif|webp|svg|woff2?|css)(\?|$)/i)) {
+          const entry = {
+            requestId: p.requestId,
+            type: p.type,
+            method: p.request.method,
+            url: u,
+            headers: p.request.headers,
+            postData: p.request.postData || null,
+          };
+          reqMap.set(p.requestId, entry);
+          netEvents.push(entry);
         }
       }
+    });
+
+    cdp.on("Network.responseReceived", (p) => {
+      const entry = reqMap.get(p.requestId);
+      if (entry) {
+        entry.status = p.response.status;
+        entry.respHeaders = p.response.headers;
+        entry.mimeType = p.response.mimeType;
+      }
+    });
+
+    cdp.on("Network.loadingFinished", async (p) => {
+      const entry = reqMap.get(p.requestId);
+      if (
+        entry &&
+        (entry.type === "XHR" ||
+          entry.type === "Fetch" ||
+          entry.url.includes("core.php") ||
+          entry.url.includes("mint") ||
+          entry.url.includes("token") ||
+          entry.url.includes("ajax") ||
+          (entry.url.includes("freex2line") && !entry.url.endsWith("blog-post.html/")))
+      ) {
+        try {
+          const b = await cdp.send("Network.getResponseBody", { requestId: p.requestId });
+          entry.respBody = (b.base64Encoded ? Buffer.from(b.body, "base64").toString("utf8") : b.body).slice(0, 4000);
+        } catch {}
+      }
+    });
+
+    // Step 1: Open item page or navigate directly to `shineUrl` with Referer `item.url`!
+    await cdp.send("Page.navigate", { url: item.shineUrl, referrer: item.url });
+
+    // Wait up to 22s for countdown + mint XHR + `#downloadbtn` to become visible/populated!
+    let gatewayDomState = null;
+    for (let t = 0; t < 24; t++) {
+      await sleep(1000);
+      try {
+        const ev = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const anchors = [...document.querySelectorAll('a, button, #downloadbtn, .downloadbtn')].map(el => ({
+              tag: el.tagName,
+              id: el.id,
+              cls: el.className,
+              href: el.href || el.getAttribute('href') || el.getAttribute('data-href') || '',
+              text: (el.innerText || el.textContent || '').trim().slice(0, 120),
+              rect: el.getBoundingClientRect ? el.getBoundingClientRect().toJSON() : null
+            }));
+            return JSON.stringify({
+              url: location.href,
+              title: document.title,
+              hasWatch: !!document.querySelector('#watch'),
+              anchors: anchors.filter(a => a.id || a.cls || a.href.includes('cimanow') || a.text.includes('مشاهد') || a.text.includes('انقر') || a.text.includes('تحميل'))
+            });
+          })()`,
+          returnByValue: true,
+        });
+        if (ev?.result?.value) {
+          gatewayDomState = JSON.parse(ev.result.value);
+          // Check if an anchor pointing to cimanow watching appeared and has width > 0!
+          const readyBtn = gatewayDomState.anchors?.find(
+            (a) => (a.href && a.href.includes("cimanow") && a.rect && a.rect.width > 0) || gatewayDomState.hasWatch
+          );
+          if (readyBtn && t >= 12) break;
+        }
+      } catch {}
     }
 
-    report.hasGetCoreTokenBeforeNbm = typeof sb._getCoreToken === "function";
-
-    // Now run `nbmJsCode`!
+    // Also grab stripped body HTML of blog-post.html so we see exact markup!
+    let strippedGatewayHtml = "";
     try {
-      vm.runInContext(nbmJsCode, sb, { timeout: 6000 });
-    } catch (e) {
-      report.nbmRunErr = String(e.message || e);
-    }
+      const evHtml = await cdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const clone = document.documentElement.cloneNode(true);
+          clone.querySelectorAll('script, style, svg').forEach(e => e.remove());
+          return clone.outerHTML.slice(0, 12000);
+        })()`,
+        returnByValue: true,
+      });
+      strippedGatewayHtml = evHtml?.result?.value || "";
+    } catch {}
 
-    // Fire any DOMContentLoaded listeners and short timers!
-    for (const l of domListeners.slice(0, 10)) {
-      if (l.ev === "DOMContentLoaded" || l.ev === "load") {
-        try { l.fn(); } catch {}
-      }
-    }
-    for (const tfn of timers.slice(0, 10)) {
-      try { tfn(); } catch {}
-    }
+    // Find the button to click with a REAL trusted mouse click (`Input.dispatchMouseEvent`)!
+    let clickInfo = null;
+    if (gatewayDomState && !gatewayDomState.hasWatch) {
+      const targetBtn =
+        gatewayDomState.anchors?.find((a) => a.href && a.href.includes("cimanow") && a.rect && a.rect.width > 0) ||
+        gatewayDomState.anchors?.find((a) => (a.id === "downloadbtn" || a.cls.includes("downloadbtn")) && a.rect && a.rect.width > 0) ||
+        gatewayDomState.anchors?.find((a) => a.rect && a.rect.width > 0 && a.href && !a.href.startsWith("javascript"));
 
-    report.hasGetCoreTokenAfterNbm = typeof sb._getCoreToken === "function";
-    if (typeof sb._getCoreToken === "function") {
-      const tok1 = sb._getCoreToken();
-      const tok2 = sb._getCoreToken();
-      report.token1 = tok1;
-      report.token2 = tok2;
-      report.getCoreTokenFnSource = sb._getCoreToken.toString().slice(0, 4000);
-    }
-
-    report._sb = sb;
-    report._mintFn = typeof sb._getCoreToken === "function" ? () => sb._getCoreToken() : null;
-  } catch (e) {
-    report.vmError = String(e.stack || e);
-  }
-
-  return report;
-}
-
-async function inspectDecodedWatching(watchingHtml, watchUrl, nbmJsCode, proxies) {
-  const res = {};
-  const tokenAnalysis = analyzeNbmAndToken(nbmJsCode, watchingHtml, "https://rm.freex2line.online/2020/02/blog-post.html/");
-  let mintFn = tokenAnalysis._mintFn;
-  const sb = tokenAnalysis._sb;
-  delete tokenAnalysis._mintFn;
-  delete tokenAnalysis._sb;
-
-  // If `_getCoreToken` wasn't defined yet, check if `watchingHtml` has a different external JS file on cimanow.cc and execute it!
-  if (!mintFn && sb && Array.isArray(tokenAnalysis.watchingExternalSrcs)) {
-    tokenAnalysis.fetchedExtraScripts = [];
-    for (const src of tokenAnalysis.watchingExternalSrcs) {
-      if (src.includes("cimanow") && !src.includes("jquery") && !src.includes("owl.carousel") && !src.includes("0CYA6X1KhKIS") && !src.includes("nbm2oHaQcN60y6Ozwm")) {
-        try {
-          const fullU = new URL(src, "https://cimanow.cc/").toString();
-          const jr = await smartReq(fullU, proxies, { referer: "https://rm.freex2line.online/" });
-          tokenAnalysis.fetchedExtraScripts.push({ url: fullU, len: jr.text.length, preview: jr.text.slice(0, 1500) });
-          vm.runInContext(jr.text, sb, { timeout: 5000 });
-          if (typeof sb._getCoreToken === "function") {
-            mintFn = () => sb._getCoreToken();
-            tokenAnalysis.tokenFromExtraScript = mintFn();
-            tokenAnalysis.extraScriptUrl = fullU;
-            tokenAnalysis.extraScriptFullIfSmall = jr.text.length < 100000 ? jr.text : undefined;
-          }
-        } catch (e) {
-          tokenAnalysis.fetchedExtraScripts.push({ url: src, err: String(e.message || e) });
+      if (targetBtn && targetBtn.rect) {
+        // Scroll element into view first and get fresh coordinates!
+        const freshBoxEv = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const el = document.querySelector('#downloadbtn a, a#downloadbtn, .downloadbtn a, a.downloadbtn, a[href*="cimanow"]');
+            if (!el) return null;
+            el.scrollIntoView({ block: 'center' });
+            const r = el.getBoundingClientRect();
+            return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2, href: el.href, outer: el.outerHTML.slice(0, 500) });
+          })()`,
+          returnByValue: true,
+        });
+        if (freshBoxEv?.result?.value) {
+          const box = JSON.parse(freshBoxEv.result.value);
+          clickInfo = box;
+          await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
+          await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
         }
       }
     }
-  }
-  res.tokenAnalysis = tokenAnalysis;
 
-  // Parse `<ul id="watch">`
-  const watchUl = watchingHtml.match(/<ul[^>]*id=["']watch["'][^>]*>([\s\S]*?)<\/ul>/i)?.[0] || "";
-  res.watchUlHtml = watchUl.slice(0, 5000);
+    // Wait up to 16s for `/watching/` (`#watch`) to load!
+    let watchingData = null;
+    for (let t = 0; t < 16; t++) {
+      await sleep(1000);
+      try {
+        // Check if a new tab was opened (`target="_blank"`)!
+        const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
+        const pages = await listRes.json();
+        const watchTab = pages.find((p) => p.url && p.url.includes("cimanow.cc") && p.webSocketDebuggerUrl);
+        if (watchTab && watchTab.webSocketDebuggerUrl !== wsUrl) {
+          const tabCdp = new CDPClient(watchTab.webSocketDebuggerUrl);
+          await tabCdp.connect();
+          await tabCdp.send("Runtime.enable");
+          await tabCdp.send("Network.enable");
+          cdp.close();
+          cdp = tabCdp;
+          wsUrl = watchTab.webSocketDebuggerUrl;
+        }
 
-  const tabs = [...watchUl.matchAll(/<li\b([^>]*)>([\s\S]*?)<\/li>/gi)].map((m) => ({
-    ariaLabel: m[1].match(/aria-label=["']([^"']*)["']/i)?.[1] || "",
-    dataIndex: m[1].match(/data-index=["']([^"']*)["']/i)?.[1] || "",
-    dataId: m[1].match(/data-id=["']([^"']*)["']/i)?.[1] || "",
-    text: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-    innerHtml: m[2].trim().slice(0, 600),
-  }));
-  res.tabs = tabs;
-
-  // Test `core.php` switch on EVERY valid tab!
-  const validTabs = tabs.filter(
-    (t) => t.ariaLabel !== "embed" && t.ariaLabel !== "uptobox" && t.dataIndex !== "00" && t.dataId
-  );
-  res.switchCalls = [];
-  for (let i = 0; i < validTabs.length; i++) {
-    const t = validTabs[i];
-    if (i === 0) {
-      // Test without token first
-      const rNo = await smartReq(
-        `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`,
-        proxies,
-        { referer: "https://rm.freex2line.online/", extraHeaders: ["Origin: https://rm.freex2line.online"] }
-      );
-      res.switchWithoutToken = { status: rNo.status, body: rNo.text.trim().slice(0, 500) };
+        const evW = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            if (!document.querySelector('#watch')) return JSON.stringify({ ready: false, url: location.href, title: document.title });
+            const tabs = [...document.querySelectorAll('#watch li')].map(li => ({
+              ariaLabel: li.getAttribute('aria-label') || '',
+              dataIndex: li.getAttribute('data-index') || '',
+              dataId: li.getAttribute('data-id') || '',
+              cls: li.className || '',
+              text: (li.innerText || li.textContent || '').trim(),
+              innerHtml: li.innerHTML.slice(0, 600)
+            }));
+            const downloads = [...document.querySelectorAll('#download li[aria-label="quality"], #download > li')].map(q => ({
+              qualityHeader: (q.querySelector('span, h3, h4, em, b') || {}).innerText || q.innerText.split('\\n')[0] || '',
+              links: [...q.querySelectorAll('a[href]')].map(a => ({
+                href: a.href,
+                text: (a.innerText || a.textContent || '').trim()
+              }))
+            }));
+            const scripts = [...document.querySelectorAll('script')].map((s, idx) => ({
+              idx,
+              src: s.src || '',
+              id: s.id || '',
+              len: (s.innerHTML || '').length,
+              preview: (s.innerHTML || '').slice(0, 500)
+            }));
+            return JSON.stringify({
+              ready: true,
+              url: location.href,
+              title: document.title,
+              cookie: document.cookie,
+              hasGetCoreToken: typeof window._getCoreToken === 'function',
+              sampleCoreToken: typeof window._getCoreToken === 'function' ? window._getCoreToken() : null,
+              coreTokenFnSrc: typeof window._getCoreToken === 'function' ? window._getCoreToken.toString().slice(0, 2000) : null,
+              tabs,
+              downloads,
+              scripts
+            });
+          })()`,
+          returnByValue: true,
+        });
+        if (evW?.result?.value) {
+          const parsed = JSON.parse(evW.result.value);
+          watchingData = parsed;
+          if (parsed.ready) break;
+        }
+      } catch {}
     }
-    const freshTok = mintFn ? mintFn() : (tokenAnalysis.token1 || "");
-    const url =
-      `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
-      (freshTok ? `?token=${encodeURIComponent(freshTok)}&` : `?`) +
-      `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
-    let sr = await smartReq(url, proxies, {
-      referer: "https://rm.freex2line.online/",
-      extraHeaders: ["Origin: https://rm.freex2line.online"],
-    });
-    if (!sr.text.includes("<iframe") && i === 0) {
-      const tokAlt = mintFn ? mintFn() : freshTok;
-      const urlAlt =
-        `https://cimanow.cc/wp-content/themes/Cima%20Now%20New/core.php` +
-        (tokAlt ? `?token=${encodeURIComponent(tokAlt)}&` : `?`) +
-        `action=switch&index=${encodeURIComponent(t.dataIndex)}&id=${encodeURIComponent(t.dataId)}`;
-      const srAlt = await smartReq(urlAlt, proxies, {
-        referer: watchUrl,
-        extraHeaders: ["X-Requested-With: XMLHttpRequest"],
+
+    // If `#watch` is ready, switch EVERY server tab right inside the page via fetch/jQuery so we get EVERY iframe!
+    let switchResults = [];
+    if (watchingData?.ready) {
+      const evSw = await cdp.send("Runtime.evaluate", {
+        expression: `(async () => {
+          const out = [];
+          const lis = [...document.querySelectorAll('#watch li[data-id]')].filter(
+            li => li.getAttribute('data-index') !== '00' && li.getAttribute('aria-label') !== 'embed'
+          );
+          // Test first tab WITHOUT token to see if core.php requires token!
+          if (lis[0]) {
+            const r0 = await fetch('/wp-content/themes/Cima%20Now%20New/core.php?action=switch&index=' + encodeURIComponent(lis[0].dataset.index) + '&id=' + encodeURIComponent(lis[0].dataset.id), {
+              headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            out.push({ testNoToken: true, status: r0.status, body: (await r0.text()).trim().slice(0, 500) });
+          }
+          for (const li of lis) {
+            const tok = typeof window._getCoreToken === 'function' ? window._getCoreToken() : '';
+            const u = '/wp-content/themes/Cima%20Now%20New/core.php?token=' + encodeURIComponent(tok) + '&action=switch&index=' + encodeURIComponent(li.dataset.index) + '&id=' + encodeURIComponent(li.dataset.id);
+            const r = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            out.push({
+              name: (li.innerText || '').trim(),
+              index: li.dataset.index,
+              id: li.dataset.id,
+              tokenUsed: tok,
+              status: r.status,
+              body: (await r.text()).trim().slice(0, 600)
+            });
+          }
+          return JSON.stringify(out);
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
       });
-      res.switchAltRefererTest = { status: srAlt.status, body: srAlt.text.trim().slice(0, 500) };
+      if (evSw?.result?.value) switchResults = JSON.parse(evSw.result.value);
     }
-    res.switchCalls.push({
-      name: t.text,
-      index: t.dataIndex,
-      id: t.dataId,
-      tokenSent: freshTok,
-      status: sr.status,
-      body: sr.text.trim().slice(0, 600),
-    });
+
+    // Also dump all cookies in Chrome's cookie jar!
+    let allBrowserCookies = [];
+    try {
+      const ck = await cdp.send("Network.getAllCookies");
+      allBrowserCookies = (ck.cookies || []).filter(
+        (c) => c.domain.includes("cimanow") || c.domain.includes("freex2line")
+      );
+    } catch {}
+
+    return {
+      ok: !!watchingData?.ready,
+      proxyUsed: proxyUrl,
+      gatewayDomState,
+      strippedGatewayHtml: strippedGatewayHtml.slice(0, 8000),
+      clickInfo,
+      allBrowserCookies,
+      netEvents,
+      watchingData,
+      switchResults,
+    };
+  } finally {
+    if (cdp) cdp.close();
+    try { proc.kill("SIGKILL"); } catch {}
+    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch {}
   }
-
-  // Parse `<ul id="download">` quality sections & links!
-  const dlIdx = watchingHtml.search(/<ul[^>]*id=["']download["']/i);
-  const dlSlice = dlIdx >= 0 ? watchingHtml.slice(dlIdx, dlIdx + 25000) : "";
-  res.downloadSectionHtml = dlSlice.slice(0, 8000);
-  res.downloadLinks = [...dlSlice.matchAll(/<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi)].map((m) => ({
-    href: m[2].replace("web2.cnvids.com", "fr.cimanow.cc"),
-    rawHref: m[2],
-    text: m[4].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-  }));
-
-  return res;
 }
 
 async function main() {
@@ -507,13 +466,6 @@ async function main() {
   try {
     const proxies = await getWorkingProxies();
     out.proxies = proxies;
-
-    const nbmResp = await smartReq(
-      "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3",
-      proxies,
-      { referer: "https://cimanow.cc/home/" }
-    );
-    const nbmJsCode = nbmResp.text;
 
     const items = [
       {
@@ -531,46 +483,42 @@ async function main() {
     ];
 
     out.items = {};
-    for (let idx = 0; idx < items.length; idx++) {
-      const it = items[idx];
-      const mv = await smartReq(it.url, proxies, { referer: "https://cimanow.cc/home/" });
-      const shineUrl = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] || "";
-      const vault = await fetchGatewayVault(shineUrl, it.url, proxies);
-      if (!vault.ok) {
-        out.items[it.name] = { shineUrl, vault };
-        continue;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      // Get `.shine` URL via curl
+      let shineUrl = "";
+      let workingP = proxies[0];
+      for (const p of proxies) {
+        try {
+          const mv = await curlReq(it.url, { proxy: p, referer: "https://cimanow.cc/home/" });
+          if (mv.status === 200 && !isCimaBlock(mv.text)) {
+            shineUrl = mv.text.match(/<a\b[^>]*class=["'][^"']*shine[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1] || "";
+            workingP = p;
+            if (shineUrl) break;
+          }
+        } catch {}
       }
-      const dec = decodeVaultHtml(vault.vaultHtml);
-      const watchUrl = it.url + "watching/";
-      const inspected = await inspectDecodedWatching(dec.decoded, watchUrl, nbmJsCode, proxies);
-      out.items[it.name] = {
-        shineUrl,
-        vaultKeyUsed: dec.keyUsed,
-        decodedLen: dec.decodedLen,
-        outerDecoderJs: idx === 0 ? dec.outerDecoderJs : undefined,
-        tokenAnalysis:
-          idx === 0
-            ? inspected.tokenAnalysis
-            : {
-                hasGetCoreTokenBeforeNbm: inspected.tokenAnalysis.hasGetCoreTokenBeforeNbm,
-                hasGetCoreTokenAfterNbm: inspected.tokenAnalysis.hasGetCoreTokenAfterNbm,
-                token1: inspected.tokenAnalysis.token1,
-                token2: inspected.tokenAnalysis.token2,
-              },
-        watchUlHtml: inspected.watchUlHtml,
-        tabs: inspected.tabs,
-        switchWithoutToken: inspected.switchWithoutToken,
-        switchCalls: inspected.switchCalls,
-        downloadSectionHtml: idx === 0 ? inspected.downloadSectionHtml : undefined,
-        downloadLinks: inspected.downloadLinks,
-      };
+      it.shineUrl = shineUrl;
+
+      // Try up to 2 proxies in Chrome if first proxy stalls
+      let flowRes = null;
+      for (const candP of [workingP, ...proxies.filter((x) => x !== workingP)].slice(0, 3)) {
+        try {
+          flowRes = await runChromeFlow(it, candP, 9222 + i);
+          if (flowRes.ok) break;
+        } catch (e) {
+          flowRes = { ok: false, err: String(e.stack || e), proxyTried: candP };
+        }
+      }
+      if (i > 0 && flowRes?.strippedGatewayHtml) delete flowRes.strippedGatewayHtml;
+      out.items[it.name] = flowRes;
     }
   } catch (e) {
     out.fatalError = String(e.stack || e);
   }
 
   fs.writeFileSync("cimanow_recon.json", JSON.stringify(out, null, 2));
-  console.log("Wrote v8 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
+  console.log("Wrote v11 recon report, bytes:", fs.statSync("cimanow_recon.json").size);
 }
 
 main();
