@@ -18,49 +18,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Dump raw YonaPlay embed.js & resolve sub-servers
+      - name: Dump Dotplay HTML/JS with Referer mid.yonaplay.net
         run: |
           pip install -q "curl_cffi"
-          python3 -u - <<'PY' > .tmp_wit/yonaplay.log 2>&1
-          import random, re
+          python3 -u - <<'PY' > .tmp_wit/dotplay.log 2>&1
+          import re
           from curl_cffi import requests as creq
 
           vs = creq.Session(impersonate="chrome124")
-          cands = []
-          for fu in [
-              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-          ]:
-              try:
-                  for ln in vs.get(fu, timeout=8).text.splitlines():
-                      if re.match(r"^\d+\.\d+\.\d+\.\d+:\d+$", ln.strip()):
-                          cands.append("socks5h://" + ln.strip())
-              except Exception:
-                  pass
-          random.shuffle(cands)
-
-          for px in cands[:80]:
-              try:
-                  ps = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-                  r = ps.get("https://mid.yonaplay.net/embed/7b80c24b3fb699b0/", headers={"Referer": "https://witanime.site/"}, timeout=8)
-                  if r.status_code != 200 or "just a moment" in r.text[:2500].lower():
-                      continue
-                  ejs = ps.get("https://mid.yonaplay.net/assets/js/embed.js", headers={"Referer": "https://mid.yonaplay.net/embed/7b80c24b3fb699b0/"}, timeout=8).text
-                  print("=== RAW embed.js ===")
-                  print(ejs)
-                  print("=== TESTING LIVE YONAPLAY API ===")
-                  h = {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest", "Accept": "application/json", "Origin": "https://mid.yonaplay.net", "Referer": "https://mid.yonaplay.net/embed/7b80c24b3fb699b0/"}
-                  ini = ps.post("https://mid.yonaplay.net/api/init-session.php", json={}, headers=h, timeout=8).json()
-                  print("init-session:", ini)
-                  srcs = ps.post("https://mid.yonaplay.net/api/sources.php", json={"code": ini["c"]}, headers=h, timeout=8).json()
-                  print("sources:", srcs)
-                  for qk, qobj in (srcs.get("qualities") or {}).items():
-                      for srv in (qobj.get("servers") or []):
-                          ra = ps.post("https://mid.yonaplay.net/api/api.php", json={"code": ini["c"], "token": srv["token"], "key": ini["k"]}, headers=h, timeout=8).json()
-                          print(f"  [{qk}] {srv['name']} -> {ra}")
-                  break
-              except Exception as e:
-                  pass
+          rd = vs.get("https://dotplay.net/embed/b15b9b7ce5fc55b2eef9a6242db9106f", headers={"Referer": "https://mid.yonaplay.net/", "Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "cross-site"}, timeout=12)
+          print("Dotplay direct:", rd.status_code, rd.url, len(rd.text))
+          print(rd.text[:6000])
+          for m in re.finditer(r'src=["\']([^"\']+\.js[^"\']*)["\']', rd.text):
+              jsu = m.group(1)
+              if not jsu.startswith("http"):
+                  jsu = "https://dotplay.net/" + jsu.lstrip("/")
+              if "dotplay" in jsu:
+                  rjs = vs.get(jsu, headers={"Referer": rd.url}, timeout=10)
+                  print(f"=== JS {jsu} ({rjs.status_code}, len={len(rjs.text)}) ===")
+                  print(rjs.text[:8000])
           PY
 
       - name: Commit inspection dump
@@ -69,6 +45,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A .tmp_wit
-          git commit -m "chore: save yonaplay dump [skip ci]" || true
+          git commit -m "chore: save dotplay dump [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
