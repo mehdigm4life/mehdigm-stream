@@ -220,9 +220,16 @@ internal object AnimeDayExtractors {
                     extractMediaFire(url, subtitleCallback, countingCallback)
                 }
 
-                // 7. UpnShare / P2PStream SPA (`*.upns.one/#id`, `*.p2pstream.vip/#id`, `upnshare.*`)
-                host.contains("upns.") || host.contains("p2pstream.") || host.contains("upnshare.") || host.contains("uns.bio") -> {
+                // 7. UpnShare / P2PStream / RPMShare SPA (`*.upns.one/#id`, `*.p2pstream.vip/#id`, `*.strp2p.site/#id`, `*.rpmplay.me/#id`)
+                host.contains("upns.") || host.contains("p2pstream.") ||
+                    host.contains("strp2p.") || host.contains("rpmplay.") ||
+                    host.contains("upnshare.") || host.contains("uns.bio") -> {
                     extractUpnShare(url, countingCallback)
+                }
+
+                // 7b. FireStream (`firestream.to/e/<slug>` -> `firestream.site/api/videos/<slug>/resolve`)
+                host.contains("firestream.") -> {
+                    extractFireStream(url, referer, subtitleCallback, countingCallback)
                 }
 
                 // 8. MegaMax / MegaTukTuk Inertia multi-mirror (`megamax.me/iframe/...`, `megatuktuk.store/iframe/...`)
@@ -860,20 +867,31 @@ internal object AnimeDayExtractors {
             "Origin" to origin,
         )
         val hexPayload = fetchText("$origin/api/v1/video?id=$id", headers)?.trim() ?: return@withContext
-        val cleanHex = hexPayload.trim('"').trim()
+        val cleanHex = hexPayload.trim('"').replace(Regex("""\s+"""), "")
         if (cleanHex.length < 32 || cleanHex.length % 2 != 0) return@withContext
 
         val decrypted = runCatching {
             val data = ByteArray(cleanHex.length / 2) { i ->
                 cleanHex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
             }
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(UPN_AES_KEY, "AES"), IvParameterSpec(UPN_AES_IV))
-            String(cipher.doFinal(data), Charsets.UTF_8)
+            val rawPlain = runCatching {
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(UPN_AES_KEY, "AES"), IvParameterSpec(UPN_AES_IV))
+                String(cipher.doFinal(data), Charsets.UTF_8)
+            }.getOrElse {
+                val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(UPN_AES_KEY, "AES"), IvParameterSpec(UPN_AES_IV))
+                String(cipher.doFinal(data), Charsets.UTF_8)
+            }
+            rawPlain.trim { it <= ' ' || it.code < 0x20 }
         }.getOrNull() ?: return@withContext
 
         val json = AnimeDayCrypto.safeJsonObject(decrypted) ?: return@withContext
-        val label = if (origin.contains("p2pstream", true)) "P2PStream" else "UpnShare"
+        val label = when {
+            origin.contains("p2pstream", true) || origin.contains("strp2p", true) -> "P2PStream"
+            origin.contains("rpmplay", true) -> "RPMShare"
+            else -> "UpnShare"
+        }
         val streamHeaders = mapOf(
             "User-Agent" to DESKTOP_UA,
             "Referer" to "$origin/",
@@ -887,6 +905,111 @@ internal object AnimeDayExtractors {
             if (!emitted.add(fullLink)) continue
             emitHlsVariantsOrMaster(label, fullLink, "$origin/", streamHeaders, Qualities.Unknown.value, callback)
         }
+    }
+
+    // ── 6b-2. FireStream (`firestream.to/e/<slug>` -> `firestream.site/api/videos/<slug>/resolve`)
+
+    private suspend fun extractFireStream(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val slug = Regex("""/(?:e|d|v)/([A-Za-z0-9_-]+)""").find(url)?.groupValues?.get(1)
+            ?: url.substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')
+                .takeIf { it.isNotBlank() }
+            ?: return@withContext
+        val initialOrigin = originOf(url)
+        val embedUrl = "$initialOrigin/e/$slug"
+
+        val pageCookies = LinkedHashMap<String, String>()
+        var finalUrl = embedUrl
+        val html = runCatching {
+            val req = Request.Builder()
+                .url(embedUrl)
+                .header("User-Agent", DESKTOP_UA)
+                .header("Referer", asciiSafeHeaderUrl(referer ?: "$initialOrigin/"))
+                .build()
+            AnimeDayCrypto.httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching null
+                finalUrl = resp.request.url.toString()
+                for (cookieLine in resp.headers("Set-Cookie")) {
+                    val pair = cookieLine.substringBefore(';')
+                    val k = pair.substringBefore('=', "").trim()
+                    val v = pair.substringAfter('=', "").trim()
+                    if (k.isNotEmpty() && v.isNotEmpty()) pageCookies[k] = v
+                }
+                resp.body?.string()
+            }
+        }.getOrNull() ?: return@withContext
+
+        val finalOrigin = originOf(finalUrl)
+
+        // Parse optional subtitles inside `<script id="video-data" type="application/json">`
+        Regex("""<script[^>]*id=["']video-data["'][^>]*>([\s\S]*?)</script>""", RegexOption.IGNORE_CASE)
+            .find(html)?.groupValues?.get(1)?.trim()?.let { rawVideoData ->
+                val subs = AnimeDayCrypto.safeJsonObject(rawVideoData)?.optJSONObject("video")?.optJSONArray("subtitles")
+                if (subs != null) {
+                    for (i in 0 until subs.length()) {
+                        val s = subs.optJSONObject(i) ?: continue
+                        val subUrl = s.optString("url").ifBlank { s.optString("file") }.trim()
+                        if (subUrl.startsWith("http")) {
+                            val lang = s.optString("label").ifBlank { s.optString("language") }.ifBlank { "Arabic" }
+                            subtitleCallback(newSubtitleFile(lang, subUrl))
+                        }
+                    }
+                }
+            }
+
+        val tokenBlob = Regex("""<script[^>]*id=["']token-blob["'][^>]*>([\s\S]*?)</script>""", RegexOption.IGNORE_CASE)
+            .find(html)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+
+        if (tokenBlob != null) {
+            val cookieHeader = pageCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+            val resolveJson = runCatching {
+                val postBody = JSONObject().put("blob", tokenBlob).toString().toRequestBody(JSON_MEDIA_TYPE)
+                val reqBuilder = Request.Builder()
+                    .url("$finalOrigin/api/videos/$slug/resolve")
+                    .post(postBody)
+                    .header("User-Agent", DESKTOP_UA)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .header("Referer", finalUrl)
+                    .header("Origin", finalOrigin)
+                if (cookieHeader.isNotBlank()) reqBuilder.header("Cookie", cookieHeader)
+                AnimeDayCrypto.httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+                    AnimeDayCrypto.safeJsonObject(resp.body?.string())
+                }
+            }.getOrNull()
+
+            if (resolveJson != null) {
+                val streamHeaders = mapOf(
+                    "User-Agent" to DESKTOP_UA,
+                    "Referer" to "$finalOrigin/",
+                    "Origin" to finalOrigin,
+                )
+                val primaryUrl = resolveJson.optString("signedVideoUrl").trim().takeIf { it.startsWith("http") }
+                val sdUrl = resolveJson.optString("signedVideoSdUrl").trim().takeIf { it.startsWith("http") }
+
+                for ((mUrl, defQual) in listOf(primaryUrl to Qualities.P1080.value, sdUrl to Qualities.P480.value)) {
+                    if (mUrl == null) continue
+                    if (mUrl.contains(".m3u8", ignoreCase = true)) {
+                        emitHlsVariantsOrMaster("FireStream", mUrl, "$finalOrigin/", streamHeaders, defQual, callback)
+                    } else {
+                        callback(
+                            newExtractorLink("FireStream", "FireStream [MP4]", mUrl, ExtractorLinkType.VIDEO) {
+                                this.referer = "$finalOrigin/"
+                                this.quality = defQual
+                                this.headers = streamHeaders
+                            },
+                        )
+                    }
+                }
+                if (primaryUrl != null || sdUrl != null) return@withContext
+            }
+        }
+
+        extractPackerAndHtmlEmbed(url, "FireStream", subtitleCallback, callback)
     }
 
     // ── 6c. MegaMax / MegaTukTuk Inertia Multi-Mirror (`megamax.me/iframe/<id>`, `megatuktuk.store/iframe/<id>`)
