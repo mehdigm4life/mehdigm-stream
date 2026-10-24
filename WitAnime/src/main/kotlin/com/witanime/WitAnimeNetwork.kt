@@ -1601,6 +1601,7 @@ object WitAnimeNetwork {
         url: String,
         fields: Map<String, String>,
         referer: String? = null,
+        extraHeaders: Map<String, String> = emptyMap(),
         clientOverride: OkHttpClient? = null
     ): Pair<Int, String>? = withContext(Dispatchers.IO) {
         try {
@@ -1613,6 +1614,9 @@ object WitAnimeNetwork {
                 .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             if (!referer.isNullOrBlank()) {
                 reqBuilder.header("Referer", encodeUrlIfNeeded(referer))
+            }
+            for ((k, v) in extraHeaders) {
+                reqBuilder.header(k, v)
             }
             (clientOverride ?: directClient).newCall(reqBuilder.build()).execute().use { resp ->
                 resp.code to resp.body?.string().orEmpty()
