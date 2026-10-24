@@ -30,10 +30,33 @@ jobs:
           cache: 'gradle'
 
       - name: Build and unit-test EgyDead plugin
+        id: gradle_build
         run: |
+          set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :EgyDead:testDebugUnitTest --tests com.egydead.EgyDeadUnitTest :EgyDead:make --no-daemon
+          ./gradlew :EgyDead:testDebugUnitTest --tests com.egydead.EgyDeadUnitTest :EgyDead:make --no-daemon 2>&1 | tee gradle.log
+
+      - name: Report Gradle Build Error if Failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          txt = open("gradle.log", encoding="utf-8", errors="replace").read()[-45000:] if os.path.exists("gradle.log") else "no log"
+          payload = {
+              "name": "EgyDead Build Log",
+              "head_sha": os.environ["SHA"],
+              "status": "completed",
+              "conclusion": "failure",
+              "output": {"title": "Gradle Build Log", "summary": "Failure tail", "text": f"```\n{txt}\n```"}
+          }
+          with open("cp.json", "w") as f: json.dump(payload, f)
+          subprocess.run(["gh", "api", "--method", "POST", f"repos/{os.environ['REPO']}/check-runs", "--input", "cp.json"], check=False)
+          PY
 
       - name: Upload EgyDead.cs3 artifact
         uses: actions/upload-artifact@v4
