@@ -1,0 +1,24 @@
+Good proxies: 18
+new-episodes?page=2: 200 {"page":2,"html":"<a class=\"@container group block w-full cursor-pointer\" href=\"https:\/\/witanime.site\/watch\/tensei-shitara-ken-deshita-ii\/4\">
+Variant no_referer_iframe (mega): rs=200 rg=302 loc=https://mega.nz/embed/BIdHzJhT#tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ
+Variant no_referer_sec_none (videa): rs=200 rg=302 loc=https://videa.hu/player?v=u5Bjx8hsoPi5waDb
+Variant origin_referer_iframe (videas): rs=200 rg=302 loc=https://app.videas.com/embed/01a169f7-c949-72e2-9f8b-4b83609cd57e/
+DL no-referer: 200 404 
+[tr4] stream HD mega -> rs=200 rg=302 loc=https://mega.nz/embed/NVFUgZ6a#ikjG-WjWdL-AZMZghOw2XPncCo4evSqXDgUZ64w8i30
+[tr4] stream HD videa -> rs=200 rg=429 loc=
+[tr4] stream HD mp4upload -> rs=429 rg=429 loc=
+[tr4] stream FHD mega -> rs=200 rg=302 loc=https://mega.nz/embed/BIdHzJhT#tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ
+[tr4] stream FHD videa -> rs=200 rg=302 loc=https://videa.hu/player?v=u5Bjx8hsoPi5waDb
+[tr4] stream FHD videas -> rs=200 rg=302 loc=https://app.videas.com/embed/01a169f7-c949-72e2-9f8b-4b83609cd57e/
+[tr4] stream FHD hgcloud -> rs=200 rg=302 loc=https://hgcloud.to/e/uenvbvpg7bp8
+[tr4] stream SD mp4upload -> rs=200 rg=302 loc=https://www.mp4upload.com/embed-5q7qs0u7pzbg.html
+[tr4] download HD mediafire -> rs=429 rg=404 loc=
+[tr4] download HD workupload -> rs=429 rg=404 loc=
+[tr4] download HD mp4upload -> rs=429 rg=404 loc=
+[tr4] download HD gofile -> rs=429 rg=404 loc=
+[tr4] download FHD mediafire -> rs=200 rg=404 loc=
+[tr4] download FHD workupload -> rs=200 rg=404 loc=
+[tr4] download FHD gofile -> rs=200 rg=404 loc=
+[bc3] stream HD ok -> rs=200 rg=302 loc=https://ok.ru/videoembed/17117310945990
+[bc3] stream FHD yonaplay -> rs=200 rg=429 loc=
+[mov] stream HD 4shared -> rs=200 rg=302 loc=https://www.4shared.com/embed/kBcjKfIOjq/Witanimecom_BNKNYYM_HD.html

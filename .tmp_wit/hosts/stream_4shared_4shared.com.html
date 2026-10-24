@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html data-embed="true">
+<head>
+  <link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/embedPlayer.4min.css?ver=-556862861"/>
+<link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/pageDownload1/downloadWithoutCommon.4min.css?ver=-1656727746"/>
+<script type="text/javascript" src="https://static.4shared.com/js/jquery/jquery-1.9.1.4min.js?ver=1965676176"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/jquery/jquery-migrate-1.2.1.4min.js?ver=-1518983214"></script>
+<script type="text/javascript">
+    $(function () {
+
+      function addHeader(cookie, header, jqXHR) {
+        var value = $.cookie(cookie);
+        if (value) jqXHR.setRequestHeader(header, value);
+      };
+
+      $.ajaxPrefilter(function (options, originalOptions, jqXHR) {
+        if (!$.cookie) return;
+        if (originalOptions.crossDomain && originalOptions.url.search(".4shared.com") == -1) return;
+        addHeader('Login', 'x-security', jqXHR);
+        addHeader('4langcookie', 'locale', jqXHR);
+      });
+    });
+  </script>
+
+  <script async src="https://serv90.com/ab47fe78.js"></script>
+<script type="text/javascript">
+  function Config() {
+    return this
+  }
+
+  Config.isVideo4SyncDomain = false;
+  Config.video4SyncDomain = 'video.4sync.com';
+  Config.mainSiteDomain = '4shared.com';
+  Config.mainSiteUrlPath = 'https://www.4shared.com/';
+  Config.mainSiteUrlHttpsPath  = 'https://www.4shared.com/';
+  Config.isRTLLanguage = false;
+  Config.currentLanguage = 'en';
+  Config.revisionNum = 64809;
+  Config.syncDomain = 'https://www.4sync.com/';
+  Config.cdDomain = 'https://dc559.4shared.com/';
+  Config.mailPatterrn = new RegExp("^[_A-Za-z0-9-]+(?:\\.[_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$");
+  Config.isMobile = false;
+  Config.isIpad = false;
+  Config.is4Sync = false;
+  Config.isUserLoggedIn = false;
+  Config.epomHost = 'adserver-e7.com';
+  Config.isMobileVersion = false;
+  Config.isMobileView = Config.isMobileVersion; //'xs' & 'sm'- mobile size
+  Config.useSearchHash = false;
+  Config.searchSeparator = Config.useSearchHash ? "#" : "?";
+  Config.detectAd = {
+    allowedUri: '/empty.js',
+    blockedUri: '/show_ad_.gif',
+    tg: 'link',
+    host : '',
+    applyD1D2 : 'false'
+  };
+  Config.searchDomain = 'search.4shared.com';
+  Config.mainSiteSecure = 'https://www.4shared.com';
+  Config.suggestionsDomain = 'suggestions.4shared.com';
+  Config.facebookVersion = 'v2.12';
+
+  Config.userVerifiedOrNull = true;
+  Config.userJustLogged = false;
+  Config.captchaSiteKey = '6Lfyis0qAAAAAPhOOELkuDxxlES9FBCmppGnIXsz';
+
+  if (!Config.isVideo4SyncDomain) {
+    Config.cookieDomain = (function () {
+      var domain = '4shared.com';
+      var splited = domain.split(".");
+      if (splited.length > 2) {
+        splited = splited.splice(splited.length - 2, splited.length);
+      }
+      return "." + splited.join(".");
+    })();
+  }
+
+  $(function() {
+    //lets detect if user just logged
+    if (typeof $.cookie === "function") {
+      Config.userJustLogged = $.cookie('justLogged') === "1";
+      if (Config.userJustLogged) {
+        $.cookie("justLogged", "0", {expires: new Date(), domain: Config.cookieDomain, path: '/'});
+        Events.fireEvent('just.logged');
+      }
+    }
+  });
+
+  
+  function selectLang(lang){
+    if (!Config.isVideo4SyncDomain) {
+      $.post("/web/user/language", {code: lang}, // save langCode into UserEntity
+          function (data) {
+            if (data.status = 'ok') {
+              document.cookie = '4langcookie=' + lang + '; path=/; domain=' + encodeURIComponent(Config.cookieDomain);
+              window.location.reload();
+            }
+          })
+    }
+  }
+</script>
+</head>
+<body class="site4shared Chrome embedVideoPlayer lang-en">
+
+<div id="player" class="embed-vjs-player">
+      <link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/plugins/videojs/video-js.4min.css?ver=1372793674"/>
+<script type="text/javascript" src="https://static.4shared.com/js/utils.4min.js?ver=1470246140"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/video.4min.js?ver=-1553918730"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.common.4min.js?ver=18684001"></script>
+<link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/plugins/videojs/videojs.social.4min.css?ver=1802999994"/>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.social.4min.js?ver=376648268"></script>
+<link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/plugins/videojs/videojs.relative.4min.css?ver=-1037512000"/>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.relative.4min.js?ver=-1510936356"></script>
+<link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/plugins/videojs/videojs.vast.4min.css?ver=-1773514814"/>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.vads.min.js?ver=8834126"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.vast.client.min.js?ver=1121532954"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.vast.min.js?ver=-305056306"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.vpaid.wrapper.4min.js?ver=454365945"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/plugins/videojs/videojs.vpaid.4min.js?ver=776440402"></script>
+<link rel="stylesheet" type="text/css" href="https://static.4shared.com/css/plugins/videojs/video-js.custom.4min.css?ver=1341694536"/>
+<div class="jsVideoAds inVideoRekl">
+      <script type="text/javascript" src="https://static.4shared.com/js/Events.4min.js?ver=-1265666699"></script>
+<script type="text/javascript" src="https://static.4shared.com/js/relativeScript.4min.js?ver=-476976299"></script>
+<ins class="a3dcb213" data-key="4d2f1d60be7814da7941fadb9185f70c"
+     data-cp-loggedin="null"
+     data-cp-filetype="null"
+     data-cp-pageType="null"
+     data-cp-category="null"
+     data-cp-fileName="null"
+     data-cp-extension="null"
+     data-cp-lang="null"
+     data-cp-preview="null"
+></ins>
+</div>
+<div class="video-container" style="position: relative; display: block; width: 100%; height: 100%;">
+  <video id="jsVideoTag_64657046491119271" playsinline class="video-js vjs-default-skin jsVideoTag" preload="auto"
+         width="640px" height="400px" controls >
+    <source src="https://dc717.4shared.com/img/kBcjKfIOjq/111ea221/dlink__2Fdownload_2FkBcjKfIOjq_3Fsbsr_3D86c104e8b5eb8323c3fb72e06300ee6cb94_26bip_3DNzQuMjM1LjEyNy4xNjQ_26lgfp_3D66_26bip_3DNzQuMjM1LjEyNy4xNjQ_26bip_3DNzQuMjM1LjEyNy4xNjQ/preview.mp4" type="video/mp4">
+  </video>
+  <script type="application/javascript">
+    function goVideoJS() {
+      videojs('jsVideoTag_64657046491119271', {
+            
+            controls : false,
+            
+            fluid:true,
+            aspectRatio:"16:9",
+            
+            plugins: {
+              
+              socialOverlay: {
+                buttonText: 'Share Video',
+                title: "[Witanime.com] BNKNYYM HD.mp4",
+                downloadLink: "https://www.4s.io/video/kBcjKfIOjq/Witanimecom_BNKNYYM_HD.html",
+                fileId: "kBcjKfIOjq"
+              },
+              
+              relative: {
+                fileId: "kBcjKfIOjq",
+                buttonText: "More videos like this"
+              },
+              
+              addLogo : "jsLogoVideo",
+              
+              addAds : 'jsVideoAds',
+              
+              common: {
+                errorMessages: {
+                  4: "Preview is not available"
+                }
+              }
+            }
+          },
+          function () {
+            
+            this.ads({
+              embed: true,
+              initialized: false
+            });
+            this.vast({
+              debugMode : 'false',
+              vpaidEnabled : 'true',
+              skip: 10,
+              url: 'https://serving.stat-rock.com/v1/placements/sgLrW9djuBalNv0w3kfA11xTRLIC6bFtPzN32nNqJCP5VqEXcW-V/code/vpaid/1',
+              embed: true,
+              initialized: false
+            });
+            
+          });
+    }
+  </script>
+  <input type="hidden" class="jsSocialTwDefaultText" value="Download $[p1] at #4shared - "/>
+  <input type="hidden" class="jsSocialTwSite" value="4shared"/>
+
+  <div class="errorOverlayBlock jsDelayCounterBlock" data-delay-time="10" style="display: none;">
+    <div class="loadingLine jsLoadingProgress"></div>
+    <div class="errorOverlayText">
+      <span>Wait widget loading<br> or watch without any delay on</span>
+      <a href="https://www.4s.io/video/kBcjKfIOjq/Witanimecom_BNKNYYM_HD.html" target="_blank" class="jsGo4sharedLink">4shared.com</a>
+    </div>
+
+    <script>
+      $(function() {
+        var counterBlock = $('.jsDelayCounterBlock');
+        var counterLength = counterBlock.attr('data-delay-time');
+        var isDifferentParentDomain = false;
+
+        if (parent !== window) {
+          isDifferentParentDomain = document.referrer.indexOf(document.domain) == -1;
+        }
+
+        if (counterLength > 0 && isDifferentParentDomain && !$('body').hasClass('site4sync') && !counterBlock.parents().find('.slideshowWrapper').length) {
+          counterBlock.show()
+        } else {
+          goVideoJS();
+          return;
+        }
+
+        $('.jsLoadingProgress', counterBlock).attr('style', 'animation-duration: '+counterLength+'s;');
+
+        setTimeout(function() {
+          goVideoJS();
+          counterBlock.hide();
+        }, counterLength * 1000);
+      });
+
+    </script>
+  </div>
+
+</div>
+
+<div class=" jsSharingContainer" style="display: none">
+  <div class="vjs-sharing-overlay" handleClick="ShareContainer" aria-disabled="false" style="display: table; opacity: 1;">
+    <div class="vjs-sharing-container">
+      <button class="vjs-share-icon footer-button btn-gp jsGooglePlusBtn" type="button" aria-live="polite" text="Google+"><span class="vjs-control-text"></span></button>
+      <button class="vjs-share-icon footer-button btn-tw jsTwitterBtn" type="button" aria-live="polite" text="Twitter"><span class="vjs-control-text"></span></button>
+      <button class="vjs-share-icon footer-button btn-em jsMailToBtn" type="button" aria-live="polite" text="Send by email"><span class="vjs-control-text"></span></button>
+      <div class="vjs-embedCode-container">
+        <div class="">
+          <div class="vid-sharing-links">
+            <div class="embedTitle">
+              <div class="middleLineBG"><span class="socialHeading">or</span></div>
+            </div>
+            <div>
+              <label for="fileEmbed">Embed code</label>
+              <input type="text" class="jsEmbedCode" id="fileEmbed" value="" onclick="this.select();">
+            </div>
+            <div>
+              <label for="fileVideoLink">Video link</label>
+              <input type="text" class="jsVideoLink" id="fileVideoLink" value="" onclick="this.select();">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="relativeTemplate" style="display: none;">
+    <h3 class="jsRrelativeTitle">More videos like this</h3>
+    <div class="relativeVideo">
+      <img src="https://static.4shared.com/images/spacer.gif?ver=1912669180" class="mp4FileExt"/>
+      <div></div>
+    </div>
+  </div>
+<div class="jsLogoVideo" style="display: none;">
+  <div class="vjs-custom-logo">
+    <a href="https://www.4s.io/video/kBcjKfIOjq/Witanimecom_BNKNYYM_HD.html" title="Free file sharing" target="_blank"><img src="https://static.4shared.com/images/spacer.gif?ver=1912669180" alt="Free file sharing"/></a>
+  </div>
+</div>
+</div>
+  </body>
+</html>
