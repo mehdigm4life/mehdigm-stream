@@ -424,5 +424,29 @@
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/ShoofLive.cs3",
         "name": "شوف لايف (ShoofLive)",
         "description": "شوف لايف — مسلسلات وأفلام وحلقات مترجمة مع كل سيرفرات المشاهدة وروابط التحميل."
+    },
+    {
+        "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaNow.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+        "fileSize": 0,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AnimeMovie",
+            "AsianDrama",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "CimaNow",
+        "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaNow.cs3",
+        "name": "سيما ناو (CimaNow)",
+        "description": "سيما ناو — مشاهدة وتحميل أحدث الأفلام والمسلسلات العربية والأجنبية والتركية والآسيوية والأنمي والبرامج بجودات متعددة."
     }
 ]

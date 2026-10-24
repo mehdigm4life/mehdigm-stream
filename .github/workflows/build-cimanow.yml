@@ -1,0 +1,84 @@
+name: Build CimaNow Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'CimaNow/**'
+      - 'build/CimaNow.png'
+      - '.github/workflows/build-cimanow.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '🤖')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Build CimaNow.cs3 and run Live E2E Verification
+        run: |
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          set +e
+          {
+            echo "=== STEP 1: :CimaNow:make ==="
+            ./gradlew :CimaNow:clean :CimaNow:make --no-daemon --stacktrace
+            MAKE_RC=$?
+            echo "MAKE_RC=$MAKE_RC"
+            if [ "$MAKE_RC" -eq 0 ]; then
+              echo "=== STEP 2: :CimaNow:testDebugUnitTest (CIMANOW_LIVE_E2E=1) ==="
+              CIMANOW_LIVE_E2E=1 ./gradlew :CimaNow:testDebugUnitTest --info --no-daemon --stacktrace
+              TEST_RC=$?
+              echo "TEST_RC=$TEST_RC"
+            else
+              TEST_RC=99
+            fi
+          } > cimanow_e2e_report.txt 2>&1
+          echo "MAKE_RC=$MAKE_RC TEST_RC=$TEST_RC" >> cimanow_e2e_report.txt
+          tail -n 120 cimanow_e2e_report.txt
+
+      - name: Sync build/CimaNow.cs3 and plugins.json
+        run: |
+          if [ -f "CimaNow/build/CimaNow.cs3" ]; then
+            mkdir -p build
+            cp -f CimaNow/build/CimaNow.cs3 build/CimaNow.cs3
+            python3 - <<'PY'
+          import os, re
+          sz = os.path.getsize("build/CimaNow.cs3")
+          with open("plugins.json", "r", encoding="utf-8") as fh:
+              txt = fh.read()
+          def repl(m):
+              blk = m.group(0)
+              if '"internalName": "CimaNow"' not in blk:
+                  return blk
+              return re.sub(r'("fileSize"\s*:\s*)\d+', rf'\g<1>{sz}', blk, count=1)
+          new_txt = re.sub(r'\{[^{}]*"internalName"\s*:\s*"CimaNow"[^{}]*\}', repl, txt, flags=re.S)
+          if new_txt != txt:
+              with open("plugins.json", "w", encoding="utf-8") as fh:
+                  fh.write(new_txt)
+          PY
+          fi
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f cimanow_e2e_report.txt plugins.json
+          if [ -f "build/CimaNow.cs3" ]; then
+            git add -f build/CimaNow.cs3
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m "🤖 Build CimaNow.cs3 + E2E report [skip ci]"
+            git pull --rebase origin "$GITHUB_REF_NAME" || true
+            git push
+          fi
