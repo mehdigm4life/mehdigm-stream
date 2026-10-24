@@ -32,23 +32,53 @@ jobs:
       - name: Live Cloudflare & Transport Forensics (Temporary Dev Probe)
         id: cf_probe
         run: |
-          python3 -m pip install --quiet -U "camoufox[geoip]" curl_cffi
-          python3 -m camoufox fetch
-          xvfb-run -a --server-args="-screen 0 1280x900x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
-          import time, json
-          from camoufox.sync_api import Camoufox
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq cloudflare-warp
+          warp-cli --accept-tos registration new || true
+          warp-cli --accept-tos mode proxy || warp-cli --accept-tos set-mode proxy || true
+          warp-cli --accept-tos proxy port 40000 || warp-cli --accept-tos set-proxy-port 40000 || true
+          warp-cli --accept-tos connect || true
+          sleep 3
 
-          with Camoufox(headless=False, humanize=True, locale="ar-EG") as browser:
-              page = browser.new_page()
+          python3 -m pip install --quiet patchright curl_cffi
+          xvfb-run -a --server-args="-screen 0 412x915x24" python3 - <<'PY' 2>&1 | tee cf_probe.log
+          import time, json
+          from curl_cffi import requests as creq
+          from patchright.sync_api import sync_playwright
+
+          print("=== 1. WARP EXIT CHECK + DIRECT CURL_CFFI OVER WARP ===")
+          try:
+              tr = creq.get("https://tv10.egydead.live/cdn-cgi/trace", proxies={"https": "socks5h://127.0.0.1:40000"}, timeout=8)
+              print("[WARP trace]", tr.text.replace("\n", " | "))
+              r_w = creq.get("https://tv10.egydead.live/h3/", impersonate="chrome131_android", proxies={"https": "socks5h://127.0.0.1:40000"}, timeout=10)
+              print(f"[WARP curl_cffi /h3/] -> status={r_w.status_code}, len={len(r_w.text)}, movieItem={'movieItem' in r_w.text}")
+          except Exception as e:
+              print("[WARP curl_cffi err]", e)
+
+          print("=== 2. PATCHRIGHT REAL CHROME + OUR EXACT TURNSTILE SOLVER OVER WARP ===")
+          with sync_playwright() as p:
+              browser = p.chromium.launch(
+                  channel="chrome",
+                  headless=False,
+                  proxy={"server": "socks5://127.0.0.1:40000"},
+                  args=[
+                      "--no-sandbox",
+                      "--disable-blink-features=AutomationControlled",
+                      "--window-size=412,915",
+                  ]
+              )
+              ctx = browser.new_context(viewport={"width": 412, "height": 915}, locale="ar-EG")
+              page = ctx.new_page()
               real_ua = page.evaluate("navigator.userAgent")
               t0 = time.time()
               resp = page.goto("https://tv10.egydead.live/h3/", wait_until="domcontentloaded", timeout=25000)
-              print(f"[CAMOUFOX] UA={real_ua} | goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
+              print(f"[CHROME+WARP] goto ({int((time.time()-t0)*1000)}ms) -> status={resp.status if resp else None}, title={page.title()!r}")
 
-              for attempt in range(1, 12):
-                  time.sleep(2.5)
+              for attempt in range(1, 10):
+                  time.sleep(2.2)
                   cards = page.locator("li.movieItem").count()
-                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in page.context.cookies()]
+                  cookies_now = [(c["name"], c["domain"], len(c["value"])) for c in ctx.cookies()]
                   if cards > 0:
                       print(f">>> LIVE CLOUDFLARE BYPASSED AT POLL #{attempt}! ({int((time.time()-t0)*1000)}ms) cards={cards}, title={page.title()!r}, cookies={cookies_now} <<<")
                       break
@@ -73,11 +103,7 @@ jobs:
                               }
                           }
                       }
-                      const sampleDivs = Array.from(document.querySelectorAll('div')).map(d => {
-                          const r = d.getBoundingClientRect();
-                          return {id: d.id, cls: (d.className||'').toString().slice(0,25), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), ch: d.children.length};
-                      }).filter(o => o.w >= 40 && o.h >= 20).slice(0, 10);
-                      return {title: document.title, dir: document.documentElement.dir, target, sampleDivs};
+                      return {title: document.title, dir: document.documentElement.dir, target};
                   }""")
                   print(f"[POLL #{attempt} +{int((time.time()-t0)*1000)}ms] cookies={cookies_now} info={json.dumps(info, ensure_ascii=False)}")
                   t = info["target"]
@@ -89,7 +115,7 @@ jobs:
                       page.mouse.click(click_x, cy)
 
               cards = page.locator("li.movieItem").count()
-              cookies = page.context.cookies()
+              cookies = ctx.cookies()
               print(f"[FINAL] ({int((time.time()-t0)*1000)}ms) title={page.title()!r}, url={page.url}, movieItems={cards}, cookies={[(c['name'], c['domain'], len(c['value'])) for c in cookies]}")
 
               if cards > 0:
@@ -103,14 +129,9 @@ jobs:
                       print(f"[TEST window.fetch({path!r})] ({int((time.time()-tf)*1000)}ms) -> {res}")
 
                   cookie_hdr = "; ".join(f"{c['name']}={c['value']}" for c in cookies if 'egydead' in c['domain'])
-                  import urllib.request
-                  req_std = urllib.request.Request("https://tv10.egydead.live/movies/", headers={"User-Agent": real_ua, "Cookie": cookie_hdr})
-                  try:
-                      with urllib.request.urlopen(req_std, timeout=8) as uresp:
-                          ubody = uresp.read().decode("utf-8", "ignore")
-                          print(f"[TEST non-browser TLS (stdlib/OkHttp analog) + cf_clearance] -> status={uresp.status}, len={len(ubody)}, movieItem={'movieItem' in ubody}")
-                  except Exception as ue:
-                      print(f"[TEST non-browser TLS (stdlib/OkHttp analog) + cf_clearance] -> BLOCKED ({ue})")
+                  r_cffi = creq.get("https://tv10.egydead.live/movies/", impersonate="chrome131", proxies={"https": "socks5h://127.0.0.1:40000"}, headers={"User-Agent": real_ua, "Cookie": cookie_hdr}, timeout=8)
+                  print(f"[TEST curl_cffi + cf_clearance] -> status={r_cffi.status_code}, len={len(r_cffi.text)}, movieItem={'movieItem' in r_cffi.text}")
+              browser.close()
           PY
 
       - name: Configure Android SDK, test, and build EgyDead plugin
