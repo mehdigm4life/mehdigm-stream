@@ -323,4 +323,40 @@ class EgyDeadUnitTest {
         assertTrue(!EgyDeadNetwork.isCloudflareBlock(200, realWatchUnlockedHtml))
         assertTrue(EgyDeadNetwork.isValidEgyDeadHtml(200, realWatchUnlockedHtml))
     }
+
+    @Test
+    fun testV21WebViewFetchBridgeConfigAndFormEncoding() {
+        val formBody = EgyDeadNetwork.encodeFormBody(
+            linkedMapOf("View" to "1", "query" to "فيلم سبايدر مان")
+        )
+        assertTrue(formBody.startsWith("View=1&query="))
+        assertFalse(formBody.contains(" "))
+
+        val cfgJson = EgyDeadNetwork.buildFetchConfigJson(
+            reqId = "req-123",
+            url = "https://tv10.egydead.live/fall-2-deadpoint-2026/",
+            method = "POST",
+            referer = "https://tv10.egydead.live/h3/",
+            body = "View=1",
+            headers = mapOf(
+                "Accept" to "text/html",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Cookie" to "cf_clearance=should_be_stripped_for_js_fetch",
+                "User-Agent" to "should_be_stripped_for_js_fetch"
+            )
+        )
+        val parsed = JSONObject(cfgJson)
+        assertEquals("req-123", parsed.getString("id"))
+        assertEquals("POST", parsed.getString("method"))
+        assertEquals("View=1", parsed.getString("body"))
+        assertEquals("https://tv10.egydead.live/h3/", parsed.getString("referer"))
+        val hdrs = parsed.getJSONObject("headers")
+        assertEquals("XMLHttpRequest", hdrs.getString("X-Requested-With"))
+        assertFalse("Forbidden browser Cookie header must not be passed to window.fetch", hdrs.has("Cookie"))
+        assertFalse("Forbidden browser User-Agent header must not be passed to window.fetch", hdrs.has("User-Agent"))
+
+        // Verify headless JVM safety of cache invalidation & cookie persistence helpers
+        EgyDeadNetwork.invalidateDomainCache()
+        assertNotNull(EgyDeadNetwork.getImageHeaders()["User-Agent"])
+    }
 }
