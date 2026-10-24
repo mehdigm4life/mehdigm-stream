@@ -18,11 +18,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inspect Videas API + Download Gate + YonaPlay + WorkUpload + Mega
+      - name: Inspect Videas API + MEGA HTTPS + Download Gate + YonaPlay
         run: |
           pip install -q "curl_cffi" beautifulsoup4 pycryptodome
           mkdir -p .tmp_wit/hosts
-          python3 -u - <<'PY' > .tmp_wit/probe2.log 2>&1
+          python3 -u - <<'PY' > .tmp_wit/probe3.log 2>&1
           import base64, concurrent.futures, json, random, re, struct, urllib.parse
           from bs4 import BeautifulSoup
           from curl_cffi import requests as creq
@@ -30,37 +30,34 @@ jobs:
           from Crypto.Util import Counter
 
           BASE = "https://witanime.site"
-          out = {}
-
-          # 1. Videas reverse engineering!
           vs = creq.Session(impersonate="chrome124")
+
+          # 1. Videas Kw() exact code
           vjs = vs.get("https://app.videas.com/static/embeds/videas-embed-player-0UWZU2eI.umd.js", timeout=15).text
-          hits = []
-          for kw in ["apiBaseUrl", "visitor/embed", "opening", "VideasEmbed", "mount("]:
-              for m in re.finditer(re.escape(kw), vjs):
-                  s = m.start()
-                  hits.append((kw, s, vjs[max(0, s-250):s+650]))
-          out["videas_js_hits"] = hits[:15]
-          for k, pos, snip in hits[:8]:
-              print(f"=== VIDEAS {k} @ {pos} ===\n{snip}\n")
+          idx = vjs.find("Kw(")
+          for m in re.finditer(r"function Kw\b|visitor/embed", vjs):
+              s = m.start()
+              print(f"=== VIDEAS @ {s} ===\n{vjs[max(0, s-400):s+1800]}\n")
 
-          # Also test MEGA API + AES-128-CTR on BIdHzJhT#tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ!
-          fid = "BIdHzJhT"
-          key_b64 = "tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ"
-          key_raw = base64.urlsafe_b64decode(key_b64 + "=" * ((4 - len(key_b64) % 4) % 4))
-          k32 = struct.unpack(">8I", key_raw)
-          aes_key = struct.pack(">4I", k32[0] ^ k32[4], k32[1] ^ k32[5], k32[2] ^ k32[6], k32[3] ^ k32[7])
-          nonce64 = struct.pack(">2I", k32[4], k32[5])
-          rmega = vs.post("https://g.api.mega.co.nz/cs?id=1", json=[{"a": "g", "g": 1, "p": fid}], timeout=12).json()
-          print("MEGA API:", rmega)
-          g_url = rmega[0]["g"]
-          enc_chunk = vs.get(g_url, headers={"Range": "bytes=0-127"}, timeout=12).content
-          ctr = Counter.new(64, prefix=nonce64, initial_value=0)
-          dec_chunk = AES.new(aes_key, AES.MODE_CTR, counter=ctr).decrypt(enc_chunk)
-          print("MEGA decrypted first 32 bytes:", dec_chunk[:32])
-          out["mega_test"] = {"api": rmega, "decrypted_hex": dec_chunk[:32].hex(), "ftyp_in_head": b"ftyp" in dec_chunk[:32]}
+          # 2. MEGA HTTPS + /0-127 test!
+          try:
+              fid = "BIdHzJhT"
+              key_b64 = "tZiJD9RQM7FgxO5lvwisdMw3XCbsXOwIoMdmDbKQ2ZQ"
+              key_raw = base64.urlsafe_b64decode(key_b64 + "=" * ((4 - len(key_b64) % 4) % 4))
+              k32 = struct.unpack(">8I", key_raw)
+              aes_key = struct.pack(">4I", k32[0] ^ k32[4], k32[1] ^ k32[5], k32[2] ^ k32[6], k32[3] ^ k32[7])
+              nonce64 = struct.pack(">2I", k32[4], k32[5])
+              rmega = vs.post("https://g.api.mega.co.nz/cs?id=1", json=[{"a": "g", "g": 1, "ssl": 2, "p": fid}], timeout=10).json()
+              print("MEGA ssl=2:", rmega)
+              g_url = rmega[0]["g"].replace("http://", "https://")
+              enc_chunk = vs.get(f"{g_url}/0-127", timeout=10).content
+              ctr = Counter.new(64, prefix=nonce64, initial_value=0)
+              dec_chunk = AES.new(aes_key, AES.MODE_CTR, counter=ctr).decrypt(enc_chunk)
+              print("MEGA decrypted first 32 bytes:", dec_chunk[:32], "ftyp?", b"ftyp" in dec_chunk[:32])
+          except Exception as e:
+              print("MEGA err:", e)
 
-          # 2. Find 8 working proxies for WitAnime download-gate + yonaplay
+          # 3. Proxies -> download-gate + yonaplay + videas live API call!
           feeds = [
               ("socks5h", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
               ("socks5h", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"),
@@ -94,91 +91,125 @@ jobs:
               for res in ex.map(tpx, cands[:220]):
                   if res:
                       pxs.append(res)
-                      if len(pxs) >= 10:
+                      if len(pxs) >= 12:
                           break
           print("Good proxies:", len(pxs))
 
-          # Test download-gate header variants on tr4!
-          for px in pxs[:4]:
-              ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-              wurl = f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"
-              r1 = ws.get(wurl, timeout=14)
-              if not is_wit(r1):
-                  continue
-              soup = BeautifulSoup(r1.text, "html.parser")
-              csrf = soup.select_one("meta[name='csrf-token']")["content"]
-              rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
-              if rsrc.status_code != 200:
-                  continue
-              dls = rsrc.json()["downloads"]["FHD"] + rsrc.json()["downloads"]["HD"]
-              dl_variants = [
-                  ("same_origin_with_referer", {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                      "Referer": wurl,
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "document",
-                      "Upgrade-Insecure-Requests": "1",
-                  }),
-                  ("same_origin_no_referer", {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-Dest": "document",
-                      "Upgrade-Insecure-Requests": "1",
-                  }),
-                  ("same_origin_user_1", {
-                      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                      "Sec-Fetch-Site": "same-origin",
-                      "Sec-Fetch-Mode": "navigate",
-                      "Sec-Fetch-User": "?1",
-                      "Sec-Fetch-Dest": "document",
-                      "Upgrade-Insecure-Requests": "1",
-                  }),
-              ]
-              dl_res = []
-              for idx_d, (vn, vh) in enumerate(dl_variants):
-                  do = dls[idx_d]
-                  tok = do["token"]
-                  rs = ws.post(f"{BASE}/watch/download-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
-                  rg = ws.get(f"{BASE}/watch/download-gate/{tok}", headers=vh, allow_redirects=False, timeout=12)
-                  loc = rg.headers.get("location", "")
-                  print(f"DL variant {vn} ({do['label']}): rs={rs.status_code} rs_body={rs.text[:150]} rg={rg.status_code} loc={loc}")
-                  dl_res.append({"variant": vn, "label": do["label"], "rs_status": rs.status_code, "rs_body": rs.text[:200], "rg_status": rg.status_code, "loc": loc})
-                  if loc.startswith("http"):
-                      rwu = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
-                      open(f".tmp_wit/hosts/dl_{do['label']}.html", "w", encoding="utf-8").write(rwu.text[:200000])
-                      print(f"  Fetched {do['label']} ({loc}) -> {rwu.status_code} len={len(rwu.text)}")
-              out["dl_variants"] = dl_res
-              break
+          # Test download-gate on tr4 using fresh proxies per variant!
+          dl_variants = [
+              ("same_origin_with_referer", lambda wurl: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                  "Referer": wurl,
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "document",
+                  "Upgrade-Insecure-Requests": "1",
+              }),
+              ("same_origin_no_referer", lambda wurl: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                  "Sec-Fetch-Site": "same-origin",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-Dest": "document",
+                  "Upgrade-Insecure-Requests": "1",
+              }),
+              ("none_user_1", lambda wurl: {
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                  "Sec-Fetch-Site": "none",
+                  "Sec-Fetch-Mode": "navigate",
+                  "Sec-Fetch-User": "?1",
+                  "Sec-Fetch-Dest": "document",
+                  "Upgrade-Insecure-Requests": "1",
+              }),
+          ]
 
-          # Also resolve yonaplay on bc3 with a fresh proxy!
-          for px in pxs[4:]:
-              ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
-              wurl = f"{BASE}/watch/black-clover-2nd-season/3"
-              r1 = ws.get(wurl, timeout=14)
-              if not is_wit(r1):
-                  continue
-              soup = BeautifulSoup(r1.text, "html.parser")
-              csrf = soup.select_one("meta[name='csrf-token']")["content"]
-              rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
-              if rsrc.status_code != 200:
-                  continue
-              yp = next((x for x in rsrc.json()["players"].get("FHD", []) if x["label"] == "yonaplay"), None)
-              if yp:
-                  tok = yp["token"]
-                  rs = ws.post(f"{BASE}/watch/stream-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
-                  rg = ws.get(f"{BASE}/watch/stream-gate/{tok}", headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": BASE + "/", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe", "Upgrade-Insecure-Requests": "1"}, allow_redirects=False, timeout=12)
-                  loc = rg.headers.get("location", "")
-                  print("yonaplay:", rs.status_code, rg.status_code, loc)
-                  out["yonaplay"] = {"rs": rs.status_code, "rs_body": rs.text[:200], "rg": rg.status_code, "loc": loc}
-                  if loc.startswith("http"):
-                      ryp = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
-                      open(".tmp_wit/hosts/stream_yonaplay.html", "w", encoding="utf-8").write(ryp.text[:200000])
-                      print("  yonaplay page:", ryp.status_code, len(ryp.text))
-              break
+          px_idx = 0
+          for px in pxs:
+              try:
+                  ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  wurl = f"{BASE}/watch/tokyo-revengers-santen-sensou-hen/4"
+                  r1 = ws.get(wurl, timeout=14)
+                  if not is_wit(r1):
+                      continue
+                  csrf = BeautifulSoup(r1.text, "html.parser").select_one("meta[name='csrf-token']")["content"]
+                  rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
+                  if rsrc.status_code != 200:
+                      continue
+                  dls = rsrc.json()["downloads"]["FHD"] + rsrc.json()["downloads"]["HD"]
+                  for idx_d, (vn, vfn) in enumerate(dl_variants):
+                      do = dls[idx_d]
+                      tok = do["token"]
+                      rs = ws.post(f"{BASE}/watch/download-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                      rg = ws.get(f"{BASE}/watch/download-gate/{tok}", headers=vfn(wurl), allow_redirects=False, timeout=12)
+                      loc = rg.headers.get("location", "")
+                      print(f"DL variant {vn} ({do['label']}): rs={rs.status_code} rs_body={rs.text[:150]} rg={rg.status_code} loc={loc}")
+                      if loc.startswith("http"):
+                          rwu = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
+                          open(f".tmp_wit/hosts/dl_{do['label']}.html", "w", encoding="utf-8").write(rwu.text[:200000])
+                          print(f"  Fetched {do['label']} ({loc}) -> {rwu.status_code} len={len(rwu.text)}")
+                  # Also fetch FHD videas embed fresh and test Videas visitor API!
+                  v_obj = next((x for x in rsrc.json()["players"]["FHD"] if x["label"] == "videas"), None)
+                  if v_obj:
+                      rs_v = ws.post(f"{BASE}/watch/stream-source/{v_obj['token']}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                      rg_v = ws.get(f"{BASE}/watch/stream-gate/{v_obj['token']}", headers={"Accept": "text/html,*/*;q=0.8", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe"}, allow_redirects=False, timeout=12)
+                      v_loc = rg_v.headers.get("location", "")
+                      print("Fresh videas loc:", v_loc)
+                      if v_loc:
+                          rvp = vs.get(v_loc, timeout=12)
+                          mcfg = re.search(r'<script id="videas-embed-config"[^>]*>([\s\S]*?)</script>', rvp.text)
+                          if mcfg:
+                              cfg = json.loads(mcfg.group(1))
+                              print("Fresh videas cfg:", cfg)
+                              # Try POST/GET /api/visitor/embed/...
+                              for api_u in [
+                                  f"https://app.videas.com/api/visitor/embed/{cfg['embedId']}?opening={urllib.parse.quote(cfg['opening'])}",
+                                  f"https://app.videas.com/api/visitor/embed?opening={urllib.parse.quote(cfg['opening'])}",
+                              ]:
+                                  ra = vs.get(api_u, headers={"Accept": "application/json", "Referer": v_loc}, timeout=12)
+                                  print("  GET", api_u[:80], "->", ra.status_code, ra.text[:400])
+                              ra_p = vs.post(f"https://app.videas.com/api/visitor/embed/{cfg['embedId']}", json={"opening": cfg["opening"]}, headers={"Accept": "application/json", "Referer": v_loc}, timeout=12)
+                              print("  POST visitor/embed/id ->", ra_p.status_code, ra_p.text[:400])
+                  px_idx = pxs.index(px) + 1
+                  break
+              except Exception as e:
+                  print("tr4 loop err:", e)
 
-          open(".tmp_wit/probe2.json", "w", encoding="utf-8").write(json.dumps(out, ensure_ascii=False, indent=2))
+          # Resolve ALL 4 download labels (mediafire, workupload, mp4upload, gofile) + yonaplay on fresh proxies!
+          for px in pxs[px_idx:]:
+              try:
+                  ws = creq.Session(impersonate="chrome124", proxies={"http": px, "https": px})
+                  wurl = f"{BASE}/watch/black-clover-2nd-season/3"
+                  r1 = ws.get(wurl, timeout=14)
+                  if not is_wit(r1):
+                      continue
+                  csrf = BeautifulSoup(r1.text, "html.parser").select_one("meta[name='csrf-token']")["content"]
+                  rsrc = ws.post(wurl + "/sources", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=14)
+                  if rsrc.status_code != 200:
+                      continue
+                  yp = next((x for x in rsrc.json()["players"].get("FHD", []) if x["label"] == "yonaplay"), None)
+                  if yp:
+                      tok = yp["token"]
+                      rs = ws.post(f"{BASE}/watch/stream-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                      rg = ws.get(f"{BASE}/watch/stream-gate/{tok}", headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": BASE + "/", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe", "Upgrade-Insecure-Requests": "1"}, allow_redirects=False, timeout=12)
+                      loc = rg.headers.get("location", "")
+                      print("yonaplay:", rs.status_code, rs.text[:150], rg.status_code, loc)
+                      if loc.startswith("http"):
+                          ryp = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
+                          open(".tmp_wit/hosts/stream_yonaplay.html", "w", encoding="utf-8").write(ryp.text[:200000])
+                          print("  yonaplay page:", ryp.status_code, len(ryp.text))
+                  for do in rsrc.json()["downloads"].get("HD", []):
+                      if do["label"] in ("workupload", "gofile"):
+                          tok = do["token"]
+                          rs = ws.post(f"{BASE}/watch/download-source/{tok}", data=b"", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": BASE, "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=12)
+                          rg = ws.get(f"{BASE}/watch/download-gate/{tok}", headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": wurl, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Upgrade-Insecure-Requests": "1"}, allow_redirects=False, timeout=12)
+                          loc = rg.headers.get("location", "")
+                          print(f"bc3 DL {do['label']}: rs={rs.status_code} rg={rg.status_code} loc={loc}")
+                          if loc.startswith("http"):
+                              rdl = vs.get(loc, headers={"Referer": BASE + "/"}, timeout=15)
+                              open(f".tmp_wit/hosts/dl_{do['label']}.html", "w", encoding="utf-8").write(rdl.text[:200000])
+                              print(f"  Fetched {do['label']} -> {rdl.status_code} len={len(rdl.text)}")
+                  break
+              except Exception as e:
+                  print("bc3 loop err:", e)
           PY
 
       - name: Commit inspection dump
@@ -187,6 +218,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A .tmp_wit
-          git commit -m "chore: save probe2 [skip ci]" || true
+          git commit -m "chore: save probe3 [skip ci]" || true
           git pull --rebase origin arena/74b8c0fa-mehdigm-stream || true
           git push origin arena/74b8c0fa-mehdigm-stream || true
