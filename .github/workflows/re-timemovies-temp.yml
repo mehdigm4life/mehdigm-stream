@@ -161,7 +161,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 - <<'PY' > /tmp/re/report/small_dex_and_appdata.txt
+          set +e
+          python3 - <<'PY' > /tmp/re/report/small_dex_and_appdata.txt 2>&1
           import glob, os, re, sqlite3
           try:
               from loguru import logger
@@ -175,19 +176,25 @@ jobs:
           if os.path.exists("/tmp/re/report/icons/classes.dex"):
               small_dexes.append("/tmp/re/report/icons/classes.dex")
           for df in small_dexes:
-              print(f"\n================ SMALL DEX: {df} ({os.path.getsize(df)} B) ================")
-              d = DEX(open(df, "rb").read())
-              print("Strings:", d.get_strings()[:250])
-              for c in d.get_classes():
-                  print("  CLASS:", c.get_name(), "super=", c.get_superclassname())
-                  for m in c.get_methods():
-                      print("    METHOD:", m.get_name(), m.get_descriptor(), "flags=", hex(m.get_access_flags()))
-                      code = m.get_code()
-                      if code:
-                          bc = code.get_bc()
-                          insns = list(bc.get_instructions())
-                          for ins in insns[:120]:
-                              print("      ", ins.get_name(), ins.get_output())
+              raw = open(df, "rb").read()
+              print(f"\n================ SMALL DEX: {df} ({len(raw)} B, magic={raw[:8]!r}) ================")
+              try:
+                  d = DEX(raw)
+                  print("Strings:", d.get_strings()[:250])
+                  for c in d.get_classes():
+                      print("  CLASS:", c.get_name(), "super=", c.get_superclassname())
+                      for m in c.get_methods():
+                          print("    METHOD:", m.get_name(), m.get_descriptor(), "flags=", hex(m.get_access_flags()))
+                          code = m.get_code()
+                          if code:
+                              bc = code.get_bc()
+                              insns = list(bc.get_instructions())
+                              for ins in insns[:120]:
+                                  print("      ", ins.get_name(), ins.get_output())
+              except Exception as e:
+                  print("  DEX parse err:", e)
+                  strs = [s.decode("ascii", "ignore") for s in re.findall(b"[ -~]{4,}", raw)]
+                  print("  RAW STRINGS:", strs[:250])
 
           # 2. Inspect /tmp/re/appdata_1092
           print("\n================ APPDATA FILES ================")
@@ -196,12 +203,18 @@ jobs:
                   continue
               for fn in sorted(files):
                   fp = os.path.join(root, fn)
-                  sz = os.path.getsize(fp)
+                  try:
+                      sz = os.path.getsize(fp)
+                  except Exception:
+                      continue
                   print(f"FILE: {fp} ({sz} B)")
-                  if sz < 250000 and any(k in fp.lower() for k in ("datastore", "shared_prefs", "device_key", "rasplab", "protector", "json", "xml", ".pb", "secret")):
-                      raw = open(fp, "rb").read()
-                      strs = re.findall(b"[ -~]{4,}", raw)
-                      print("  ASCII:", [s.decode("ascii", "ignore")[:300] for s in strs[:60]])
+                  if sz < 250000 and any(k in fp.lower() for k in ("datastore", "shared_prefs", "device_key", "rasplab", "protector", "json", "xml", ".pb", "secret", "files/")):
+                      try:
+                          raw = open(fp, "rb").read()
+                          strs = re.findall(b"[ -~]{4,}", raw)
+                          print("  ASCII:", [s.decode("ascii", "ignore")[:300] for s in strs[:80]])
+                      except Exception as e:
+                          print("  read err:", e)
                   if fn.endswith(".db") or "database" in root.lower():
                       try:
                           con = sqlite3.connect(fp)
@@ -223,9 +236,10 @@ jobs:
           grep -iE "extremeqr|okhttp|retrofit|apks\.lol|protector|firebase|Exception|Error " /tmp/re/report/logcat_1092.txt | tail -n 250 > /tmp/re/report/logcat_filtered.txt || true
           rm -f /tmp/re/report/logcat_1092.txt /tmp/re/report/icons/classes.dex
 
-          # Run jadx WITH --show-bad-code on ALL dumped DEXes + stub APK classes.dex
+          # Run jadx WITH --show-bad-code on valid standard DEXes (dump_000..003) + stub APK classes.dex
           mkdir -p /tmp/re/jadx_bad /tmp/re/jadx_stub /tmp/re/r5_src
-          ALL_DEXS=$(find /tmp/re/dumped_1092 -name "dump_*.dex" | sort)
+          ALL_DEXS=$(python3 -c 'import glob; print(" ".join(sorted(f for f in glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True) if open(f,"rb").read(4)==b"dex\n")))')
+          echo "Standard DEX files for jadx: $ALL_DEXS"
           /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_bad $ALL_DEXS || true
           /tmp/re/jadx/bin/jadx -j 4 --show-bad-code --no-res -d /tmp/re/jadx_stub /tmp/re/apks/TimeMovies_1092.apk || true
 
@@ -315,8 +329,15 @@ jobs:
               ]
           }
           with open("/tmp/re/report/bytecode_critical.txt", "w") as out_bc:
-              for df in sorted(glob.glob("/tmp/re/dumped_1092/**/dump_00[0-3]_*.dex", recursive=True)):
-                  d = DEX(open(df, "rb").read())
+              for df in sorted(glob.glob("/tmp/re/dumped_1092/**/dump_*.dex", recursive=True)):
+                  raw = open(df, "rb").read()
+                  if raw[:4] != b"dex\n":
+                      continue
+                  try:
+                      d = DEX(raw)
+                  except Exception as e:
+                      out_bc.write(f"DEX err on {df}: {e}\n")
+                      continue
                   for c in d.get_classes():
                       cname = c.get_name()
                       if cname in bytecode_targets or cname.startswith("Ltm/") or cname.startswith("Lcom/protector/"):
