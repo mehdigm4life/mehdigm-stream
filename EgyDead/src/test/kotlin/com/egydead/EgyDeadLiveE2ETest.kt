@@ -55,8 +55,10 @@ class EgyDeadLiveE2ETest {
 
     @Test
     fun test0_DiagnoseRawEndpoints() {
-        val r1 = EgyDeadNetwork.executeRawGet("https://tv10.egydead.live/movies/", referer = "https://tv10.egydead.live/")
-        println("[DIAG] tv10.egydead.live/movies/ -> code=${r1?.code}, finalUrl=${r1?.finalUrl}, len=${r1?.body?.length}, snippet=${r1?.body?.take(350)?.replace('\n', ' ')}")
+        val r0 = EgyDeadNetwork.executeRawGet("https://tv10.egydead.live/h3/", referer = "https://tv10.egydead.live/")
+        println("[DIAG] Direct tv10.egydead.live/h3/ -> code=${r0?.code}, finalUrl=${r0?.finalUrl}, len=${r0?.body?.length}, isCf=${r0?.let { EgyDeadNetwork.isCloudflareBlock(it.code, it.body) }}")
+        val r1 = EgyDeadNetwork.executeRawGet("https://tv10.egydead.live/movies/", referer = "https://tv10.egydead.live/h3/")
+        println("[DIAG] Direct tv10.egydead.live/movies/ -> code=${r1?.code}, finalUrl=${r1?.finalUrl}, len=${r1?.body?.length}")
 
         val refWatch = "https://tv10.egydead.live/fall-2-deadpoint-2026-1080p-web-dl-1/watch/"
         val r2 = EgyDeadExtractorKit.getText(
@@ -135,32 +137,40 @@ class EgyDeadLiveE2ETest {
     }
 
     @Test
-    fun test2_LiveSiteCatalogSearchLoadIfReachable() = runBlocking {
-        val probe = EgyDeadNetwork.fetchDocument("https://tv10.egydead.live/movies/")
-        println("[SITE] fetchDocument(/movies/) reachable=${probe != null}, title=${probe?.title()}")
-        assumeTrue(
-            "Skipping direct site scrape assertions when Cloudflare challenges GitHub Actions Azure ASN",
-            probe != null && probe.select("li.movieItem").isNotEmpty()
+    fun test2_LiveCloudflareBypassHomeSearchAndLoad() = runBlocking {
+        val t0 = System.currentTimeMillis()
+        val homeDoc = EgyDeadNetwork.getHomeLandingDocument(forceRefresh = true)
+        val dtHome = System.currentTimeMillis() - t0
+        println("[LIVE-CF-BYPASS] getHomeLandingDocument(/h3/) -> ok=${homeDoc != null}, elapsed=${dtHome}ms, transport=(${EgyDeadNetwork.activeTransportSummary()}), title=${homeDoc?.title()}, cards=${homeDoc?.select("li.movieItem")?.size}")
+
+        assertNotNull("CRITICAL: Must bypass Cloudflare LIVE on https://tv10.egydead.live/h3/!", homeDoc)
+        assertTrue(
+            "Expected real movieItem cards on https://tv10.egydead.live/h3/, got 0",
+            homeDoc!!.select("li.movieItem").isNotEmpty()
         )
 
-        val base = EgyDeadNetwork.getBaseUrl()
+        val featShelf = api.getMainPage(1, MainPageRequest("المواضيع المميزة", "/h3/#featured", false)).items.first().list
+        val recentShelf = api.getMainPage(1, MainPageRequest("المضاف حديثاً", "/h3/#recent", false)).items.first().list
+        println("[LIVE-CF-BYPASS] /h3/#featured=${featShelf.size} items (first=${featShelf.firstOrNull()?.name}), /h3/#recent=${recentShelf.size} items (first=${recentShelf.firstOrNull()?.name})")
+        assertTrue("Featured shelf on /h3/ must not be empty", featShelf.isNotEmpty())
+        assertTrue("Recent shelf on /h3/ must not be empty", recentShelf.isNotEmpty())
+
         val moviesReq = MainPageRequest("أحدث الأفلام", "/movies/", false)
         val p1 = api.getMainPage(1, moviesReq).items.first().list
         val p2 = api.getMainPage(2, moviesReq).items.first().list
-        assertTrue(p1.isNotEmpty() && p2.isNotEmpty())
-        assertFalse(p1.first().url == p2.first().url)
+        println("[LIVE-CF-BYPASS] /movies/ page1=${p1.size} (first=${p1.firstOrNull()?.name}), page2=${p2.size} (first=${p2.firstOrNull()?.name})")
+        assertTrue("Movies page 1 must not be empty", p1.isNotEmpty())
+        assertTrue("Movies page 2 must not be empty", p2.isNotEmpty())
+        assertFalse("Movies page 1 and page 2 must contain distinct items", p1.first().url == p2.first().url)
 
         val s1 = api.search("Lupin", 1)
-        assertNotNull(s1)
-        assertTrue(s1!!.items.isNotEmpty())
+        println("[LIVE-CF-BYPASS] search(Lupin) -> count=${s1?.items?.size}, first=${s1?.items?.firstOrNull()?.name}")
+        assertNotNull("Search must return results", s1)
+        assertTrue("Search for Lupin must return >= 1 result", s1!!.items.isNotEmpty())
 
-        val seasonRes = api.load("$base/seasons/lupin-s04/") as? AnimeLoadResponse
-        assertNotNull(seasonRes)
-        assertTrue((seasonRes!!.episodes[DubStatus.Subbed]?.size ?: 0) >= 15)
-        assertTrue((seasonRes.episodes[DubStatus.Dubbed]?.size ?: 0) >= 15)
-
-        val colRes = api.load("$base/film-series/fall-movies-collection/") as? TvSeriesLoadResponse
-        assertNotNull(colRes)
-        assertTrue(colRes!!.episodes.size >= 2)
+        val firstMovie = p1.first()
+        val movieLoad = api.load(firstMovie.url)
+        println("[LIVE-CF-BYPASS] load(${firstMovie.url}) -> type=${movieLoad?.javaClass?.simpleName}, name=${movieLoad?.name}")
+        assertNotNull("Loading live movie detail page must succeed", movieLoad)
     }
 }

@@ -13,6 +13,7 @@ object EgyDeadPrefs {
     private const val KEY_CF_CLEARANCE = "cf_clearance"
     private const val KEY_SAVED_COOKIE_HEADER = "saved_cookie_header"
     private const val KEY_CF_UA = "cf_ua"
+    private const val KEY_WORKING_PROXIES = "working_proxies_v1"
 
     @Volatile
     private var prefs: SharedPreferences? = null
@@ -121,9 +122,25 @@ object EgyDeadPrefs {
             }
         }
 
+    var savedWorkingProxies: List<String>
+        get() = prefs?.getString(KEY_WORKING_PROXIES, null)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.contains("://") && it.contains(':') }
+            .orEmpty()
+        set(value) {
+            prefs?.edit()?.apply {
+                val clean = value.map { it.trim() }.filter { it.contains("://") }.distinct().take(6)
+                if (clean.isEmpty()) remove(KEY_WORKING_PROXIES)
+                else putString(KEY_WORKING_PROXIES, clean.joinToString(","))
+                apply()
+            }
+        }
+
     fun clearCookies() {
         cfClearance = null
         savedCookieHeader = null
         savedUserAgent = null
+        savedWorkingProxies = emptyList()
     }
 }

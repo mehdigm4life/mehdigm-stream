@@ -1,7 +1,7 @@
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 18
+version = 19
 
 cloudstream {
     description = "إيجي ديد — أفلام ومسلسلات وكرتون وأنمي مترجم."
