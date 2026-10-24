@@ -137,7 +137,7 @@
         "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3284091,
+        "fileSize": 103208,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -149,7 +149,7 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 34,
+        "version": 35,
         "internalName": "CimaCloud",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.cs3",
         "name": "سيما كلاود (CimaCloud)",
