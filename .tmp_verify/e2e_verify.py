@@ -322,10 +322,17 @@ def extract_single_server(raw_url: str):
         if "vidtube." in host:
             _, _, _, raw = http_req(f"{EXTRACTOR_PHP}?url={urllib.parse.quote(url, safe='')}", headers={"User-Agent": APP_UA})
             j = json.loads(raw.decode("utf-8", errors="replace"))
-            for item in j.get("links", []):
+            srv_items = j.get("servers") or j.get("links") or j.get("sources") or []
+            for item in srv_items:
                 mu = item.get("url", "")
-                q = item.get("quality", "auto")
+                q_raw = item.get("quality") or item.get("label") or item.get("name") or "auto"
+                mq = re.search(r"(\d{3,4}p)", q_raw)
+                q = mq.group(1) if mq else ("auto" if "master.m3u8" in mu else q_raw)
                 hdrs = {"User-Agent": DESKTOP_UA, **(item.get("headers") or {})}
+                if item.get("referer"):
+                    hdrs["Referer"] = item["referer"]
+                if item.get("origin"):
+                    hdrs["Origin"] = item["origin"]
                 if q == "auto":
                     vs = parse_m3u8_variants(mu, hdrs)
                     for v in vs:
@@ -406,7 +413,8 @@ def extract_single_server(raw_url: str):
             mo = re.search(r'data-options=["\']([^"\']+)["\']', h)
             if mo:
                 opts = json.loads(htmllib.unescape(mo.group(1)))
-                meta = json.loads(opts["flashvars"]["metadata"])
+                meta_raw = opts.get("flashvars", {}).get("metadata", {})
+                meta = meta_raw if isinstance(meta_raw, dict) else json.loads(meta_raw)
                 qmap = {"mobile": "144p", "lowest": "240p", "low": "360p", "sd": "480p", "hd": "720p", "full": "1080p", "quad": "1440p", "ultra": "2160p"}
                 hdrs = {"User-Agent": DESKTOP_UA, "Referer": "https://ok.ru/"}
                 for idx, v in enumerate(meta.get("videos", [])):

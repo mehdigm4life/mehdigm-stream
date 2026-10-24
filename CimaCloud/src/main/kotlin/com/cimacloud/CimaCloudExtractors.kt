@@ -508,7 +508,8 @@ internal object CimaCloudExtractors {
         val json = CimaCloudCrypto.safeJsonObject(body) ?: return@withContext
         if (json.has("error")) return@withContext
 
-        val linksArr = json.optJSONArray("links")
+        val linksArr = json.optJSONArray("servers")
+            ?: json.optJSONArray("links")
             ?: json.optJSONArray("sources")
             ?: json.optJSONArray("data")
             ?: return@withContext
@@ -521,6 +522,13 @@ internal object CimaCloudExtractors {
 
             val customHeaders = LinkedHashMap<String, String>()
             customHeaders["User-Agent"] = DESKTOP_UA
+
+            item.optString("referer").trim().takeIf { it.isNotEmpty() }?.let {
+                customHeaders["Referer"] = asciiSafeHeaderUrl(it)
+            }
+            item.optString("origin").trim().takeIf { it.isNotEmpty() }?.let {
+                customHeaders["Origin"] = asciiSafeHeaderUrl(it)
+            }
             item.optJSONObject("headers")?.let { hObj ->
                 val keys = hObj.keys()
                 while (keys.hasNext()) {
@@ -532,18 +540,29 @@ internal object CimaCloudExtractors {
             val effRef = customHeaders["Referer"] ?: customHeaders["referer"] ?: defaultRef
             customHeaders.putIfAbsent("Referer", effRef)
 
-            val qualStr = item.optString("quality").ifBlank { item.optString("label") }
+            val qualStr = item.optString("quality")
+                .ifBlank { item.optString("label") }
+                .ifBlank { item.optString("name") }
             val qual = detectQualityInt("$qualStr $mediaUrl")
             val isM3u8 = item.optString("type").equals("hls", ignoreCase = true) ||
                 mediaUrl.contains(".m3u8", ignoreCase = true)
+            val isMasterPlaylist = mediaUrl.contains("master.m3u8", ignoreCase = true) &&
+                qual == Qualities.Unknown.value
 
-            if (isM3u8 && qualStr.equals("auto", ignoreCase = true)) {
+            if (isM3u8 && (qualStr.equals("auto", ignoreCase = true) || isMasterPlaylist)) {
                 emitHlsVariantsOrMaster(providerLabel, mediaUrl, effRef, customHeaders, qual, callback)
             } else {
+                val displayTag = if (qualStr.isNotBlank() && !qualStr.contains("سيرفر")) {
+                    "$providerLabel ($qualStr)"
+                } else if (isM3u8) {
+                    providerLabel
+                } else {
+                    "$providerLabel [MP4]"
+                }
                 callback(
                     newExtractorLink(
                         providerLabel,
-                        if (isM3u8) providerLabel else "$providerLabel [MP4]",
+                        displayTag,
                         mediaUrl,
                         if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
                     ) {
@@ -1254,10 +1273,12 @@ internal object CimaCloudExtractors {
             ?: return@withContext
         val unescaped = Parser.unescapeEntities(dataOptsRaw, false)
         val optsJson = CimaCloudCrypto.safeJsonObject(unescaped) ?: return@withContext
-        val metaRaw = optsJson.optJSONObject("flashvars")?.optString("metadata").orEmpty()
-        val metaJson = CimaCloudCrypto.safeJsonObject(metaRaw)
-            ?: CimaCloudCrypto.safeJsonObject(Parser.unescapeEntities(metaRaw, false))
-            ?: return@withContext
+        val flashvars = optsJson.optJSONObject("flashvars") ?: return@withContext
+        val metaJson = flashvars.optJSONObject("metadata") ?: run {
+            val metaRaw = flashvars.optString("metadata")
+            CimaCloudCrypto.safeJsonObject(metaRaw)
+                ?: CimaCloudCrypto.safeJsonObject(Parser.unescapeEntities(metaRaw, false))
+        } ?: return@withContext
 
         val headers = mapOf(
             "User-Agent" to DESKTOP_UA,
