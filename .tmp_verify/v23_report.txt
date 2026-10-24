@@ -2,14 +2,14 @@
 WitAnime.cs3 size=147092 entries=['manifest.json', 'classes.dex'] manifest={'requiresResources': False, 'version': 23, 'pluginClassName': 'com.witanime.WitAnimePlugin', 'name': 'WitAnime'}
 DEX symbol verification PASSED!
 plugins.json WitAnime entry: {"iconUrl": "https://witanime.site/favicon.ico", "apiVersion": 1, "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream", "fileSize": 147092, "status": 1, "language": "ar", "authors": ["mehdigm4life"], "tvTypes": ["Anime", "AnimeMovie", "OVA", "TvSeries", "Movie", "Cartoon"], "version": 23, "internalName": "WitAnime", "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/WitAnime.cs3", "name": "ويت أنمي (WitAnime)", "description": "ويت أنمي (WitAnime) — أنمي مترجم ومدبلج وأفلام أنمي بجودة عالية."}
-Found 4 verified watch-page proxies in 13.55s: ['socks5h://176.65.132.138:1080', 'socks5h://45.74.31.42:12894', 'socks5h://45.74.31.40:7121', 'socks5h://45.74.31.40:12566']
+Found 4 verified watch-page proxies in 9.16s: ['http://5.129.254.215:8888', 'socks5h://50.114.58.15:1080', 'socks5h://185.225.32.40:1080', 'socks5h://88.201.248.85:1080']
 
-=== 2. Testing v23 Streaming Pipeline on https://witanime.site/watch/black-clover-2nd-season/3 (simulating residential 429 at gate #6) ===
+=== 2.1. Testing v23 Streaming Pipeline on https://witanime.site/watch/black-clover-2nd-season/3 (simulating residential 429 at gate #6) ===
 First 8 ordered tokens: [('stream', 'videas', 'FHD'), ('stream', 'videa', 'FHD'), ('stream', 'ok', 'FHD'), ('stream', 'mp4upload', 'HD'), ('stream', 'hgcloud', 'FHD'), ('stream', 'mega', 'FHD'), ('stream', 'yonaplay', 'FHD'), ('download', 'gofile', 'FHD')]
-  Gate #1 transport skip: KeyError
-  Gate #2 transport skip: KeyError
-  [+1850ms] Real HTTP 429 at gate #3; v23 stops immediately!
-SUMMARY https://witanime.site/watch/black-clover-2nd-season/3: unlocked=0, playable_links=0, first_link=-1ms, total_loadLinks=1850ms
+  [+4522ms] Gate #1 unlocked: videas [FHD] -> https://app.videas.fr/embed/media/290e75ef-8688-4858-b49f-27906bb
+  [+5590ms] EMITTED: Videas [FHD] -> https://app.videas.fr/assets/290e75ef-8688-4858-b49f-27906bb36ed9/stream.m3...
+  [+5754ms] Real HTTP 429 at gate #3; v23 stops immediately!
+SUMMARY https://witanime.site/watch/black-clover-2nd-season/3: unlocked=1, playable_links=1, first_link=5590ms, total_loadLinks=5754ms
 Traceback (most recent call last):
-  File "<stdin>", line 359, in <module>
-AssertionError: Expected >=5 links, got 0
+  File "<stdin>", line 361, in <module>
+AssertionError: Expected >=5 links, got 1
