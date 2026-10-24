@@ -25,142 +25,70 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install jadx, pillow, pyelftools, capstone, and download APKs
+      - name: Install jadx, pillow, androguard, cryptography & download APKs
         run: |
           set -e
           pip install -q pillow pyelftools capstone androguard cryptography
-          mkdir -p /tmp/re/jadx /tmp/re/out /tmp/re/report
+          mkdir -p /tmp/re/jadx /tmp/re/out /tmp/re/report/icons
           curl -sSL https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip -o /tmp/re/jadx.zip
           unzip -q /tmp/re/jadx.zip -d /tmp/re/jadx
           chmod +x /tmp/re/jadx/bin/jadx
 
           curl -sSL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.v1.0.6.5.1092-p1.apk" -o /tmp/re/TimeMovies_1092.apk
-          curl -sSL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMovies.1.0.6.5.1091-p.apk" -o /tmp/re/TimeMovies_1091.apk
-          curl -sSL "https://github.com/magicsol255/timefiles/releases/download/player/DoomVideoPlayer.v1.0.6.7.build.1126.apk" -o /tmp/re/DoomPlayer_1126.apk
+          curl -sSL "https://github.com/magicsol255/timefiles/releases/download/mobile/TimeMoviesTV.v5.0.6.1.build.1086-p1.apk" -o /tmp/re/TimeMoviesTV_1086.apk
           curl -sSL "https://codeload.github.com/magicsol255/timefiles/zip/refs/heads/main" -o /tmp/re/timefiles_main.zip
           unzip -q /tmp/re/timefiles_main.zip -d /tmp/re/main_repo
           cp /tmp/re/main_repo/timefiles-main/TimeMovies.v1.0.6.3.build.1083-p1.apk /tmp/re/TimeMovies_1083.apk
-          ls -lh /tmp/re/*.apk
 
-      - name: Static analysis of 1092, 1091, & Protector + Icon extraction
-        run: |
-          python3 - <<'PY' > /tmp/re/report/protector_static.txt 2>&1
-          import zipfile, os, json, struct
+          # Extract icons from 1092 and 1083 + TV manifest
+          python3 - <<'PY' > /tmp/re/report/r3_static.txt 2>&1
+          import zipfile, io, os
+          try:
+              from loguru import logger
+              logger.disable("androguard")
+          except Exception:
+              pass
           from PIL import Image
-          import io
-          from androguard.core.axml import AXMLPrinter
+          from androguard.core.axml import AXMLPrinter, ARSCParser
 
-          for name, path in [("1092", "/tmp/re/TimeMovies_1092.apk"), ("1091", "/tmp/re/TimeMovies_1091.apk")]:
-              print(f"================ {name} ================")
-              z = zipfile.ZipFile(path)
-              names = z.namelist()
-              print("DEX:", [n for n in names if n.endswith(".dex")])
-              print("SO:", [n for n in names if n.endswith(".so")])
-              print("ASSETS:", [n for n in names if n.startswith("assets/")])
-              try:
-                  axml = AXMLPrinter(z.read("AndroidManifest.xml")).get_xml().decode("utf-8", "replace")
-                  for line in axml.splitlines()[:45]:
-                      print("  MAN:", line[:220])
-              except Exception as e:
-                  print("  MAN err:", e)
-              if "assets/rasplab_protector_identity.json" in names:
-                  print("IDENTITY JSON:", z.read("assets/rasplab_protector_identity.json").decode("utf-8", "replace"))
-              if "assets/so_integrity.dat" in names:
-                  d = z.read("assets/so_integrity.dat")
-                  print("so_integrity.dat len=", len(d), "head=", d[:128].hex(), "ascii=", repr(d[:128]))
-              if "assets/payload.dat" in names:
-                  d = z.read("assets/payload.dat")
-                  print("payload.dat len=", len(d), "head256=", d[:256].hex(), "ascii=", repr(d[:128]))
-              if name == "1092":
-                  # Extract launcher icons (.png or .webp)
-                  icon_cands = [n for n in names if ("mipmap" in n or "launcher" in n or "logo" in n) and (n.endswith(".png") or n.endswith(".webp"))]
-                  print("ICON CANDIDATES:", icon_cands)
-                  best = None
-                  best_px = 0
-                  for ic in icon_cands:
-                      if "foreground" in ic or "monochrome" in ic or "background" in ic:
-                          continue
+          for tag, p in [("1092", "/tmp/re/TimeMovies_1092.apk"), ("1083", "/tmp/re/TimeMovies_1083.apk"), ("TV1086", "/tmp/re/TimeMoviesTV_1086.apk")]:
+              z = zipfile.ZipFile(p)
+              axml = AXMLPrinter(z.read("AndroidManifest.xml")).get_xml().decode("utf-8", "replace")
+              print(f"=== {tag} MANIFEST ===")
+              for line in axml.splitlines()[:30]:
+                  print(" ", line[:220])
+              imgs = []
+              for n in z.namelist():
+                  if n.startswith("res/") and (n.endswith(".png") or n.endswith(".webp")) and not n.endswith(".9.png"):
                       try:
-                          im = Image.open(io.BytesIO(z.read(ic)))
-                          px = im.size[0] * im.size[1]
-                          print(f"  icon {ic}: {im.size} {im.mode}")
-                          if px > best_px:
-                              best_px = px
-                              best = (ic, im)
+                          raw = z.read(n)
+                          im = Image.open(io.BytesIO(raw))
+                          imgs.append((im.size[0]*im.size[1], len(raw), im.size, n, im))
                       except Exception:
                           pass
-                  if best:
-                      os.makedirs("/tmp/re/report/icons", exist_ok=True)
-                      best[1].save("/tmp/re/report/icons/TimeMovies_icon.png", format="PNG")
-                      print("Saved best icon from", best[0])
-                  for ic in icon_cands:
-                      if any(k in ic for k in ["xxxhdpi", "xxhdpi", "launcher", "logo"]):
-                          try:
-                              im = Image.open(io.BytesIO(z.read(ic)))
-                              safe = ic.replace("/", "_") + ".png"
-                              os.makedirs("/tmp/re/report/icons", exist_ok=True)
-                              im.save("/tmp/re/report/icons/" + safe, format="PNG")
-                          except Exception:
-                              pass
-                  if "lib/x86_64/libprotector.so" in names:
-                      os.makedirs("/tmp/re/report/prot_bin", exist_ok=True)
-                      os.makedirs("/tmp/re/so1092", exist_ok=True)
-                      so_bytes = z.read("lib/x86_64/libprotector.so")
-                      open("/tmp/re/so1092/libprotector.so", "wb").write(so_bytes)
-                      if len(so_bytes) < 2_500_000:
-                          open("/tmp/re/report/prot_bin/libprotector_x64.so", "wb").write(so_bytes)
-                  if "assets/payload.dat" in names:
-                      p_bytes = z.read("assets/payload.dat")
-                      os.makedirs("/tmp/re/report/prot_bin", exist_ok=True)
-                      open("/tmp/re/report/prot_bin/payload_head64k.bin", "wb").write(p_bytes[:65536])
-                      open("/tmp/re/report/prot_bin/payload_tail4k.bin", "wb").write(p_bytes[-4096:])
+              imgs.sort(reverse=True, key=lambda x: (x[0], x[1]))
+              print(f"=== {tag} TOP IMAGES ===")
+              for idx, (px, bsz, sz, n, im) in enumerate(imgs[:15]):
+                  print(f"  {sz} ({bsz}B) {n}")
+                  if tag in ("1092", "1083") and idx < 8 and sz[0] == sz[1] and sz[0] >= 96:
+                      im.save(f"/tmp/re/report/icons/{tag}_{idx}_{sz[0]}x{sz[1]}_{os.path.basename(n)}.png", format="PNG")
+              try:
+                  arsc = ARSCParser(z.read("resources.arsc"))
+                  pkg = arsc.get_packages_names()[0]
+                  print(f"=== {tag} ARSC pkg={pkg} ===")
+                  for res_id in [0x7F110002, 0x7F110000, 0x7F110001, 0x7F0E0000, 0x7F0E0001]:
+                      try:
+                          print(f"  0x{res_id:08x} ->", arsc.get_id(pkg, res_id))
+                      except Exception:
+                          pass
+              except Exception as e:
+                  print("ARSC err:", e)
           PY
-          if [ -f /tmp/re/so1092/libprotector.so ]; then
-            echo "=== libprotector.so dynamic symbols ===" >> /tmp/re/report/protector_static.txt
-            nm -D /tmp/re/so1092/libprotector.so | head -n 120 >> /tmp/re/report/protector_static.txt || true
-            echo "=== libprotector.so interesting strings ===" >> /tmp/re/report/protector_static.txt
-            strings -n 5 /tmp/re/so1092/libprotector.so | grep -E -i "payload|dex|tm_|af5|af7|http|api|magic|time|rasp|emu|qemu|goldfish|sdk_gphone|key|gcm|hmac|secret" | head -n 200 >> /tmp/re/report/protector_static.txt || true
-          fi
-          head -n 120 /tmp/re/report/protector_static.txt
+          cat /tmp/re/report/r3_static.txt
 
-      - name: Decompile DoomPlayer_1126 full app code with jadx
-        run: |
-          mkdir -p /tmp/re/jadx_dp
-          /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_dp /tmp/re/DoomPlayer_1126.apk || true
-          python3 - <<'PY'
-          import os, shutil
-
-          src_root = "/tmp/re/jadx_dp/sources/com/doomvideo/players"
-          dst_root = "/tmp/re/dp_clean/com/doomvideo/players"
-          skip_Substrings = [
-              "/R.java", "DaggerDoomPlayerApp", "Hilt_", "_HiltModules", "_Factory.java",
-              "_GeneratedInjector.java", "_MembersInjector.java", "_Impl.java",
-              "ComposableSingletons$", "/ads/", "/data/local/", "/data/audio/",
-              "/ui/screens/media/music/", "/ui/screens/videolist/", "/ui/screens/home/folder/",
-              "/common/permission/", "/common/awesomeDialog/"
-          ]
-          count = 0
-          total_bytes = 0
-          for root, _, files in os.walk(src_root):
-              for f in sorted(files):
-                  if not f.endswith(".java"):
-                      continue
-                  full = os.path.join(root, f)
-                  rel = os.path.relpath(full, "/tmp/re/jadx_dp/sources")
-                  if any(s in full for s in skip_Substrings):
-                      continue
-                  out = os.path.join("/tmp/re/dp_clean", rel)
-                  os.makedirs(os.path.dirname(out), exist_ok=True)
-                  shutil.copyfile(full, out)
-                  count += 1
-                  total_bytes += os.path.getsize(full)
-          print(f"Copied {count} clean DoomPlayer files ({total_bytes} bytes)")
-          PY
-
-      - name: Compile NDK memory DEX + TMSTRV1 dumper
+      - name: Compile NDK memory DEX + TMSTRV1 dumper and prepare emulator script
         run: |
           NDK_CC=$(find $ANDROID_HOME/ndk -name "x86_64-linux-android30-clang" | sort | tail -n 1)
-          echo "Using NDK CC: $NDK_CC"
           cat << 'EOF' > /tmp/re/dexdump_mem.c
           #define _LARGEFILE64_SOURCE
           #include <stdio.h>
@@ -282,85 +210,107 @@ jobs:
           EOF
           $NDK_CC -O2 -static /tmp/re/dexdump_mem.c -o /tmp/re/dexdump_mem
 
+          cat << 'EOS' > /tmp/re/run_emu.sh
+          #!/usr/bin/env bash
+          set +e
+          exec > /tmp/re/report/emu_trace.txt 2>&1
+          echo "=== run_emu.sh started ==="
+          adb devices -l
+          adb root || true
+          sleep 2
+          adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
+          adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1083 /data/local/tmp/tm1092 /data/local/tmp/tmtv"
+
+          echo "=== 1) Unpacking TimeMovies 1083 (com.funpainty.funtime) ==="
+          adb install -r /tmp/re/TimeMovies_1083.apk
+          adb logcat -c || true
+          adb shell "tcpdump -i any -nn -s 512 -w /data/local/tmp/net1083.pcap >/dev/null 2>&1 &" || true
+          adb shell monkey -p com.funpainty.funtime -c android.intent.category.LAUNCHER 1 || true
+          sleep 10
+          PID83=$(adb shell pidof com.funpainty.funtime | tr -d '\r')
+          echo "1083 PID=$PID83"
+          if [ -n "$PID83" ]; then
+            adb shell "/data/local/tmp/dexdump_mem $PID83 /data/local/tmp/tm1083"
+            adb shell "cat /proc/$PID83/maps" > /tmp/re/report/maps_1083.txt
+            adb shell "ls -laR /data/data/com.funpainty.funtime" > /tmp/re/report/files_1083.txt
+          fi
+          adb shell "killall tcpdump" || true
+          adb logcat -d > /tmp/re/report/logcat_1083.txt
+          mkdir -p /tmp/re/dumped_1083
+          adb pull /data/local/tmp/tm1083 /tmp/re/dumped_1083/ || true
+          adb pull /data/local/tmp/net1083.pcap /tmp/re/report/net1083.pcap || true
+          adb shell am force-stop com.funpainty.funtime || true
+
+          echo "=== 2) Unpacking TimeMovies 1092 (com.extremeqr.proapps) ==="
+          # Hide su binary on userdebug image so libprotector anti_root doesn't trigger
+          adb remount || true
+          adb shell "mv /system/xbin/su /system/xbin/su.bak 2>/dev/null || true; mv /system/bin/su /system/bin/su.bak 2>/dev/null || true"
+          adb install -r /tmp/re/TimeMovies_1092.apk
+          adb logcat -c || true
+          adb shell "tcpdump -i any -nn -s 512 -w /data/local/tmp/net1092.pcap >/dev/null 2>&1 &" || true
+          adb shell am start -n com.extremeqr.proapps/com.extremeqr.proapps.ui.screens.activity.MainActivity || true
+          for step in 1 2 3 4 5; do
+            sleep 2
+            PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
+            echo "1092 step $step: PID=$PID92"
+            if [ -n "$PID92" ]; then
+              adb shell "mkdir -p /data/local/tmp/tm1092_$step && /data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092_$step"
+              adb shell "cat /proc/$PID92/maps" > /tmp/re/report/maps_1092_$step.txt
+              adb shell "ls -laR /data/data/com.extremeqr.proapps" > /tmp/re/report/files_1092.txt
+            fi
+          done
+          adb shell "killall tcpdump" || true
+          adb logcat -d > /tmp/re/report/logcat_1092.txt
+          mkdir -p /tmp/re/dumped_1092
+          for step in 1 2 3 4 5; do
+            adb pull /data/local/tmp/tm1092_$step /tmp/re/dumped_1092/ || true
+          done
+          adb pull /data/local/tmp/net1092.pcap /tmp/re/report/net1092.pcap || true
+          echo "=== run_emu.sh finished ==="
+          exit 0
+          EOS
+          chmod +x /tmp/re/run_emu.sh
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run Android Emulator (API 33 google_apis x86_64) to unpack 1092 & 1083
+      - name: Run Android Emulator (API 30 default x86_64)
         continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
-          target: google_apis
+          api-level: 30
+          target: default
           arch: x86_64
-          profile: pixel_5
+          profile: Nexus 6
           ram-size: 4096M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            set +e
-            exec > /tmp/re/report/emu_trace.txt 2>&1
-            echo "=== Emulator booted ==="
-            adb root || true
-            sleep 2
-            adb push /tmp/re/dexdump_mem /data/local/tmp/dexdump_mem
-            adb shell "chmod 755 /data/local/tmp/dexdump_mem && mkdir -p /data/local/tmp/tm1092 /data/local/tmp/tm1083"
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -writable-system
+          script: bash /tmp/re/run_emu.sh
 
-            echo "=== Installing 1092 (com.extremeqr.proapps) ==="
-            adb install -r /tmp/re/TimeMovies_1092.apk
-            adb logcat -c || true
-            adb shell "setprop debug.tm.af7.selftest 1" || true
-            adb shell am start -n com.extremeqr.proapps/com.extremeqr.proapps.ui.screens.activity.MainActivity
-            for delay in 0.2 0.5 1.5 4 6; do
-              sleep $delay
-              PID92=$(adb shell pidof com.extremeqr.proapps | tr -d '\r')
-              echo "1092 check ($delay s): PID=$PID92"
-              if [ -n "$PID92" ]; then
-                adb shell "/data/local/tmp/dexdump_mem $PID92 /data/local/tmp/tm1092"
-                adb shell "cat /proc/$PID92/maps" > /tmp/re/report/maps_1092.txt
-                adb shell "ls -laR /data/data/com.extremeqr.proapps /data/user/0/com.extremeqr.proapps/code_cache" > /tmp/re/report/files_1092.txt
-              fi
-            done
-            adb logcat -d > /tmp/re/report/logcat_1092.txt
-            mkdir -p /tmp/re/dumped_1092
-            adb pull /data/local/tmp/tm1092 /tmp/re/dumped_1092/ || true
-
-            echo "=== Installing 1091 ==="
-            adb install -r /tmp/re/TimeMovies_1091.apk
-            PKG91=$(adb shell pm list packages -3 | tr -d '\r' | sed 's/package://g' | grep -v extremeqr || true)
-            echo "Third-party packages after 1091: $PKG91"
-
-            echo "=== Installing 1083 (com.funpainty.funtime) ==="
-            adb install -r /tmp/re/TimeMovies_1083.apk
-            adb logcat -c || true
-            adb shell monkey -p com.funpainty.funtime -c android.intent.category.LAUNCHER 1
-            sleep 10
-            PID83=$(adb shell pidof com.funpainty.funtime | tr -d '\r')
-            echo "1083 PID=$PID83"
-            if [ -n "$PID83" ]; then
-              adb shell "/data/local/tmp/dexdump_mem $PID83 /data/local/tmp/tm1083"
-              adb shell "ls -laR /data/data/com.funpainty.funtime" > /tmp/re/report/files_1083.txt
-            fi
-            adb logcat -d > /tmp/re/report/logcat_1083.txt
-            mkdir -p /tmp/re/dumped_1083
-            adb pull /data/local/tmp/tm1083 /tmp/re/dumped_1083/ || true
-            exit 0
-
-      - name: Decrypt TMSTRV1 strings, decompile dumped DEXs, and publish check-run bundles
+      - name: Decrypt TMSTRV1, extract pcap SNIs, decompile DEXs, and publish check-runs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ls -laR /tmp/re/dumped_1092 /tmp/re/dumped_1083 /tmp/re/report || true
+          ls -laR /tmp/re/dumped_1083 /tmp/re/dumped_1092 /tmp/re/report || true
 
-          # Decrypt any tm_strings_*.dat files using StringBridge V2 AES-GCM
+          # Extract readable hostnames / SNIs from pcaps
+          for pc in /tmp/re/report/net1083.pcap /tmp/re/report/net1092.pcap; do
+            if [ -f "$pc" ]; then
+              strings -n 5 "$pc" | sort -u > "${pc}.strings.txt" || true
+              rm -f "$pc"
+            fi
+          done
+
+          # Decrypt any tm_strings_*.dat files
           python3 - <<'PY'
           import glob, struct, json, os
           from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
           DOMAIN_STRING = b"TM_DEX_STRING_V1"
-          for p in sorted(glob.glob("/tmp/re/dumped_1092/**/tm_strings_*.dat", recursive=True)):
+          for idx_f, p in enumerate(sorted(glob.glob("/tmp/re/dumped_1092/**/tm_strings_*.dat", recursive=True))):
               data = open(p, "rb").read()
               if data[:8] != b"TMSTRV1\x00":
                   continue
@@ -390,37 +340,46 @@ jobs:
                       out[str(rid)] = pt
                   except Exception as e:
                       out[str(rid)] = f"<ERR:{e}>"
-              out_json = "/tmp/re/report/" + os.path.basename(p) + ".json"
+              out_json = f"/tmp/re/report/tm_strings_dec_{idx_f}.json"
               json.dump(out, open(out_json, "w"), ensure_ascii=False, indent=2)
               print(f"Decrypted {len(out)} strings from {p} -> {out_json}")
+              break
           PY
 
-          mkdir -p /tmp/re/jadx_1092 /tmp/re/jadx_1083
-          for d in $(find /tmp/re/dumped_1092 -name "*.dex" 2>/dev/null | sort); do
-            sz=$(stat -c%s "$d")
-            if [ "$sz" -gt 10000 ]; then
-              /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_1092 "$d" || true
-            fi
-          done
-          for d in $(find /tmp/re/dumped_1083 -name "*.dex" 2>/dev/null | sort); do
-            sz=$(stat -c%s "$d")
-            if [ "$sz" -gt 10000 ]; then
-              /tmp/re/jadx/bin/jadx -j 4 --show-bad-code -d /tmp/re/jadx_1083 "$d" || true
-            fi
-          done
+          mkdir -p /tmp/re/jadx_1083 /tmp/re/jadx_1092
+          # Deduplicate dumped DEXs by size before running jadx so we don't decompile 5 identical copies
+          python3 - <<'PY'
+          import glob, os, subprocess
+
+          for out_jadx, pattern in [
+              ("/tmp/re/jadx_1083", "/tmp/re/dumped_1083/**/*.dex"),
+              ("/tmp/re/jadx_1092", "/tmp/re/dumped_1092/**/*.dex"),
+          ]:
+              seen_sizes = set()
+              dexes = []
+              for d in sorted(glob.glob(pattern, recursive=True)):
+                  sz = os.path.getsize(d)
+                  if sz > 10000 and sz not in seen_sizes:
+                      seen_sizes.add(sz)
+                      dexes.append(d)
+              print(f"{out_jadx}: unique DEX files = {[(os.path.basename(x), os.path.getsize(x)) for x in dexes]}")
+              for d in dexes:
+                  subprocess.run(["/tmp/re/jadx/bin/jadx", "-j", "4", "--show-bad-code", "-d", out_jadx, d], check=False)
+          PY
 
           python3 - <<'PY'
           import os, shutil, tarfile, base64, json, subprocess
 
-          skip_subs = ["/R.java", "Dagger", "Hilt_", "_HiltModules", "_Factory.java", "_GeneratedInjector.java", "_MembersInjector.java", "_Impl.java", "ComposableSingletons$"]
+          skip_subs = ["/R.java", "Dagger", "Hilt_", "_HiltModules", "_Factory.java", "_GeneratedInjector.java", "_MembersInjector.java", "_Impl.java", "ComposableSingletons$", "/ads/"]
 
-          for tag, src_base, pkg_sub in [
-              ("tm1092", "/tmp/re/jadx_1092/sources", "extremeqr"),
-              ("tm1083", "/tmp/re/jadx_1083/sources", "funpainty"),
+          for tag, src_base, kws in [
+              ("tm1083", "/tmp/re/jadx_1083/sources", ["funpainty", "funtime", "vplayer", "doomvideo", "extremeqr"]),
+              ("tm1092", "/tmp/re/jadx_1092/sources", ["extremeqr", "proapps", "protector", "funpainty", "funtime", "doomvideo"]),
           ]:
               dst_base = f"/tmp/re/clean_{tag}"
               os.makedirs(dst_base, exist_ok=True)
               idx = []
+              copied = 0
               if os.path.isdir(src_base):
                   for root, _, files in os.walk(src_base):
                       for f in sorted(files):
@@ -429,47 +388,39 @@ jobs:
                           full = os.path.join(root, f)
                           rel = os.path.relpath(full, src_base)
                           idx.append(rel)
-                          if (pkg_sub in rel or "protector" in rel or "funtime" in rel or "proapps" in rel or "vplayer" in rel or "doomvideo" in rel) and not any(s in full for s in skip_subs):
+                          if any(k in rel for k in kws) and not any(s in full for s in skip_subs):
                               out = os.path.join(dst_base, rel)
                               os.makedirs(os.path.dirname(out), exist_ok=True)
                               shutil.copyfile(full, out)
+                              copied += 1
               open(f"/tmp/re/report/index_{tag}.txt", "w").write("\n".join(idx))
-              print(f"{tag}: total_classes={len(idx)}")
+              print(f"{tag}: total_classes={len(idx)}, copied_app_classes={copied}")
 
-          with tarfile.open("/tmp/re/r2_report_and_tm.tar.gz", "w:gz") as tf:
+          with tarfile.open("/tmp/re/r3_bundle.tar.gz", "w:gz") as tf:
               tf.add("/tmp/re/report", arcname="report")
-              if os.path.isdir("/tmp/re/clean_tm1092"):
-                  tf.add("/tmp/re/clean_tm1092", arcname="clean_tm1092")
               if os.path.isdir("/tmp/re/clean_tm1083"):
                   tf.add("/tmp/re/clean_tm1083", arcname="clean_tm1083")
-
-          with tarfile.open("/tmp/re/r2_dp_clean.tar.gz", "w:gz") as tf:
-              if os.path.isdir("/tmp/re/dp_clean"):
-                  tf.add("/tmp/re/dp_clean", arcname="dp_clean")
+              if os.path.isdir("/tmp/re/clean_tm1092"):
+                  tf.add("/tmp/re/clean_tm1092", arcname="clean_tm1092")
 
           sha = os.environ.get("GITHUB_SHA")
           repo = os.environ.get("GITHUB_REPOSITORY")
-
-          def upload_tar(tar_path, prefix):
-              b64 = base64.b64encode(open(tar_path, "rb").read()).decode("ascii")
-              chunk_size = 60000
-              chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
-              print(f"Uploading {tar_path}: {len(b64)} b64 chars in {len(chunks)} chunks")
-              for idx, ch in enumerate(chunks[:30]):
-                  payload = {
-                      "name": f"{prefix}-{idx:02d}",
-                      "head_sha": sha,
-                      "status": "completed",
-                      "conclusion": "success",
-                      "output": {
-                          "title": f"{prefix} {idx+1}/{len(chunks)}",
-                          "summary": f"total={len(chunks)} size={len(b64)}",
-                          "text": ch
-                      }
+          b64 = base64.b64encode(open("/tmp/re/r3_bundle.tar.gz", "rb").read()).decode("ascii")
+          chunk_size = 60000
+          chunks = [b64[i:i+chunk_size] for i in range(0, len(b64), chunk_size)]
+          print(f"Uploading r3_bundle.tar.gz: {len(b64)} b64 chars in {len(chunks)} chunks")
+          for idx, ch in enumerate(chunks[:45]):
+              payload = {
+                  "name": f"r3-tm-{idx:02d}",
+                  "head_sha": sha,
+                  "status": "completed",
+                  "conclusion": "success",
+                  "output": {
+                      "title": f"r3-tm {idx+1}/{len(chunks)}",
+                      "summary": f"total={len(chunks)} size={len(b64)}",
+                      "text": ch
                   }
-                  open("/tmp/re/cp.json", "w").write(json.dumps(payload))
-                  subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/check-runs", "--input", "/tmp/re/cp.json"], check=False)
-
-          upload_tar("/tmp/re/r2_report_and_tm.tar.gz", "r2-tm")
-          upload_tar("/tmp/re/r2_dp_clean.tar.gz", "r2-dp")
+              }
+              open("/tmp/re/cp.json", "w").write(json.dumps(payload))
+              subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/check-runs", "--input", "/tmp/re/cp.json"], check=False)
           PY
