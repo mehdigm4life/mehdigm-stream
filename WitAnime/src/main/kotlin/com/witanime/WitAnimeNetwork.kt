@@ -273,11 +273,39 @@ object WitAnimeNetwork {
         }
     }
 
+    // ── Chromium Client Hints Interceptor (required by witanime.site /sources) ─
+
+    private val CHROME_VER_REGEX = Regex("""Chrome/(\d+)""")
+
+    private val browserClientHintsInterceptor = okhttp3.Interceptor { chain ->
+        val orig = chain.request()
+        val ua = orig.header("User-Agent") ?: userAgent
+        if (ua.contains("Chrome/", ignoreCase = true) && orig.header("sec-ch-ua") == null) {
+            val major = CHROME_VER_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
+            val isMobile = if (ua.contains("Mobile", ignoreCase = true)) "?1" else "?0"
+            val platform = when {
+                ua.contains("Android", ignoreCase = true) -> "\"Android\""
+                ua.contains("Macintosh", ignoreCase = true) -> "\"macOS\""
+                ua.contains("Linux", ignoreCase = true) -> "\"Linux\""
+                else -> "\"Windows\""
+            }
+            val updated = orig.newBuilder()
+                .header("sec-ch-ua", "\"Google Chrome\";v=\"$major\", \"Chromium\";v=\"$major\", \"Not_A Brand\";v=\"24\"")
+                .header("sec-ch-ua-mobile", isMobile)
+                .header("sec-ch-ua-platform", platform)
+                .build()
+            chain.proceed(updated)
+        } else {
+            chain.proceed(orig)
+        }
+    }
+
     // ── Primary OkHttp Clients ───────────────────────────────────────────────
 
     val directClient: OkHttpClient = OkHttpClient.Builder()
         .dns(hybridDns)
         .cookieJar(cookieJar)
+        .addInterceptor(browserClientHintsInterceptor)
         .sslSocketFactory(trustAllSslSocketFactory, trustAllManager)
         .hostnameVerifier { _, _ -> true }
         .followRedirects(true)
@@ -599,6 +627,7 @@ object WitAnimeNetwork {
         val client: OkHttpClient = OkHttpClient.Builder()
             .proxy(proxy)
             .cookieJar(jar)
+            .addInterceptor(browserClientHintsInterceptor)
             .sslSocketFactory(trustAllSslSocketFactory, trustAllManager)
             .hostnameVerifier { _, _ -> true }
             .followRedirects(true)
@@ -769,6 +798,7 @@ object WitAnimeNetwork {
             .header("Upgrade-Insecure-Requests", "1")
             .header("Sec-Fetch-Dest", "document")
             .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-User", "?1")
             .header("Sec-Fetch-Site", if (referer != null) "same-origin" else "none")
         if (!referer.isNullOrBlank()) {
             builder.header("Referer", encodeUrlIfNeeded(referer))
