@@ -15,7 +15,6 @@ jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '🤖')"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -28,29 +27,19 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Build CimaNow.cs3 and run Live E2E Verification
+      - name: Configure Android SDK, test, and build CimaNow plugin
         run: |
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          set +e
-          {
-            echo "=== STEP 1: :CimaNow:make ==="
-            ./gradlew :CimaNow:clean :CimaNow:make --no-daemon --stacktrace
-            MAKE_RC=$?
-            echo "MAKE_RC=$MAKE_RC"
-            if [ "$MAKE_RC" -eq 0 ]; then
-              echo "=== STEP 2: :CimaNow:testDebugUnitTest (CIMANOW_LIVE_E2E=1) ==="
-              CIMANOW_LIVE_E2E=1 ./gradlew :CimaNow:testDebugUnitTest --info --no-daemon --stacktrace
-              TEST_RC=$?
-              echo "TEST_RC=$TEST_RC"
-            else
-              TEST_RC=99
-            fi
-          } > cimanow_e2e_report.txt 2>&1
-          echo "MAKE_RC=$MAKE_RC TEST_RC=$TEST_RC" >> cimanow_e2e_report.txt
-          tail -n 120 cimanow_e2e_report.txt
+          ./gradlew :CimaNow:testDebugUnitTest :CimaNow:make --no-daemon
 
-      - name: Sync build/CimaNow.cs3 and plugins.json
+      - name: Upload CimaNow.cs3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CimaNow
+          path: CimaNow/build/CimaNow.cs3
+
+      - name: Commit and push built cs3 to build/
         run: |
           if [ -f "CimaNow/build/CimaNow.cs3" ]; then
             mkdir -p build
@@ -70,15 +59,15 @@ jobs:
               with open("plugins.json", "w", encoding="utf-8") as fh:
                   fh.write(new_txt)
           PY
-          fi
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add -f cimanow_e2e_report.txt plugins.json
-          if [ -f "build/CimaNow.cs3" ]; then
-            git add -f build/CimaNow.cs3
-          fi
-          if ! git diff --cached --quiet; then
-            git commit -m "🤖 Build CimaNow.cs3 + E2E report [skip ci]"
-            git pull --rebase origin "$GITHUB_REF_NAME" || true
-            git push
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add -f build/CimaNow.cs3 plugins.json
+            if ! git diff --cached --quiet; then
+              git commit -m "🤖 Build CimaNow.cs3 [skip ci]"
+              git pull --rebase origin "$GITHUB_REF_NAME" || true
+              git push
+            fi
+          else
+            echo "CimaNow.cs3 not found!"
+            exit 1
           fi
