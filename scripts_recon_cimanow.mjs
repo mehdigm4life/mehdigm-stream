@@ -203,6 +203,8 @@ async function fetchCimaAssets(proxies) {
   const urls = [
     "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3",
     "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/0CYA6X1KhKIS.js?v=3.1",
+    "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/jquery-3.5.1.min.js",
+    "https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/owl.carousel.min.js",
   ];
   for (const u of urls) {
     for (const p of proxies.slice(0, 4)) {
@@ -248,7 +250,7 @@ async function renderWatchingInLocalChrome(watchingUrl, rawHtml, assetsMap, prox
 
   try {
     let wsUrl = null;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await sleep(250);
       try {
         const res = await fetch(`http://127.0.0.1:${port}/json/list`);
@@ -346,6 +348,10 @@ async function renderWatchingInLocalChrome(watchingUrl, rawHtml, assetsMap, prox
       const u = p.request.url;
       if (requestedSubUrls.length < 40) requestedSubUrls.push(u);
       try {
+        if (p.resourceType === "Document" && !u.includes("/watching/")) {
+          await cdp.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "Aborted" });
+          return;
+        }
         if (u === normalizedTarget || u === watchingUrl || u.includes("/watching/")) {
           await cdp.send("Fetch.fulfillRequest", {
             requestId: p.requestId,
@@ -391,7 +397,10 @@ async function renderWatchingInLocalChrome(watchingUrl, rawHtml, assetsMap, prox
       } catch {}
     });
 
-    await cdp.send("Page.navigate", { url: watchingUrl });
+    await cdp.send("Page.navigate", {
+      url: watchingUrl,
+      referrer: "https://rm.freex2line.online/2020/02/blog-post.html/",
+    });
 
     let rendered = null;
     for (let t = 0; t < 16; t++) {
@@ -525,9 +534,10 @@ async function processItem(item, proxies, assetsMap, idx) {
       });
       if (watchRes.status !== 200 || isCimaBlock(watchRes.text)) continue;
 
-      const rawVaultStructure = idx === 0 ? inspectRawWatchingVault(watchRes.text) : undefined;
-      if (idx === 0) {
-        fs.writeFileSync("/tmp/watching_sample.html", watchRes.text);
+      let rawVaultStructure;
+      if (!globalThis.__dumpedVault) {
+        globalThis.__dumpedVault = true;
+        rawVaultStructure = inspectRawWatchingVault(watchRes.text);
       }
 
       // Render `/watching/?token=...` in Local Chrome to decode `#p_...` vault + get `_getCoreToken()`!
