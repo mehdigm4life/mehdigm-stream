@@ -740,7 +740,7 @@ class EgyDead : MainAPI() {
         }
     }
 
-    private fun loadFilmSeriesCollection(
+    private suspend fun loadFilmSeriesCollection(
         doc: Document,
         resolvedUrl: String,
         meta: PageMetadata

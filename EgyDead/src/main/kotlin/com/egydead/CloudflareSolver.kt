@@ -2,6 +2,7 @@ package com.egydead
 
 import android.R
 import android.app.Activity
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -11,15 +12,26 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.lagradost.cloudstream3.CommonActivity
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
-data class SolverResult(val finalUrl: String, val cookies: String?)
+data class SolverResult(
+    val finalUrl: String,
+    val cookies: String?,
+    val cfClearance: String?,
+    val userAgent: String
+)
 
 object CloudflareSolver {
     private const val TAG = "CF_Cookie_Hunter_Hidden"
 
-    suspend fun solve(activity: Activity?, initialUrl: String, userAgent: String): SolverResult? {
+    suspend fun solve(context: Context, initialUrl: String, userAgent: String = EgyDeadNetwork.currentUserAgent): SolverResult? {
+        val activity = (context as? Activity) ?: CommonActivity.activity
+        return solveWithActivity(activity, initialUrl, userAgent)
+    }
+
+    suspend fun solveWithActivity(activity: Activity?, initialUrl: String, userAgent: String): SolverResult? {
         return suspendCoroutine { continuation ->
             Log.d(TAG, "🕵️ بدء رحلة صيد الكوكيز للرابط: $initialUrl (في الخلفية)")
 
@@ -75,11 +87,16 @@ object CloudflareSolver {
 
                         cookieManager.flush()
                         val finalCookies = cookieManager.getCookie(finalUrl)
-                        if (!finalCookies.isNullOrEmpty()) {
-                            Log.w(TAG, "🍪 تم صيد الكوكيز بنجاح في الخلفية: $finalCookies")
-                            try { com.egydead.EgyDeadPrefsEncoder.saveCookies(finalCookies) } catch (e: Exception) {}
-                        } else {
-                            Log.e(TAG, "⚠️ انتهت العملية ولم يتم العثور على أي كوكيز!")
+                        val clearance = finalCookies
+                            ?.split(';')
+                            ?.map { it.trim() }
+                            ?.firstOrNull { it.startsWith("cf_clearance=") }
+                            ?.substringAfter("cf_clearance=")
+                            ?.takeIf { it.isNotBlank() }
+
+                        if (!clearance.isNullOrEmpty()) {
+                            EgyDeadPrefs.cfClearance = clearance
+                            EgyDeadPrefs.savedUserAgent = userAgent
                         }
 
                         try {
@@ -87,7 +104,7 @@ object CloudflareSolver {
                             rootView.removeView(webView)
                             webView.destroy()
                         } catch (e: Exception) {}
-                        continuation.resume(SolverResult(finalUrl, finalCookies))
+                        continuation.resume(SolverResult(finalUrl, finalCookies, clearance, userAgent))
                     }
                 }
                 pollingHandler.postDelayed({

@@ -362,8 +362,8 @@ object EgyDeadNetwork {
         if (res != null && isCloudflareBlock(res.code, res.body)) {
             val ctx = EgyDeadPrefs.appContext
             if (ctx != null) {
-                val solved = runCatching { CloudflareSolver.solve(ctx, targetUrl) }.getOrNull()
-                if (solved != null) {
+                val solved = runCatching { CloudflareSolver.solve(ctx, targetUrl, currentUserAgent) }.getOrNull()
+                if (solved != null && !solved.cfClearance.isNullOrBlank()) {
                     EgyDeadPrefs.cfClearance = solved.cfClearance
                     EgyDeadPrefs.savedUserAgent = solved.userAgent
                     val afterSolve = executeRawGet(targetUrl, referer = effectiveRef)
