@@ -79,27 +79,29 @@ jobs:
                   pass
           random.shuffle(cands)
 
-          working_proxy = None
+          working_proxies = []
           def probe_px(px):
               try:
                   s = requests.Session()
                   s.proxies = {"http": px, "https": px}
-                  r = s.get("https://witanime.site/", headers={**BASE_HEADERS, "Accept": "text/html"}, timeout=5)
-                  if r.status_code == 200 and len(r.text) > 1000 and "_cf_chl_opt" not in r.text:
+                  r = s.get("https://witanime.site/watch/tokyo-revengers-santen-sensou-hen/4", headers={**BASE_HEADERS, "Accept": "text/html"}, timeout=5)
+                  if r.status_code == 200 and "csrf-token" in r.text and "_cf_chl_opt" not in r.text:
                       return px
               except Exception:
                   pass
               return None
 
           t_px = time.monotonic()
-          with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
-              futs = [ex.submit(probe_px, p) for p in cands[:60]]
-              for f in concurrent.futures.as_completed(futs):
-                  res = f.result()
-                  if res:
-                      working_proxy = res
+          ex = concurrent.futures.ThreadPoolExecutor(max_workers=25)
+          futs = [ex.submit(probe_px, p) for p in cands[:120]]
+          for f in concurrent.futures.as_completed(futs):
+              res = f.result()
+              if res:
+                  working_proxies.append(res)
+                  if len(working_proxies) >= 4:
                       break
-          print(f"Found test transport proxy in {time.monotonic()-t_px:.2f}s: {working_proxy}")
+          ex.shutdown(wait=False, cancel_futures=True)
+          print(f"Found {len(working_proxies)} verified watch-page proxies in {time.monotonic()-t_px:.2f}s: {working_proxies}")
 
           def host_family(name):
               n = name.lower().strip()
@@ -270,20 +272,31 @@ jobs:
 
           for watch_url in TARGETS:
               print(f"\n=== 2. Testing v23 Streaming Pipeline on {watch_url} (simulating residential 429 at gate #6) ===")
+              sess = None
+              r_page = None
+              r_src = None
+              csrf = None
               t0 = time.monotonic()
-              sess = requests.Session()
-              if working_proxy:
-                  sess.proxies = {"http": working_proxy, "https": working_proxy}
-              sess.headers.update(BASE_HEADERS)
-
-              r_page = sess.get(watch_url, headers={"Accept": "text/html,application/xhtml+xml", "Upgrade-Insecure-Requests": "1"}, timeout=10)
-              assert r_page.status_code == 200, f"Watch page status {r_page.status_code}"
-              soup = BeautifulSoup(r_page.text, "html.parser")
-              csrf = soup.select_one("meta[name=csrf-token]")["content"]
-              sm = re.search(r"""sourcesUrl\s*:\s*['"]([^'"]+)['"]""", r_page.text)
-              src_url = urllib.parse.urljoin("https://witanime.site", sm.group(1).replace("\\/", "/"))
-              r_src = sess.post(src_url, headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": "https://witanime.site", "Referer": watch_url, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=10)
-              assert r_src.status_code == 200, f"Sources status {r_src.status_code}"
+              for px in working_proxies:
+                  try:
+                      t0 = time.monotonic()
+                      cand_sess = requests.Session()
+                      cand_sess.proxies = {"http": px, "https": px}
+                      cand_sess.headers.update(BASE_HEADERS)
+                      rp = cand_sess.get(watch_url, headers={"Accept": "text/html,application/xhtml+xml", "Upgrade-Insecure-Requests": "1"}, timeout=8)
+                      if rp.status_code != 200 or "csrf-token" not in rp.text:
+                          continue
+                      soup = BeautifulSoup(rp.text, "html.parser")
+                      cand_csrf = soup.select_one("meta[name=csrf-token]")["content"]
+                      sm = re.search(r"""sourcesUrl\s*:\s*['"]([^'"]+)['"]""", rp.text)
+                      src_url = urllib.parse.urljoin("https://witanime.site", sm.group(1).replace("\\/", "/"))
+                      rs = cand_sess.post(src_url, headers={"Accept": "application/json", "X-CSRF-TOKEN": cand_csrf, "Origin": "https://witanime.site", "Referer": watch_url, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=8)
+                      if rs.status_code == 200:
+                          sess, r_page, r_src, csrf = cand_sess, rp, rs, cand_csrf
+                          break
+                  except Exception:
+                      continue
+              assert r_src is not None and r_src.status_code == 200, f"Could not open watch session for {watch_url}"
               payload = r_src.json()
 
               streams, downloads, skeys = [], [], set()
@@ -340,24 +353,28 @@ jobs:
                       break
                   if idx > 0:
                       time.sleep(0.18)
-                  ep = "stream-source" if kind == "stream" else "download-source"
-                  r1 = sess.post(f"https://witanime.site/watch/{ep}/{tk}", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": "https://witanime.site", "Referer": watch_url, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=8)
-                  if r1.status_code == 429:
-                      print(f"  [+{(time.monotonic()-t0)*1000:.0f}ms] Real HTTP 429 at gate #{idx+1}; v23 stops immediately!")
-                      break
-                  if r1.status_code != 200:
+                  try:
+                      ep = "stream-source" if kind == "stream" else "download-source"
+                      r1 = sess.post(f"https://witanime.site/watch/{ep}/{tk}", headers={"Accept": "application/json", "X-CSRF-TOKEN": csrf, "Origin": "https://witanime.site", "Referer": watch_url, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, timeout=8)
+                      if r1.status_code == 429:
+                          print(f"  [+{(time.monotonic()-t0)*1000:.0f}ms] Real HTTP 429 at gate #{idx+1}; v23 stops immediately!")
+                          break
+                      if r1.status_code != 200:
+                          continue
+                      gj = r1.json()
+                      gu = urllib.parse.urljoin("https://witanime.site", gj["gateUrl"])
+                      gh = {"Accept": "text/html,application/xhtml+xml", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" if kind=="stream" else "document", "Upgrade-Insecure-Requests": "1"}
+                      if gj.get("referrerPolicy") != "no-referrer":
+                          gh["Referer"] = watch_url
+                      r2 = sess.get(gu, headers=gh, allow_redirects=False, timeout=8)
+                      if r2.status_code in (301, 302, 303, 307, 308) and r2.headers.get("Location"):
+                          loc = r2.headers["Location"]
+                          unlocked_cnt += 1
+                          print(f"  [+{(time.monotonic()-t0)*1000:.0f}ms] Gate #{unlocked_cnt} unlocked: {nm} [{ql}] -> {loc[:65]}")
+                          futs.append(pool.submit(on_unlocked, kind, nm, ql, loc))
+                  except Exception as ge:
+                      print(f"  Gate #{idx+1} transport skip: {type(ge).__name__}")
                       continue
-                  gj = r1.json()
-                  gu = urllib.parse.urljoin("https://witanime.site", gj["gateUrl"])
-                  gh = {"Accept": "text/html,application/xhtml+xml", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" if kind=="stream" else "document", "Upgrade-Insecure-Requests": "1"}
-                  if gj.get("referrerPolicy") != "no-referrer":
-                      gh["Referer"] = watch_url
-                  r2 = sess.get(gu, headers=gh, allow_redirects=False, timeout=8)
-                  if r2.status_code in (301, 302, 303, 307, 308) and r2.headers.get("Location"):
-                      loc = r2.headers["Location"]
-                      unlocked_cnt += 1
-                      print(f"  [+{(time.monotonic()-t0)*1000:.0f}ms] Gate #{unlocked_cnt} unlocked: {nm} [{ql}] -> {loc[:65]}")
-                      futs.append(pool.submit(on_unlocked, kind, nm, ql, loc))
 
               concurrent.futures.wait(futs, timeout=6.0)
               total_ms = (time.monotonic() - t0) * 1000
