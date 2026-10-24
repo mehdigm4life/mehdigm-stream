@@ -729,7 +729,7 @@ internal object AnimeDayExtractors {
             ?: json?.optJSONArray("links")
             ?: json?.optJSONArray("downloads")
             ?: json?.optJSONArray("data")
-            ?: AnimeDayCrypto.safeJsonArray(text)
+            ?: runCatching { if (text.trimStart().startsWith("[")) JSONArray(text.trim()) else null }.getOrNull()
             ?: return@withContext
 
         val origin = originOf(url)
@@ -937,7 +937,8 @@ internal object AnimeDayExtractors {
 
         for (i in 0 until attachments.length()) {
             val att = attachments.optJSONObject(i) ?: continue
-            val attId = att.optString("hashId").ifBlank { continue }
+            val attId = att.optString("hashId").trim()
+            if (attId.isEmpty()) continue
             val label = att.optString("label").ifBlank { att.optString("resolution") }
             val quality = detectQualityInt("${att.optString("resolution")} $label")
 
