@@ -1,184 +1,36 @@
 {
-  "rankedProxies": [
-    {
-      "proxy": "socks5h://91.107.179.68:10809",
-      "ms": 1154
-    },
-    {
-      "proxy": "socks5h://184.178.172.5:15303",
-      "ms": 1609
-    },
-    {
-      "proxy": "socks5h://184.178.172.25:15291",
-      "ms": 1688
-    },
-    {
-      "proxy": "socks5h://45.74.31.46:8287",
-      "ms": 1863
-    },
-    {
-      "proxy": "socks5h://45.74.31.46:8506",
-      "ms": 2101
-    },
-    {
-      "proxy": "socks5h://34.154.195.225:40001",
-      "ms": 3711
-    }
+  "proxies": [
+    "socks5h://91.107.179.68:10809",
+    "socks5h://184.178.172.25:15291",
+    "socks5h://184.178.172.5:15303",
+    "socks5h://45.74.31.46:8287"
   ],
-  "curlMatrix": {
-    "freex2lineAcrossProxies": [
-      {
-        "proxy": "socks5h://91.107.179.68:10809",
-        "status": 200,
-        "finalUrl": "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS1mYWxsLTItZGVhZHBvaW50LTIwMjYtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1L3dhdGNoaW5nLw==",
-        "headers": "HTTP/2 200 \r\ndate: Sat, 24 Oct 2026 13:21:58 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nserver: cloudflare\r\nexpires: Thu, 19 Nov 1981 08:52:00 GMT\r\ncache-control: no-store, no-cache, must-revalidate\r\npragma: no-cache\r\nset-cookie: PHPSESSID=lndij26rhil0e96uta8g7voamq; path=/; secure; HttpOnly; SameSite=Lax\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=KtxYMoTnrUFB9orsj9wB82kIhxWxpCajcg8pj3GL5eKo6WpwvvogL%2FwBK%2FIbJmTRBzBHz60qRI%2FUEy4DJaux6nxnF2BuEcFA4hLZCNW5QnOfEOm4cyOTilw3QNvwgiUwgrxi6KmLpQ%3D%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncf-cache-status: DYNAMIC\r\ncontent-encoding: zstd\r\ncf-ray: a4f949a57bd64dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "title": "",
-        "len": 1064,
-        "bodySample": "    <script>\r\n    window.location.href = 'https://href.li/?https://rm.freex2line.online/redirectingfree/'\r\n    </script>\r\n    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML=\"window.__CF$cv$params={r:'a4f949a57bd64dcb',t:'MTc5Mjg0ODExOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);\";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>"
-      }
-    ],
-    "directWatchProbes": [
-      {
-        "name": "POST_empty_ref_movie",
-        "status": 403,
-        "finalUrl": "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/watching/",
-        "redirectUrl": "",
-        "headers": "HTTP/2 403 \r\ndate: Sat, 24 Oct 2026 13:21:59 GMT\r\ncontent-type: text/html; charset=UTF-8\r\ncache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0\r\nexpires: Thu, 01 Jan 1970 00:00:01 GMT\r\nreferrer-policy: same-origin\r\nreferrer-policy: strict-origin-when-cross-origin\r\nserver-timing: cfEdge;dur=39,cfOrigin;dur=0\r\nx-frame-options: SAMEORIGIN\r\nvary: accept-encoding\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=Q0qpDGIwsAfHdxpsO97oqAIyjIZq5Spjk%2FqOiYv%2Bqw%2Fhp3KEd9ktldf9bpP%2FaY9XU1QKlvWqtIR2b40x7Cy9ZFYngBaVFT2KhTISrHgcgGhF%2Bcn%2FKvTGNtuNAnk%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-content-type-options: nosniff\r\ncontent-encoding: zstd\r\nserver: cloudflare\r\ncf-ray: a4f949aa79624dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 128275,
-        "sample": "<!DOCTYPE html>\r\n<html lang=\"ar\" dir=\"rtl\">\r\n<head>\r\n    <meta charset=\"UTF-8\">\r\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\r\n    <title>ستوب! المخرج عايز كدة | Cima Now</title>\r\n    <style>/* arabic */\n@font-face {\n  font-family: 'Cairo';\n  font-style: normal;\n  font-weight: 700;\n  font-display: swap;\n  src: url(data:font/woff2;base64,d09GMgABAAAAADRMAA8AAAAAm2wAADP"
-      },
-      {
-        "name": "POST_empty_ref_freex2line",
-        "status": 403,
-        "finalUrl": "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/watching/",
-        "redirectUrl": "",
-        "headers": "HTTP/2 403 \r\ndate: Sat, 24 Oct 2026 13:22:00 GMT\r\ncontent-type: text/html; charset=UTF-8\r\ncache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0\r\nexpires: Thu, 01 Jan 1970 00:00:01 GMT\r\nreferrer-policy: same-origin\r\nreferrer-policy: strict-origin-when-cross-origin\r\nserver-timing: cfEdge;dur=23,cfOrigin;dur=0\r\nx-frame-options: SAMEORIGIN\r\nvary: accept-encoding\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=75yF7lyo%2FCMz3NdtzPsJ1emhSt2cuRXYmY5qs9V5wqal83LMScdlPvoiQ3AFGzP%2ByG8VkSMMjdM7X9%2BDYwdz%2BsWu41auFclPy3OQCOBPjAtpLgZ5wn10iOHC3NM%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-content-type-options: nosniff\r\ncontent-encoding: zstd\r\nserver: cloudflare\r\ncf-ray: a4f949b1a8bb4dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 128275,
-        "sample": "<!DOCTYPE html>\r\n<html lang=\"ar\" dir=\"rtl\">\r\n<head>\r\n    <meta charset=\"UTF-8\">\r\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\r\n    <title>ستوب! المخرج عايز كدة | Cima Now</title>\r\n    <style>/* arabic */\n@font-face {\n  font-family: 'Cairo';\n  font-style: normal;\n  font-weight: 700;\n  font-display: swap;\n  src: url(data:font/woff2;base64,d09GMgABAAAAADRMAA8AAAAAm2wAADP"
-      },
-      {
-        "name": "GET_ref_full_shineUrl",
-        "status": 200,
-        "finalUrl": "https://cimanow.cc/",
-        "redirectUrl": "",
-        "headers": "HTTP/2 302 \r\ndate: Sat, 24 Oct 2026 13:22:01 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nlocation: https://cimanow.cc/\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nx-pingback: https://cimanow.cc/xmlrpc.php\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nx-content-type-options: nosniff\r\nx-redirect-by: WordPress\r\nx-litespeed-cache-control: public,max-age=604800\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-litespeed-cache: miss\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=18,cfOrigin;dur=160\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=Q0ltnhcFPc98OwLbGRdSw4t7GX5MR0kaLklRzypFKXSmPeGLdAACODspgnfSugjNwYmOv25fcgXnuzmrqj9VTM1fVcY%2BX1iuwduk0knapLZ1xoz87yXOMQuSMAI%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\ncf-ray: a4f949b8df794dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\nHTTP/2 200 \r\ndate: Sat, 24 Oct 2026 13:22:02 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nvary: Accept-Encoding\r\nx-litespeed-cache: hit\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-content-type-options: nosniff\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=31,cfOrigin;dur=88\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=BZZJeiTma598ce6OthlovBAlHTGJmI5grlIHq3nZJKHyJJoc37NPvRMWj2yugt37qytPokSofuBbKGd2Q7d7fGlJjOHwnXuEAs%2F7LHW4fLhnxdVdS05nSbRMLlc%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncontent-encoding: zstd\r\ncf-ray: a4f949bad97b4dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 25258,
-        "sample": "<html dir=\"rtl\" lang=\"ar\">\n<head>\n<link rel=\"canonical\" href=\"https://cimanow.cc/\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"ar\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"x-default\" />\n<link rel=\"shortcut icon\" href=\"https://cimanow.cc/wp-content/uploads/2017/05/Favicon.gif\" />\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4"
-      },
-      {
-        "name": "GET_ref_vip_cimanowinc",
-        "status": 200,
-        "finalUrl": "https://cimanow.cc/",
-        "redirectUrl": "",
-        "headers": "HTTP/2 302 \r\ndate: Sat, 24 Oct 2026 13:22:03 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nlocation: https://cimanow.cc/\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nx-pingback: https://cimanow.cc/xmlrpc.php\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nx-content-type-options: nosniff\r\nx-redirect-by: WordPress\r\nx-litespeed-cache-control: public,max-age=604800\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-litespeed-cache: miss\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=51,cfOrigin;dur=200\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=xm%2BI39WIa9JQgt6k8Pcdc0cF6bKvBiil7lsMOnMfHWb0KaHwhVK2cm1HMEtfEOvcFS1cvPXzqF7lvpG2YiQHaYdcFTW%2Bwf1AD4iWgU7t5kJYFw9btFBkOiqdMmU%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\ncf-ray: a4f949c0bf9e4dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\nHTTP/2 200 \r\ndate: Sat, 24 Oct 2026 13:22:03 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nvary: Accept-Encoding\r\nx-litespeed-cache: hit\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-content-type-options: nosniff\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=27,cfOrigin;dur=88\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=fjcj%2B8whQjr9FZxp0gYzk4lcVg%2B869UGVp5SAWOFVRtd6iBSF%2Blh8cX86jWyq3AeB0YaDSnvQ%2FA6GUJSZtomeFKTIznqMySF4TcA%2BUIpUzesvXxi06IrtoAmnJc%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncontent-encoding: zstd\r\ncf-ray: a4f949c31a274dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 25258,
-        "sample": "<html dir=\"rtl\" lang=\"ar\">\n<head>\n<link rel=\"canonical\" href=\"https://cimanow.cc/\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"ar\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"x-default\" />\n<link rel=\"shortcut icon\" href=\"https://cimanow.cc/wp-content/uploads/2017/05/Favicon.gif\" />\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4"
-      },
-      {
-        "name": "GET_ref_cimanow_home",
-        "status": 200,
-        "finalUrl": "https://cimanow.cc/",
-        "redirectUrl": "",
-        "headers": "HTTP/2 302 \r\ndate: Sat, 24 Oct 2026 13:22:04 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nlocation: https://cimanow.cc/\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nx-pingback: https://cimanow.cc/xmlrpc.php\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nx-content-type-options: nosniff\r\nx-redirect-by: WordPress\r\nx-litespeed-cache-control: public,max-age=604800\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-litespeed-cache: miss\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=12,cfOrigin;dur=168\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=yhgXu6cU4th%2FJkSzzbECijLNfzptubybKXYtV4EmXNpfCE%2F0%2FkyuHOk3rF1XYJdchlX%2BmFXNm5U6qgZu8NvvscPoX2cAQfyOCUlIgdOoRQFpsBDi6rppBFPormA%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\ncf-ray: a4f949c898304dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\nHTTP/2 200 \r\ndate: Sat, 24 Oct 2026 13:22:04 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nvary: Accept-Encoding\r\nx-litespeed-cache: hit\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-content-type-options: nosniff\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=11,cfOrigin;dur=88\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=ImOq7AAfECIqN84WNnxSyqU3Ge%2BIag5at5ChtyPq8qoK3JJ27h3XXVHQfbj5wNCPlVngshlLnvhxCCx%2FpwaYFzqZ6H4Lxqb%2BSeqaKHbADRsGuo77kPoJdp%2FNR4g%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncontent-encoding: zstd\r\ncf-ray: a4f949ca8a6b4dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 25258,
-        "sample": "<html dir=\"rtl\" lang=\"ar\">\n<head>\n<link rel=\"canonical\" href=\"https://cimanow.cc/\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"ar\" />\n<link rel=\"alternate\" href=\"https://cimanow.cc/\" hreflang=\"x-default\" />\n<link rel=\"shortcut icon\" href=\"https://cimanow.cc/wp-content/uploads/2017/05/Favicon.gif\" />\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/animate.css/4"
-      },
-      {
-        "name": "GET_no_follow_inspect_302",
-        "status": 302,
-        "finalUrl": "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/watching/",
-        "redirectUrl": "https://cimanow.cc/",
-        "headers": "HTTP/2 302 \r\ndate: Sat, 24 Oct 2026 13:22:05 GMT\r\ncontent-type: text/html; charset=UTF-8\r\nlocation: https://cimanow.cc/\r\nserver: cloudflare\r\nx-frame-options: SAMEORIGIN\r\nx-dns-prefetch-control: on\r\nx-pingback: https://cimanow.cc/xmlrpc.php\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: access-token=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nset-cookie: profile-guid=deleted; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/\r\nx-content-type-options: nosniff\r\nx-redirect-by: WordPress\r\nx-litespeed-cache-control: public,max-age=604800\r\nstrict-transport-security: max-age=31536000; includeSubDomains; preload\r\nx-litespeed-cache: miss\r\nreferrer-policy: strict-origin-when-cross-origin\r\ncf-cache-status: DYNAMIC\r\nspeculation-rules: \"/cdn-cgi/speculation\"\r\nserver-timing: cfCacheStatus;desc=\"DYNAMIC\"\r\nserver-timing: cfEdge;dur=9,cfOrigin;dur=159\r\nreport-to: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=aewxOE%2BIJ3ktXhhnjGCIQ3LL0Mc3IoVmOexfiHnRRx%2BOlHdg6YQETBCqqdQg9ClHUUYIoNWL3kNZbXWhsfvdo8ohWlMSmHrlzYSHQlk50GpzCX3tZ8CwTYnvv%2BE%3D\"}]}\r\nnel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r\ncontent-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https: data:; frame-src 'self' https:; media-src 'self' https:; connect-src 'self' https:;\r\ncf-ray: a4f949cff83f4dcb-FRA\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
-        "hasWatchId": false,
-        "hasCorePhp": false,
-        "len": 0,
-        "sample": ""
-      }
-    ],
-    "moviePostIdClues": {
-      "dataPostMatch": null,
-      "allDataAttrs": [
-        "data-cfasync=\"false\"",
-        "data-src=\"https://www.youtube.com/embed/Krs0VDIjhmE\"",
-        "data-cf-beacon='{\"",
-        "data-post=\"${Gw1Trfa}\""
-      ],
-      "metaAndLinkTags": [
-        "<link rel=\"canonical\" href=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<link rel=\"alternate\" href=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" hreflang=\"ar\" />",
-        "<link rel=\"alternate\" href=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" hreflang=\"x-default\" />",
-        "<meta name=\"netpub_d95591d12960b338154592a6d0728d32\" content=\"d95591d12960b338154592a6d0728d32_a588657acf06ea344118c7f678ef1e8d\" />",
-        "<meta name=\"clckd\" content=\"dcbc5270599f757251a4eca1ba166edf\" />",
-        "<meta name=\"clckd\" content=\"eecc9177cf02dd177e31db9e9e8e709d\" />",
-        "<link rel=\"shortcut icon\" href=\"https://cimanow.cc/wp-content/uploads/2017/05/Favicon.gif\" />",
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-        "<meta name=\"propeller\" content=\"51da8736ac66a5e31bf6e5e152e92593\">",
-        "<meta name=\"msvalidate.01\" content=\"F7AEFFA13920B961CCCD513C2BE89DE5\" />",
-        "<meta name=\"theme-color\" content=\"#4527a0\" />",
-        "<meta name=\"robots\" content=\"index, follow\" />",
-        "<meta name=\"description\" content=\"مشاهدة وتحميل فيلم Fall 2: Deadpoint 2026 مترجم بجودة عالية اون لاين. تعيش جاكس هانتر ألم فقدان شقيقتها شايلوه، قبل أن تجد في صديقتها الجريئة لوس دعمًا يساعدها على استعادة توازنها. وتقرر الاثنتان خوض ...\" />",
-        "<meta property=\"og:locale\" content=\"ar_ar\" />",
-        "<link itemprop=\"contentUrl\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<link itemprop=\"embedUrl\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<meta property=\"article:publisher\" content=\"CimaNow\" />",
-        "<meta property=\"article:section\" content=\"افلام اجنبية\" />",
-        "<meta property=\"og:image\" content=\"https://cimanow.cc/wp-content/uploads/2026/10/فيلم-Fall-2-Deadpoint-2026-مترجم.jpg\" />",
-        "<meta property=\"og:image:width\" content=\"667\" />",
-        "<meta property=\"og:image:height\" content=\"1000\" />",
-        "<meta name=\"twitter:card\" content=\"player\" />",
-        "<meta name=\"twitter:player\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<meta name=\"twitter:player:width\" content=\"1280\" />",
-        "<meta name=\"twitter:player:height\" content=\"720\" />",
-        "<meta name=\"twitter:title\" content=\"فيلم Fall 2: Deadpoint 2026 مترجم\" />",
-        "<meta name=\"twitter:description\" content=\"مشاهدة وتحميل فيلم Fall 2: Deadpoint 2026 مترجم بجودة عالية اون لاين. تعيش جاكس هانتر ألم فقدان شقيقتها شايلوه، قبل أن تجد في صديقتها الجريئة لوس دعمًا يساعدها على استعادة توازنها. وتقرر الاثنتان خوض ...\" />",
-        "<meta name=\"twitter:image\" content=\"https://cimanow.cc/wp-content/uploads/2026/10/فيلم-Fall-2-Deadpoint-2026-مترجم.jpg\" />",
-        "<meta property=\"og:title\" content=\"فيلم Fall 2: Deadpoint 2026 مترجم\" />",
-        "<meta property=\"og:description\" content=\"مشاهدة وتحميل فيلم Fall 2: Deadpoint 2026 مترجم بجودة عالية اون لاين. تعيش جاكس هانتر ألم فقدان شقيقتها شايلوه، قبل أن تجد في صديقتها الجريئة لوس دعمًا يساعدها على استعادة توازنها. وتقرر الاثنتان خوض ...\"/>",
-        "<meta property=\"og:type\" content=\"video\" />",
-        "<meta property=\"og:video\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<meta property=\"og:video:secure_url\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<meta property=\"og:video:type\" content=\"text/html\" />",
-        "<meta property=\"og:video:width\" content=\"1280\" />",
-        "<meta property=\"og:video:height\" content=\"720\" />",
-        "<meta property=\"og:url\" content=\"https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/\" />",
-        "<meta property=\"og:site_name\" content=\"سيما ناو | عندما يكون للمشاهدة متعة خاصة\"/>",
-        "<meta property=\"article:published_time\" content=\"2026-10-06T19:32:50+02:00\" />",
-        "<meta property=\"article:modified_time\" content=\"2026-10-06T19:32:50+02:00\" />",
-        "<meta property=\"article:tag\" content=\"Fall 2: Deadpoint مترجم\" />",
-        "<meta property=\"article:tag\" content=\"فيلم Fall 2: Deadpoint مترجم\" />",
-        "<meta property=\"article:tag\" content=\"فيلم Fall 2: Deadpoint\" />",
-        "<meta property=\"article:tag\" content=\"مشاهدة\" />",
-        "<meta property=\"article:tag\" content=\"تحميل\" />",
-        "<meta property=\"article:tag\" content=\"فيلم سقوط 2: نقطة مميتة\" />",
-        "<meta property=\"article:tag\" content=\"فيلم سقوط 2: ديدبوينت\" />",
-        "<meta property=\"article:tag\" content=\"كامل\" />",
-        "<meta property=\"article:tag\" content=\"مترجم\" />",
-        "<meta itemprop=\"image\" content=\"https://media6.cimanow.cc/wp-content/uploads/2026/10/فيلم-Fall-2-Deadpoint-2026-مترجم-كوفر.jpg\" />",
-        "<link rel=\"preload\" as=\"style\" href=\"https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/css/animate.css?v=1.1.9.0\">",
-        "<link rel=\"stylesheet\" href=\"https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/css/animate.css?v=1.1.9.0\" media=\"all\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/nbm2oHaQcN60y6Ozwm.js?v=2.3\">",
-        "<link rel=\"preload\" as=\"style\" href=\"https://cdn.jsdelivr.net/npm/sweetalert2@latest/dist/sweetalert2.min.css\">",
-        "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/sweetalert2@latest/dist/sweetalert2.min.css\" media=\"all\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/jquery-3.5.1.min.js\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cimanow.cc/wp-content/themes/Cima%20Now%20New/Assets/js/owl.carousel.min.js\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cdn.jsdelivr.net/npm/sweetalert2@latest/dist/sweetalert2.all.min.js\">",
-        "<link rel=\"preload\" as=\"script\" href=\"https://cdnjs.cloudflare.com/ajax/libs/vanilla-lazyload/17.8.3/lazyload.min.js\">"
-      ]
-    }
+  "nbmPreloadScript": {
+    "status": 200,
+    "len": 536748,
+    "preview": "(function(_0x243cac,_0x2ba31b){function _0x59d5ee(_0x4a0f4d,_0x2b4161,_0x4e9884,_0x88f1ce,_0x58589d){return _0x39aa(_0x88f1ce- -0x11,_0x4a0f4d);}function _0x21481e(_0x467dfb,_0x272b33,_0x39971d,_0x28ab3c,_0x39054c){return _0x39aa(_0x272b33-0x299,_0x39054c);}function _0x5e5a1d(_0x24986f,_0x54e35a,_0x2157a2,_0x41487e,_0xd9d18f){return _0x39aa(_0x41487e-0x31d,_0xd9d18f);}function _0x4597ec(_0x5a8266,_0x4bd1e9,_0x58c188,_0x4e1cdb,_0x34bcb5){return _0x39aa(_0x58c188-0x2b4,_0x4bd1e9);}var _0x365cab=_0x243cac();function _0x5f41de(_0x39fe4c,_0x1dbca7,_0x506863,_0x5a4ea1,_0x4e213a){return _0x39aa(_0x4e213a- -0x1b,_0x506863);}while(!![]){try{var _0x221b97=parseInt(_0x5e5a1d(0x2a15,0x2a03,0x1195,0x1e7c,0x1a5e))/(-0x1168+0x1*-0x1d9f+0x1784*0x2)*(-parseInt(_0x5e5a1d(-0x1c,0x1f0,-0x130,0x501,-0x6c0))/(0xffe+0x222e+0x1*-0x322a))+-parseInt(_0x59d5ee(0x1a1b,0x7d9,0x1af5,0x14c3,0x1053))/(0x1f87+-0x2541+0x5bd)+parseInt(_0x5f41de(0x12c0,0xa63,0x11c6,0x567,0x732))/(0x21ff+-0x25bf+0x3c4)+parseInt(_0x21481e(0x181c,0x178a,0x1bb3,0x162b,0x268e))/(0x6a4+-0x38b+-0x18a*0x2)*(parseInt(_0x4597ec(0xa05,0xa27,0x558,0xdd2,0x14c3))/(-0x8ca+0xef*-0x11+0x18af))+-parseInt(_0x59d5ee(0x17c,0x1818,0x1378,0xc68,0x1f5))/(-0x7*-0x12a+0x2c7+0x5d*-0x1e)*(-parseInt(_0x5e5a1d(0x20fe,0x2425,0x2d8c,0x2085,0x1a0f))/(-0x95*0x3e+0x18ab+-0xb73*-0x1))+-parseInt(_0x59d5ee(0x153c,0x1f5a,0x1cfb,0x1269,0x1e58))/(0x2d1+0x113f+-0x1407)*(parseInt(_0x59d5ee(0xdcd,0x2144,0x157c,0x1b57,0x2740))/(-0x1dba+0x19+0x1dab))+parseInt(_0x59d5ee(0x288c,0x1f97,0x1a9f,0x1aa1,0x2409))/(-0x326*0x8+0xcd0+0x1*0xc6b)*(parseInt(_0x4597ec(0x63c,0x536,0x10f7,0x999,0x1d81))/(-0x5*-0x2c0+0x1*0x1c6+-0x236*0x7));if(_0x221b97===_0x2ba31b)break;else _0x365cab['push'](_0x365cab['shift']());}catch(_0x1853b2){_0x365cab['push'](_0x365cab['shift']());}}}(_0x2426,0x1*0x1001b3+0x2*0x54338+-0x29*0x6427),(function(){function _0x2fd9fa(_0x1331e4,_0x5ae623,_0x22e85f,_0x978b2c,_0x313ebc){return _0x39aa(_0x22e85f-0x232,_0x978b2c);}function _0x499dcb(_0xdae225,_0x186e88,_0x58968f,_0xbb13fc,_0x329315){return _0x39aa(_0x58968f-0x29f,_0xdae225);}function _0x5acfa0(_0x50d1b2,_0x3e2807,_0x48a855,_0x3906a0,_0x1d0e89){return _0x39aa(_0x1d0e89-0x362,_0x3e2807);}function _0x411a20(_0x322dc1,_0x4a48fd,_0x4fea2b,_0x101483,_0x21af2f){return _0x39aa(_0x21af2f- -0x1ff,_0x101483);}var _0x1b963b={'awEKd':function(_0x25fdc6,_0x1ad73c){return _0x25fdc6!==_0x1ad73c;},'sKrQf':_0x2fd9fa(0x16eb,0x1c2d,0x1247,0x14ec,0x1008),'CYTsv':function(_0x43bbc3,_0x171095){return _0x43bbc3(_0"
   },
-  "xvfbGateway": {
-    "available": true,
-    "error": "No CDP target"
+  "itemFlows": {
+    "ForeignMovie_Fall2": {
+      "usedProxy": "socks5h://45.74.31.46:8287",
+      "shineUrl": "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS1mYWxsLTItZGVhZHBvaW50LTIwMjYtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1L3dhdGNoaW5nLw==",
+      "hops": [],
+      "chainError": "Error: Command failed: curl -sS -k --compressed --max-time 14 --connect-timeout 5 -X GET -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 -H Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8 -H Accept-Language: ar,en-US;q=0.9,en;q=0.8 -D /tmp/curl_h_x4szcaxb4c.txt -w \n__CURL_META__:%{http_code}|%{url_effective}|%{redirect_url} -x socks5h://45.74.31.46:8287 -e https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-fall-2-deadpoint-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/ -b /tmp/cn_chain_kajqajc61n.txt -c /tmp/cn_chain_kajqajc61n.txt https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS1mYWxsLTItZGVhZHBvaW50LTIwMjYtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1L3dhdGNoaW5nLw==\ncurl: (28) Connection timed out after 5000 milliseconds\n\n    at genericNodeError (node:internal/errors:986:15)\n    at wrappedFn (node:internal/errors:540:14)\n    at ChildProcess.exithandler (node:child_process:417:12)\n    at ChildProcess.emit (node:events:514:28)\n    at maybeClose (node:internal/child_process:1141:16)\n    at ChildProcess._handle.onexit (node:internal/child_process:306:5)",
+      "cookiesAtEnd": ""
+    },
+    "ArabicMovie_BeitElRuby": {
+      "usedProxy": "socks5h://45.74.31.46:8287",
+      "shineUrl": "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS0lZDglYTglZDklOGElZDglYWEtJWQ4JWE3JWQ5JTg0JWQ4JWIxJWQ5JTg4JWQ4JWE4JWQ5JThhLTIwMjMvd2F0Y2hpbmcv",
+      "hops": [],
+      "chainError": "Error: Command failed: curl -sS -k --compressed --max-time 14 --connect-timeout 5 -X GET -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 -H Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8 -H Accept-Language: ar,en-US;q=0.9,en;q=0.8 -D /tmp/curl_h_u8teft73bi.txt -w \n__CURL_META__:%{http_code}|%{url_effective}|%{redirect_url} -x socks5h://45.74.31.46:8287 -e https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-%d8%a8%d9%8a%d8%aa-%d8%a7%d9%84%d8%b1%d9%88%d8%a8%d9%8a-2023/ -b /tmp/cn_chain_s0t5wymg0s8.txt -c /tmp/cn_chain_s0t5wymg0s8.txt https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4MSVkOSU4YSVkOSU4NCVkOSU4NS0lZDglYTglZDklOGElZDglYWEtJWQ4JWE3JWQ5JTg0JWQ4JWIxJWQ5JTg4JWQ4JWE4JWQ5JThhLTIwMjMvd2F0Y2hpbmcv\ncurl: (28) Connection timed out after 5002 milliseconds\n\n    at genericNodeError (node:internal/errors:986:15)\n    at wrappedFn (node:internal/errors:540:14)\n    at ChildProcess.exithandler (node:child_process:417:12)\n    at ChildProcess.emit (node:events:514:28)\n    at maybeClose (node:internal/child_process:1141:16)\n    at ChildProcess._handle.onexit (node:internal/child_process:306:5)",
+      "cookiesAtEnd": ""
+    },
+    "ForeignEpisode_LupinS4E1": {
+      "usedProxy": "socks5h://45.74.31.46:8287",
+      "shineUrl": "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4NSVkOCViMyVkOSU4NCVkOCViMyVkOSU4NC1sdXBpbi0lZDglYWM0LSVkOCVhZDEtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1JWQ4JWE5L3dhdGNoaW5nLw==",
+      "hops": [],
+      "chainError": "Error: Command failed: curl -sS -k --compressed --max-time 14 --connect-timeout 5 -X GET -A Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 -H Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8 -H Accept-Language: ar,en-US;q=0.9,en;q=0.8 -D /tmp/curl_h_yg8ezkulycq.txt -w \n__CURL_META__:%{http_code}|%{url_effective}|%{redirect_url} -x socks5h://45.74.31.46:8287 -e https://cimanow.cc/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin-%d8%ac4-%d8%ad1-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/ -b /tmp/cn_chain_rc4hg36aot.txt -c /tmp/cn_chain_rc4hg36aot.txt https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4NSVkOCViMyVkOSU4NCVkOCViMyVkOSU4NC1sdXBpbi0lZDglYWM0LSVkOCVhZDEtJWQ5JTg1JWQ4JWFhJWQ4JWIxJWQ4JWFjJWQ5JTg1JWQ4JWE5L3dhdGNoaW5nLw==\ncurl: (97) Failed to receive SOCKS response, proxy closed connection\n\n    at genericNodeError (node:internal/errors:986:15)\n    at wrappedFn (node:internal/errors:540:14)\n    at ChildProcess.exithandler (node:child_process:417:12)\n    at ChildProcess.emit (node:events:514:28)\n    at maybeClose (node:internal/child_process:1141:16)\n    at ChildProcess._handle.onexit (node:internal/child_process:306:5)",
+      "cookiesAtEnd": ""
+    }
   }
 }
