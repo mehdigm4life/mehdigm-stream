@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -18,8 +19,6 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import java.lang.ref.WeakReference
@@ -60,24 +59,22 @@ class TimeMoviesPlugin : Plugin() {
         registerExtractorAPI(TmByseDikamoumExtractor())
         registerExtractorAPI(TmByseKozeExtractor())
 
-        // Configure interactive Settings BottomSheet in CloudStream plugin manager
         openSettings = { ctx ->
-            val activity = ctx as? AppCompatActivity ?: ctx as? Activity
+            val activity = ctx as? Activity
             if (activity != null && !activity.isFinishing) {
-                showSettingsBottomSheet(activity)
+                showMainSettingsDialog(ctx)
             } else {
-                Toast.makeText(
-                    ctx,
-                    "إعدادات TimeMovies متاحة من داخل شاشة الإضافات",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                showMainSettingsDialog(ctx)
             }
         }
     }
 
-    private fun dp(ctx: Context, value: Int): Int {
-        return (value * ctx.resources.displayMetrics.density).toInt()
-    }
+    private fun dp(ctx: Context, value: Int): Int =
+        TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            value.toFloat(),
+            ctx.resources.displayMetrics,
+        ).toInt()
 
     private fun roundedBg(fillColor: Int, strokeColor: Int? = null, radiusDp: Int = 14, ctx: Context): GradientDrawable {
         return GradientDrawable().apply {
@@ -100,7 +97,7 @@ class TimeMoviesPlugin : Plugin() {
         return TextView(ctx).apply {
             text = label
             setTextColor(textColor)
-            textSize = 15f
+            textSize = 14.5f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             background = roundedBg(bgColor, null, 12, ctx)
@@ -115,48 +112,45 @@ class TimeMoviesPlugin : Plugin() {
         }
     }
 
-    private fun showSettingsBottomSheet(activity: Activity) {
-        val dialog = BottomSheetDialog(activity)
-        val scroll = ScrollView(activity).apply {
+    private fun showMainSettingsDialog(ctx: Context) {
+        val scroll = ScrollView(ctx).apply {
             setBackgroundColor(Color.parseColor("#121318"))
         }
 
-        val root = LinearLayout(activity).apply {
+        val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(activity, 20), dp(activity, 20), dp(activity, 20), dp(activity, 28))
+            setPadding(dp(ctx, 20), dp(ctx, 20), dp(ctx, 20), dp(ctx, 24))
         }
 
-        // Header Title
-        val headerTitle = TextView(activity).apply {
+        val headerTitle = TextView(ctx).apply {
             text = "🎬 إعدادات TimeMovies (v4.7)"
             setTextColor(Color.WHITE)
-            textSize = 19f
+            textSize = 18.5f
             typeface = Typeface.DEFAULT_BOLD
         }
         root.addView(headerTitle)
 
-        val subHeader = TextView(activity).apply {
+        val subHeader = TextView(ctx).apply {
             text = "إدارة الحساب، الملف الشخصي، حماية الجهاز الافتراضية، ومشغل DoomPlayer المدمج"
             setTextColor(Color.parseColor("#9AA0B4"))
-            textSize = 13f
-            setPadding(0, dp(activity, 4), 0, dp(activity, 14))
+            textSize = 12.5f
+            setPadding(0, dp(ctx, 4), 0, dp(ctx, 14))
         }
         root.addView(subHeader)
 
-        // Account Status Card
-        val statusCard = LinearLayout(activity).apply {
+        val statusCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = roundedBg(
                 fillColor = Color.parseColor("#1B1D26"),
                 strokeColor = Color.parseColor("#2D3244"),
                 radiusDp = 14,
-                ctx = activity,
+                ctx = ctx,
             )
-            setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 14))
+            setPadding(dp(ctx, 16), dp(ctx, 14), dp(ctx, 16), dp(ctx, 14))
         }
 
-        val statusBadge = TextView(activity).apply {
+        val statusBadge = TextView(ctx).apply {
             text = if (TimeMoviesPrefs.isSignedIn) "✅ متصل بحساب TimeMovies" else "⚠️ لم يتم تسجيل الدخول بعد"
             setTextColor(
                 if (TimeMoviesPrefs.isSignedIn) Color.parseColor("#4ADE80")
@@ -167,46 +161,45 @@ class TimeMoviesPlugin : Plugin() {
         }
         statusCard.addView(statusBadge)
 
-        val statusSummary = TextView(activity).apply {
+        val statusSummary = TextView(ctx).apply {
             text = TimeMoviesPrefs.getAccountSummaryAr()
             setTextColor(Color.parseColor("#D4D8E8"))
             textSize = 13f
-            setPadding(0, dp(activity, 6), 0, 0)
+            setPadding(0, dp(ctx, 6), 0, 0)
         }
         statusCard.addView(statusSummary)
 
         if (!TimeMoviesPrefs.isSignedIn) {
-            val hintText = TextView(activity).apply {
+            val hintText = TextView(ctx).apply {
                 text = "يتطلب خادم TimeMovies الرسمي (v4.7) حساباً مجانياً أو VIP لتصفح المكتبة وتشغيل الروابط. تتضمن الإضافة نظام جهاز افتراضي معزول لتجاوز حظر الأجهزة تلقائياً."
                 setTextColor(Color.parseColor("#9AA0B4"))
                 textSize = 12f
-                setPadding(0, dp(activity, 8), 0, 0)
+                setPadding(0, dp(ctx, 8), 0, 0)
             }
             statusCard.addView(hintText)
         }
         root.addView(statusCard)
 
-        // Language Preference Toggle
-        val langRow = LinearLayout(activity).apply {
+        val langRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = roundedBg(Color.parseColor("#1B1D26"), Color.parseColor("#2D3244"), 12, activity)
-            setPadding(dp(activity, 14), dp(activity, 10), dp(activity, 14), dp(activity, 10))
+            background = roundedBg(Color.parseColor("#1B1D26"), Color.parseColor("#2D3244"), 12, ctx)
+            setPadding(dp(ctx, 14), dp(ctx, 10), dp(ctx, 14), dp(ctx, 10))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply {
-                topMargin = dp(activity, 14)
+                topMargin = dp(ctx, 14)
             }
         }
 
-        val langLabel = TextView(activity).apply {
+        val langLabel = TextView(ctx).apply {
             text = "تفضيل العناوين والملصقات العربية عند توفرها"
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = 13.5f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val langSwitch = Switch(activity).apply {
+        val langSwitch = Switch(ctx).apply {
             isChecked = TimeMoviesPrefs.preferArabic
             setOnCheckedChangeListener { _, checked ->
                 TimeMoviesPrefs.preferArabic = checked
@@ -216,90 +209,102 @@ class TimeMoviesPlugin : Plugin() {
         langRow.addView(langSwitch)
         root.addView(langRow)
 
+        lateinit var dialog: AlertDialog
+
         // Pending OTP Resume Button (shown whenever an unactivated registration token is saved)
         if (!TimeMoviesPrefs.pendingOtpToken.isNullOrBlank()) {
             val pendingEmail = TimeMoviesPrefs.pendingOtpEmail ?: "بريدك الإلكتروني"
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "🔑 إدخال رمز التفعيل (OTP) لـ $pendingEmail",
                     bgColor = Color.parseColor("#D97706"),
                 ) {
                     dialog.dismiss()
-                    showOtpActivationDialog(activity, pendingEmail)
+                    showOtpActivationDialog(ctx, pendingEmail)
                 }
             )
         }
 
-        // Auth & Profile Buttons
         if (!TimeMoviesPrefs.isSignedIn) {
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "🔐 تسجيل الدخول بالبريد الإلكتروني",
                     bgColor = Color.parseColor("#2563EB"),
                 ) {
                     dialog.dismiss()
-                    showSignInDialog(activity)
+                    showSignInDialog(ctx)
                 }
             )
 
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "✨ إنشاء حساب مجاني جديد (مع تفعيل OTP)",
                     bgColor = Color.parseColor("#059669"),
                 ) {
                     dialog.dismiss()
-                    showSignUpDialog(activity)
+                    showSignUpDialog(ctx)
                 }
             )
 
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "🛡️ توليد هوية جهاز افتراضية جديدة (تجاوز الحظر)",
                     bgColor = Color.parseColor("#4F46E5"),
                 ) {
                     val fresh = TimeMoviesPrefs.rotateVirtualDeviceIdentity()
-                    toast(activity, "تم توليد هوية جهاز جديدة: ${fresh.displayLabel}")
+                    toast(ctx, "تم توليد هوية جهاز جديدة: ${fresh.displayLabel}")
                     dialog.dismiss()
-                    showSettingsBottomSheet(activity)
+                    showMainSettingsDialog(ctx)
+                }
+            )
+
+            root.addView(
+                makeActionButton(
+                    ctx = ctx,
+                    label = "📋 لصق توكن JWT يدوياً (متقدم)",
+                    bgColor = Color.parseColor("#374151"),
+                ) {
+                    dialog.dismiss()
+                    showManualTokenDialog(ctx)
                 }
             )
         } else {
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "👤 اختيار / تحديث الملف الشخصي",
                     bgColor = Color.parseColor("#2563EB"),
                 ) {
                     dialog.dismiss()
-                    showProfilePickerDialog(activity)
+                    showProfilePickerDialog(ctx)
                 }
             )
 
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "🔄 مزامنة الجلسة ومفتاح التشفير (ECDSA P-256)",
                     bgColor = Color.parseColor("#374151"),
                 ) {
-                    toast(activity, "جاري تحديث الجلسة ومزامنة توقيت الخادم...")
+                    toast(ctx, "جاري تحديث الجلسة ومزامنة توقيت الخادم...")
                     ioExecutor.execute {
                         TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
                         TimeMoviesApi.syncServerClockIfNeeded(force = true)
                         val tk = TimeMoviesPrefs.authToken.orEmpty()
                         TimeMoviesApi.ensureDeviceKeyEnrolled(tk)
                         val prof = TimeMoviesApi.syncAppDataAndSelectMainProfile()
-                        runOnUi(activity) {
+                        runOnUi(ctx) {
                             toast(
-                                activity,
+                                ctx,
                                 if (prof != null) "تمت المزامنة بنجاح (${prof.name})"
                                 else "تم تحديث مفتاح الجهاز وتوقيت الخادم",
                             )
                             dialog.dismiss()
-                            showSettingsBottomSheet(activity)
+                            showMainSettingsDialog(ctx)
                         }
                     }
                 }
@@ -307,35 +312,38 @@ class TimeMoviesPlugin : Plugin() {
 
             root.addView(
                 makeActionButton(
-                    ctx = activity,
+                    ctx = ctx,
                     label = "🚪 تسجيل الخروج",
                     bgColor = Color.parseColor("#DC2626"),
                 ) {
                     TimeMoviesPrefs.signOut()
-                    toast(activity, "تم تسجيل الخروج من TimeMovies")
+                    toast(ctx, "تم تسجيل الخروج من TimeMovies")
                     dialog.dismiss()
                 }
             )
         }
 
         scroll.addView(root)
-        dialog.setContentView(scroll)
+        dialog = AlertDialog.Builder(ctx)
+            .setView(scroll)
+            .setNegativeButton("إغلاق", null)
+            .create()
         dialog.show()
     }
 
-    private fun showSignInDialog(activity: Activity) {
-        val container = LinearLayout(activity).apply {
+    private fun showSignInDialog(ctx: Context) {
+        val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(activity, 20), dp(activity, 12), dp(activity, 20), dp(activity, 4))
+            setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 4))
         }
 
-        val emailInput = EditText(activity).apply {
+        val emailInput = EditText(ctx).apply {
             hint = "البريد الإلكتروني (Gmail / Outlook...)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             setText(TimeMoviesPrefs.userEmail.orEmpty())
         }
-        val passInput = EditText(activity).apply {
+        val passInput = EditText(ctx).apply {
             hint = "كلمة المرور"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
@@ -343,27 +351,27 @@ class TimeMoviesPlugin : Plugin() {
         container.addView(emailInput)
         container.addView(passInput)
 
-        AlertDialog.Builder(activity)
+        AlertDialog.Builder(ctx)
             .setTitle("تسجيل الدخول — TimeMovies")
             .setView(container)
             .setPositiveButton("دخول") { _, _ ->
                 val email = emailInput.text?.toString()?.trim().orEmpty()
                 val pass = passInput.text?.toString().orEmpty()
                 if (email.isBlank() || pass.isBlank()) {
-                    toast(activity, "يرجى إدخال البريد الإلكتروني وكلمة المرور")
+                    toast(ctx, "يرجى إدخال البريد الإلكتروني وكلمة المرور")
                     return@setPositiveButton
                 }
-                toast(activity, "جاري تسجيل الدخول...")
+                toast(ctx, "جاري تسجيل الدخول...")
                 ioExecutor.execute {
                     val result = TimeMoviesApi.signInWithEmail(email, pass)
-                    runOnUi(activity) {
+                    runOnUi(ctx) {
                         if (result.success) {
-                            toast(activity, "✅ تم تسجيل الدخول بنجاح! أعد تحديث الصفحة الرئيسية")
+                            toast(ctx, "✅ تم تسجيل الدخول بنجاح! أعد تحديث الصفحة الرئيسية")
                         } else if (!TimeMoviesPrefs.pendingOtpToken.isNullOrBlank()) {
-                            toast(activity, result.message ?: "يرجى إدخال رمز التفعيل المرسل لبريدك")
-                            showOtpActivationDialog(activity, email)
+                            toast(ctx, result.message ?: "يرجى إدخال رمز التفعيل المرسل لبريدك")
+                            showOtpActivationDialog(ctx, email)
                         } else {
-                            toast(activity, "❌ ${result.message ?: "فشل تسجيل الدخول"}")
+                            toast(ctx, "❌ ${result.message ?: "فشل تسجيل الدخول"}")
                         }
                     }
                 }
@@ -372,22 +380,22 @@ class TimeMoviesPlugin : Plugin() {
             .show()
     }
 
-    private fun showSignUpDialog(activity: Activity) {
-        val container = LinearLayout(activity).apply {
+    private fun showSignUpDialog(ctx: Context) {
+        val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(activity, 20), dp(activity, 12), dp(activity, 20), dp(activity, 4))
+            setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 4))
         }
 
-        val nameInput = EditText(activity).apply {
+        val nameInput = EditText(ctx).apply {
             hint = "الاسم (مثال: Mehdi)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME
         }
-        val emailInput = EditText(activity).apply {
+        val emailInput = EditText(ctx).apply {
             hint = "بريد إلكتروني حقيقي لاستلام رمز التفعيل (Gmail...)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
         }
-        val passInput = EditText(activity).apply {
+        val passInput = EditText(ctx).apply {
             hint = "كلمة المرور (8 أحرف أو أكثر)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
@@ -396,7 +404,7 @@ class TimeMoviesPlugin : Plugin() {
         container.addView(emailInput)
         container.addView(passInput)
 
-        AlertDialog.Builder(activity)
+        AlertDialog.Builder(ctx)
             .setTitle("إنشاء حساب مجاني — TimeMovies")
             .setMessage("سيتم توليد هوية جهاز افتراضية جديدة تلقائياً وإرسال رمز تفعيل (OTP) إلى بريدك الإلكتروني:")
             .setView(container)
@@ -405,17 +413,19 @@ class TimeMoviesPlugin : Plugin() {
                 val email = emailInput.text?.toString()?.trim().orEmpty()
                 val pass = passInput.text?.toString().orEmpty()
                 if (email.isBlank() || pass.length < 6) {
-                    toast(activity, "يرجى إدخال بريد إلكتروني صالح وكلمة مرور لا تقل عن 6 أحرف")
+                    toast(ctx, "يرجى إدخال بريد إلكتروني صالح وكلمة مرور لا تقل عن 6 أحرف")
                     return@setPositiveButton
                 }
-                toast(activity, "جاري إنشاء الحساب عبر جهاز افتراضي نظيف...")
+                toast(ctx, "جاري إنشاء الحساب عبر جهاز افتراضي نظيف...")
                 ioExecutor.execute {
                     val res = TimeMoviesApi.signUpWithEmail(name, email, pass)
-                    runOnUi(activity) {
-                        if (res.success) {
-                            showOtpActivationDialog(activity, email)
+                    runOnUi(ctx) {
+                        if (res.success && TimeMoviesPrefs.isSignedIn) {
+                            toast(ctx, "🎉 تم إنشاء وتفعيل الحساب بنجاح!")
+                        } else if (res.success) {
+                            showOtpActivationDialog(ctx, email)
                         } else {
-                            toast(activity, "❌ ${res.message ?: "تعذر إنشاء الحساب"}")
+                            toast(ctx, "❌ ${res.message ?: "تعذر إنشاء الحساب"}")
                         }
                     }
                 }
@@ -424,55 +434,55 @@ class TimeMoviesPlugin : Plugin() {
             .show()
     }
 
-    private fun showOtpActivationDialog(activity: Activity, email: String) {
-        val container = LinearLayout(activity).apply {
+    private fun showOtpActivationDialog(ctx: Context, email: String) {
+        val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(activity, 20), dp(activity, 12), dp(activity, 20), dp(activity, 4))
+            setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 4))
         }
 
-        val otpInput = EditText(activity).apply {
+        val otpInput = EditText(ctx).apply {
             hint = "رمز التفعيل (OTP)"
             inputType = InputType.TYPE_CLASS_TEXT
             gravity = Gravity.CENTER
         }
         container.addView(otpInput)
 
-        AlertDialog.Builder(activity)
+        AlertDialog.Builder(ctx)
             .setTitle("تفعيل البريد الإلكتروني")
             .setMessage("تم إرسال رمز التفعيل إلى:\n$email\nأدخل الرمز لإتمام تفعيل الحساب (وإذا غادرت لبريدك يمكنك دائماً متابعة التفعيل من إعدادات الإضافة):")
             .setView(container)
             .setPositiveButton("تفعيل") { _, _ ->
                 val code = otpInput.text?.toString()?.trim().orEmpty()
                 if (code.isBlank()) {
-                    toast(activity, "يرجى إدخال رمز التفعيل")
-                    showOtpActivationDialog(activity, email)
+                    toast(ctx, "يرجى إدخال رمز التفعيل")
+                    showOtpActivationDialog(ctx, email)
                     return@setPositiveButton
                 }
-                toast(activity, "جاري التحقق من الرمز وتفعيل الحساب...")
+                toast(ctx, "جاري التحقق من الرمز وتفعيل الحساب...")
                 ioExecutor.execute {
                     val res = TimeMoviesApi.activateEmailOtp(code)
-                    runOnUi(activity) {
+                    runOnUi(ctx) {
                         if (res.success) {
-                            toast(activity, "🎉 تم تفعيل الحساب وتسجيل الدخول بنجاح!")
+                            toast(ctx, "🎉 تم تفعيل الحساب وتسجيل الدخول بنجاح!")
                         } else {
-                            toast(activity, "❌ ${res.message ?: "رمز التفعيل غير صحيح"}")
-                            showOtpActivationDialog(activity, email)
+                            toast(ctx, "❌ ${res.message ?: "رمز التفعيل غير صحيح"}")
+                            showOtpActivationDialog(ctx, email)
                         }
                     }
                 }
             }
             .setNeutralButton("إعادة إرسال الرمز") { _, _ ->
-                toast(activity, "جاري طلب إعادة إرسال الرمز...")
+                toast(ctx, "جاري طلب إعادة إرسال الرمز...")
                 ioExecutor.execute {
                     val res = TimeMoviesApi.resendActivationOtp(email)
-                    runOnUi(activity) {
+                    runOnUi(ctx) {
                         toast(
-                            activity,
+                            ctx,
                             if (res.success) "📨 ${res.message ?: "تم إرسال الرمز مجدداً"}"
                             else "❌ ${res.message ?: "تعذر إعادة الإرسال حالياً"}",
                         )
-                        showOtpActivationDialog(activity, email)
+                        showOtpActivationDialog(ctx, email)
                     }
                 }
             }
@@ -480,13 +490,43 @@ class TimeMoviesPlugin : Plugin() {
             .show()
     }
 
-    private fun showProfilePickerDialog(activity: Activity) {
-        toast(activity, "جاري جلب الملفات الشخصية...")
+    private fun showManualTokenDialog(ctx: Context) {
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 4))
+        }
+        val tokenInput = EditText(ctx).apply {
+            hint = "eyJhbGciOi..."
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        container.addView(tokenInput)
+
+        AlertDialog.Builder(ctx)
+            .setTitle("لصق توكن JWT — TimeMovies")
+            .setView(container)
+            .setPositiveButton("حفظ وتفعيل") { _, _ ->
+                val raw = tokenInput.text?.toString()?.trim().orEmpty()
+                if (raw.isBlank()) return@setPositiveButton
+                toast(ctx, "جاري التحقق وربط مفتاح الجهاز...")
+                ioExecutor.execute {
+                    val (ok, msg) = TimeMoviesApi.applyManualToken(raw)
+                    runOnUi(ctx) {
+                        toast(ctx, if (ok) "✅ $msg" else "❌ $msg")
+                    }
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showProfilePickerDialog(ctx: Context) {
+        toast(ctx, "جاري جلب الملفات الشخصية...")
         ioExecutor.execute {
             val profiles = TimeMoviesApi.fetchUserProfiles()
-            runOnUi(activity) {
+            runOnUi(ctx) {
                 if (profiles.isEmpty()) {
-                    toast(activity, "تعذر العثور على ملفات شخصية")
+                    toast(ctx, "تعذر العثور على ملفات شخصية")
                     return@runOnUi
                 }
                 val labels = profiles.map { p ->
@@ -498,12 +538,12 @@ class TimeMoviesPlugin : Plugin() {
                     if (flags.isNotEmpty()) "${p.name} ($flags)" else p.name
                 }.toTypedArray()
 
-                AlertDialog.Builder(activity)
+                AlertDialog.Builder(ctx)
                     .setTitle("اختر الملف الشخصي")
                     .setItems(labels) { _, which ->
                         val selected = profiles[which]
                         TimeMoviesApi.saveActiveProfile(selected)
-                        toast(activity, "✅ تم اختيار الملف: ${selected.name}")
+                        toast(ctx, "✅ تم اختيار الملف: ${selected.name}")
                     }
                     .setNegativeButton("إغلاق", null)
                     .show()
@@ -511,9 +551,10 @@ class TimeMoviesPlugin : Plugin() {
         }
     }
 
-    private fun runOnUi(activity: Activity, block: () -> Unit) {
+    private fun runOnUi(ctx: Context, block: () -> Unit) {
         Handler(Looper.getMainLooper()).post {
-            if (!activity.isFinishing) {
+            val act = ctx as? Activity
+            if (act == null || !act.isFinishing) {
                 block()
             }
         }

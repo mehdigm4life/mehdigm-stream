@@ -357,7 +357,7 @@ class TimeMoviesUnitTest {
                     assertEquals("prof_1", ex.requestHeaders.getFirst("x-p"))
                     val body = JSONObject(reqBody)
                     assertEquals("com.extremeqr.proapps", body.getString("package"))
-                    assertEquals("fc_interstellar_2014", body.getString("code"))
+                    assertEquals("fc_interstellar_2014", body.getString("file_code"))
                     val action = body.getString("action")
                     val grantTok = if (action == "watch") "grant_watch_tok" else "grant_dl_tok"
                     respondJson(

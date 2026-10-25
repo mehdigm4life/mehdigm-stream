@@ -70,8 +70,6 @@ object TimeMoviesCrypto {
         val publicKeySpkiB64Url: String,
     )
 
-    typealias DeviceKeyPair = EcKeyMaterial
-
     data class SignedHeaders(
         val dk: String,
         val ds: String,

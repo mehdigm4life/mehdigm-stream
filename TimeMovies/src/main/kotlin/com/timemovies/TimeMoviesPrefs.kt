@@ -586,11 +586,11 @@ object TimeMoviesPrefs {
     }
 
     @Synchronized
-    fun getOrCreateDeviceKeyPair(): TimeMoviesCrypto.DeviceKeyPair {
+    fun getOrCreateDeviceKeyPair(): TimeMoviesCrypto.EcKeyMaterial {
         val priv = getString(KEY_EC_PRIV)
         val pub = getString(KEY_EC_PUB)
         if (!priv.isNullOrBlank() && !pub.isNullOrBlank()) {
-            return TimeMoviesCrypto.DeviceKeyPair(
+            return TimeMoviesCrypto.EcKeyMaterial(
                 privateKeyPkcs8B64Url = priv,
                 publicKeySpkiB64Url = pub,
             )

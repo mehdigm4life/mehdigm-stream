@@ -28,6 +28,7 @@ import com.timemovies.TimeMoviesModels.LinkPayload
 import com.timemovies.TimeMoviesModels.WorkCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 class TimeMovies : MainAPI() {
