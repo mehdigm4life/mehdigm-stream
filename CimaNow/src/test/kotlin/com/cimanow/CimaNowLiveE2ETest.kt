@@ -118,56 +118,152 @@ class CimaNowLiveE2ETest {
             val vaultHtml = hop3?.second.orEmpty()
             if (vaultHtml.length < 5000 || vaultHtml.contains("redirectingfree")) return@withStickySession null
 
-            // O(N) compaction of huge [...] arrays (>2000 chars)
-            val compactSb = StringBuilder()
-            var p = 0
-            while (p < vaultHtml.length) {
-                val lb = vaultHtml.indexOf('[', p)
-                if (lb == -1) {
-                    compactSb.append(vaultHtml, p, vaultHtml.length)
-                    break
-                }
-                compactSb.append(vaultHtml, p, lb)
-                val rb = vaultHtml.indexOf(']', lb + 1)
-                if (rb != -1 && rb - lb > 2000) {
-                    compactSb.append("[<ARRAY len=${rb - lb} head='${vaultHtml.substring(lb + 1, lb + 60).replace("\n", "")}'>]")
-                    p = rb + 1
-                } else {
-                    compactSb.append('[')
-                    p = lb + 1
-                }
-            }
-            println("[DIAG][$pTag] COMPACTED_VAULT_HTML (len=${compactSb.length}):\n${compactSb.toString().take(12000)}")
+            val vDoc = org.jsoup.Jsoup.parse(vaultHtml)
+            val mainScriptEl = vDoc.selectFirst("script[id^=script_]") ?: vDoc.select("script").firstOrNull { it.data().length > 5000 }
+                ?: return@withStickySession null
+            val scriptId = mainScriptEl.id().ifEmpty { "script_main" }
+            val scriptJs = mainScriptEl.data()
 
-            // O(N) extraction of `e=[...],k=...,d=''` blocks
-            var searchFrom = 0
-            var blkIdx = 0
-            while (true) {
-                val mStart = Regex("""\be\s*=\s*\[""").find(vaultHtml, searchFrom) ?: break
-                val arrOpen = mStart.range.last
-                val arrClose = vaultHtml.indexOf(']', arrOpen + 1)
-                if (arrClose == -1) break
-                val afterArr = vaultHtml.substring(arrClose + 1, minOf(vaultHtml.length, arrClose + 300))
-                val kVal = Regex("""k\s*=\s*(\d+)""").find(afterArr)?.groupValues?.get(1)?.toIntOrNull()
-                val stepVal = Regex("""i\s*\*\s*(\d+)""").find(afterArr)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                println("[DIAG][$pTag] e[] block #$blkIdx arrChars=${arrClose - arrOpen} k=$kVal step=$stepVal after='${afterArr.take(180).replace("\n", " ")}'")
-                if (kVal != null) {
-                    val slice = vaultHtml.substring(arrOpen + 1, arrClose)
-                    val st = java.util.StringTokenizer(slice, ", \r\n\t")
-                    val sb = StringBuilder(st.countTokens())
-                    var ii = 0
-                    while (st.hasMoreTokens()) {
-                        val v = st.nextToken().toIntOrNull() ?: continue
-                        sb.append((v xor ((kVal + ii * stepVal) and 255)).toChar())
-                        ii++
+            val tRhino0 = System.currentTimeMillis()
+            var capturedDocWrite = ""
+            var capturedFragHtml = ""
+
+            val cx = org.mozilla.javascript.Context.enter()
+            try {
+                runCatching { cx.javaClass.getMethod("setInterpretedMode", Boolean::class.javaPrimitiveType).invoke(cx, true) }
+                    .onFailure { runCatching { cx.javaClass.getMethod("setOptimizationLevel", Int::class.javaPrimitiveType).invoke(cx, -1) } }
+                cx.languageVersion = org.mozilla.javascript.Context.VERSION_ES6
+                val scope = cx.initSafeStandardObjects()
+
+                val bridge = object {
+                    fun atob(b64: String): String {
+                        val bytes = CimaNowCrypto.b64Decode(b64)
+                        return String(bytes, Charsets.ISO_8859_1)
                     }
-                    val d = sb.toString()
-                    val dDump = if (d.length <= 44000) d else "${d.take(22000)}\n...<MID_ELIDED len=${d.length}>...\n${d.takeLast(22000)}"
-                    println("[DIAG][$pTag] DECODED_D[$blkIdx] (len=${d.length}):\n$dDump")
+                    fun btoa(str: String): String {
+                        return CimaNowCrypto.b64EncodeNoWrap(str.toByteArray(Charsets.ISO_8859_1))
+                    }
+                    fun utf8Decode(arr: Any?): String {
+                        if (arr is org.mozilla.javascript.typedarrays.NativeUint8Array) {
+                            val out = ByteArray(arr.byteLength)
+                            for (idx in 0 until arr.byteLength) {
+                                out[idx] = (arr.get(idx) as Number).toInt().toByte()
+                            }
+                            return String(out, Charsets.UTF_8)
+                        }
+                        return ""
+                    }
+                    fun onWrite(s: String) {
+                        capturedDocWrite += s
+                    }
+                    fun onFrag(s: String) {
+                        capturedFragHtml += s
+                    }
                 }
-                blkIdx++
-                searchFrom = arrClose + 1
+                org.mozilla.javascript.ScriptableObject.putProperty(scope, "__bridge", org.mozilla.javascript.Context.javaToJS(bridge, scope))
+
+                val shimJs = """
+                    var window = this;
+                    var self = this;
+                    var globalThis = this;
+                    var navigator = { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36', webdriver: false };
+                    function atob(s) { return String(__bridge.atob(String(s))); }
+                    function btoa(s) { return String(__bridge.btoa(String(s))); }
+                    function TextDecoder(enc) {}
+                    TextDecoder.prototype.decode = function(u8) { return String(__bridge.utf8Decode(u8)); };
+                    function XMLHttpRequest() {}
+                    XMLHttpRequest.prototype.send = function() {};
+                    XMLHttpRequest.prototype.send.toString = function() { return 'function send() { [native code] }'; };
+                    function MutationObserver(cb) {}
+                    MutationObserver.prototype.observe = function() {};
+                    MutationObserver.prototype.disconnect = function() {};
+                    function setTimeout(fn, ms) { return 1; }
+                    function setInterval(fn, ms) { return 1; }
+                    function clearTimeout(id) {}
+                    function clearInterval(id) {}
+
+                    var __elsById = {};
+                    function __parsePx(css, prop) {
+                        var re = new RegExp('(?:^|;|\\s)' + prop + '\\s*:\\s*([0-9.]+)px', 'i');
+                        var m = re.exec(String(css || ''));
+                        return m ? parseFloat(m[1]) : 0;
+                    }
+                    function __makeEl(tag) {
+                        var el = {
+                            tagName: String(tag || 'DIV').toUpperCase(),
+                            nodeType: 1,
+                            id: '',
+                            style: { cssText: '' },
+                            attributes: [],
+                            childNodes: [],
+                            parentNode: null,
+                            firstChild: null,
+                            _innerHTML: '',
+                            setAttribute: function(k, v) { this.attributes.push({ name: k, value: String(v) }); if (k === 'id') { this.id = String(v); __elsById[this.id] = this; } },
+                            getAttribute: function(k) { for (var i=0;i<this.attributes.length;i++) if (this.attributes[i].name===k) return this.attributes[i].value; return null; },
+                            hasAttribute: function(k) { return this.getAttribute(k) !== null; },
+                            appendChild: function(c) { if (c) { c.parentNode = this; this.childNodes.push(c); this.firstChild = this.childNodes[0] || null; if (c.id) __elsById[c.id] = c; } return c; },
+                            removeChild: function(c) { var idx = this.childNodes.indexOf(c); if (idx >= 0) this.childNodes.splice(idx, 1); this.firstChild = this.childNodes[0] || null; if (c) c.parentNode = null; return c; },
+                            insertBefore: function(n, r) { return this.appendChild(n); },
+                            replaceChild: function(n, o) { return this.appendChild(n); },
+                            getElementsByTagName: function() { return []; },
+                            addEventListener: function() {},
+                            getBoundingClientRect: function() {
+                                var w = __parsePx(this.style.cssText, 'width');
+                                var h = __parsePx(this.style.cssText, 'height');
+                                return { width: w, height: h, top: 0, left: 0, right: w, bottom: h };
+                            }
+                        };
+                        Object.defineProperty(el, 'offsetWidth', { get: function() { return Math.round(__parsePx(this.style.cssText, 'width')); } });
+                        Object.defineProperty(el, 'offsetHeight', { get: function() { return Math.round(__parsePx(this.style.cssText, 'height')); } });
+                        Object.defineProperty(el, 'innerHTML', {
+                            get: function() { return this._innerHTML; },
+                            set: function(v) { this._innerHTML = String(v); __bridge.onFrag(String(v)); }
+                        });
+                        return el;
+                    }
+                    function Document() {}
+                    Document.prototype.write = function(h) { __bridge.onWrite(String(h)); };
+                    var document = new Document();
+                    document.nodeType = 9;
+                    document.readyState = 'complete';
+                    document.documentElement = __makeEl('html');
+                    document.body = __makeEl('body');
+                    document.createElement = function(t) { return __makeEl(t); };
+                    document.createDocumentFragment = function() { return __makeEl('frag'); };
+                    document.getElementById = function(id) { return __elsById[id] || null; };
+                    document.getElementsByTagName = function(t) { return [document.body]; };
+                    document.addEventListener = function() {};
+                    var __initScript = __makeEl('script');
+                    __initScript.id = '$scriptId';
+                    document.body.appendChild(__initScript);
+                """.trimIndent()
+
+                cx.evaluateString(scope, shimJs, "shim.js", 1, null)
+                cx.evaluateString(scope, scriptJs, "vault.js", 1, null)
+            } finally {
+                org.mozilla.javascript.Context.exit()
             }
+            val rhinoMs = System.currentTimeMillis() - tRhino0
+            val innerHtml = capturedDocWrite.ifEmpty { capturedFragHtml }
+            println("[DIAG][$pTag] Rhino unpacked vaultHtml in ${rhinoMs}ms! docWriteLen=${capturedDocWrite.length} fragLen=${capturedFragHtml.length}")
+
+            // Compact huge arrays inside innerHtml and print ALL scripts in innerHtml!
+            val innerDoc = org.jsoup.Jsoup.parse(innerHtml)
+            println("[DIAG][$pTag] INNER_HTML title='${innerDoc.title()}' scripts=${innerDoc.select("script").size} forms=${innerDoc.select("form").size} btns=${innerDoc.select("button, a[id], div[id]").map { "${it.tagName()}#${it.id()}.${it.className()}" }.take(25)}")
+            innerDoc.select("script").forEachIndexed { idx, sc ->
+                val d = sc.data()
+                if (d.isBlank()) {
+                    println("[DIAG][$pTag] INNER_SCRIPT[$idx] src='${sc.attr("src")}'")
+                } else {
+                    val dump = if (d.length <= 16000) d else "${d.take(8000)}\n...<MID len=${d.length}>...\n${d.takeLast(8000)}"
+                    println("[DIAG][$pTag] INNER_SCRIPT[$idx] id='${sc.id()}' len=${d.length}:\n$dump")
+                }
+            }
+
+            // Test solveGatewayPostBody(innerHtml) too!
+            val solvedFromInner = CimaNowCrypto.solveGatewayPostBody(innerHtml)
+            println("[DIAG][$pTag] solveGatewayPostBody(innerHtml) -> $solvedFromInner")
             "done"
         }
         Unit
