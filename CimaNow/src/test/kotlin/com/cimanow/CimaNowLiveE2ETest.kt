@@ -118,27 +118,55 @@ class CimaNowLiveE2ETest {
             val vaultHtml = hop3?.second.orEmpty()
             if (vaultHtml.length < 5000 || vaultHtml.contains("redirectingfree")) return@withStickySession null
 
-            // Inspect structure of vaultHtml outside huge literals
-            val compactedHtml = vaultHtml
-                .replace(Regex("""\[[0-9,\s]{2000,}\]""")) { "<INT_ARRAY chars=${it.value.length}>" }
-                .replace(Regex("""\[(?:\s*"[A-Za-z0-9+/=]+"\s*,?)+\]""")) { "<B64_ARRAY chars=${it.value.length}>" }
-            println("[DIAG][$pTag] COMPACTED_VAULT_HTML (len=${compactedHtml.length}):\n${compactedHtml.take(12000)}")
-
-            // Decode ALL `e=[...],k=...,d=''` blocks in vaultHtml!
-            val eRegex = Regex("""e\s*=\s*\[([0-9,\s]+)\]\s*,\s*k\s*=\s*(\d+)\s*,\s*d\s*=\s*['"]{2};\s*for\s*\([^)]*\)\s*\{\s*d\s*\+=\s*String\.fromCharCode\(e\[i\]\s*\^\s*\(\(k\s*\+\s*\(i\s*\*\s*(\d+)\)\)\s*&\s*255\)\)""")
-            val matches = eRegex.findAll(vaultHtml).toList()
-            println("[DIAG][$pTag] Found ${matches.size} rolling-XOR e[] blocks")
-            matches.forEachIndexed { idx, m ->
-                val nums = m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() }
-                val k = m.groupValues[2].toInt()
-                val step = m.groupValues[3].toInt()
-                val sb = StringBuilder(nums.size)
-                for (ii in nums.indices) {
-                    sb.append((nums[ii] xor ((k + ii * step) and 255)).toChar())
+            // O(N) compaction of huge [...] arrays (>2000 chars)
+            val compactSb = StringBuilder()
+            var p = 0
+            while (p < vaultHtml.length) {
+                val lb = vaultHtml.indexOf('[', p)
+                if (lb == -1) {
+                    compactSb.append(vaultHtml, p, vaultHtml.length)
+                    break
                 }
-                val d = sb.toString()
-                val dDump = if (d.length <= 42000) d else "${d.take(21000)}\n...<MID_ELIDED len=${d.length}>...\n${d.takeLast(21000)}"
-                println("[DIAG][$pTag] DECODED_D[$idx] (len=${d.length}, k=$k, step=$step):\n$dDump")
+                compactSb.append(vaultHtml, p, lb)
+                val rb = vaultHtml.indexOf(']', lb + 1)
+                if (rb != -1 && rb - lb > 2000) {
+                    compactSb.append("[<ARRAY len=${rb - lb} head='${vaultHtml.substring(lb + 1, lb + 60).replace("\n", "")}'>]")
+                    p = rb + 1
+                } else {
+                    compactSb.append('[')
+                    p = lb + 1
+                }
+            }
+            println("[DIAG][$pTag] COMPACTED_VAULT_HTML (len=${compactSb.length}):\n${compactSb.toString().take(12000)}")
+
+            // O(N) extraction of `e=[...],k=...,d=''` blocks
+            var searchFrom = 0
+            var blkIdx = 0
+            while (true) {
+                val mStart = Regex("""\be\s*=\s*\[""").find(vaultHtml, searchFrom) ?: break
+                val arrOpen = mStart.range.last
+                val arrClose = vaultHtml.indexOf(']', arrOpen + 1)
+                if (arrClose == -1) break
+                val afterArr = vaultHtml.substring(arrClose + 1, minOf(vaultHtml.length, arrClose + 300))
+                val kVal = Regex("""k\s*=\s*(\d+)""").find(afterArr)?.groupValues?.get(1)?.toIntOrNull()
+                val stepVal = Regex("""i\s*\*\s*(\d+)""").find(afterArr)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                println("[DIAG][$pTag] e[] block #$blkIdx arrChars=${arrClose - arrOpen} k=$kVal step=$stepVal after='${afterArr.take(180).replace("\n", " ")}'")
+                if (kVal != null) {
+                    val slice = vaultHtml.substring(arrOpen + 1, arrClose)
+                    val st = java.util.StringTokenizer(slice, ", \r\n\t")
+                    val sb = StringBuilder(st.countTokens())
+                    var ii = 0
+                    while (st.hasMoreTokens()) {
+                        val v = st.nextToken().toIntOrNull() ?: continue
+                        sb.append((v xor ((kVal + ii * stepVal) and 255)).toChar())
+                        ii++
+                    }
+                    val d = sb.toString()
+                    val dDump = if (d.length <= 44000) d else "${d.take(22000)}\n...<MID_ELIDED len=${d.length}>...\n${d.takeLast(22000)}"
+                    println("[DIAG][$pTag] DECODED_D[$blkIdx] (len=${d.length}):\n$dDump")
+                }
+                blkIdx++
+                searchFrom = arrClose + 1
             }
             "done"
         }
