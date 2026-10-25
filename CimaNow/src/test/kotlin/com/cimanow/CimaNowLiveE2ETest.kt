@@ -670,7 +670,27 @@ class CimaNowLiveE2ETest {
                             logs.push('V8_HTTP[' + kind + '] ' + method + ' ' + url + ' hdr=' + hdrs + ' body=' + String(body).slice(0, 400));
                             return '{"ok":true,"url":"https://cimanow.cc/watching/?token=dummy"}';
                         },
-                        webcrypto: cryptoNode.webcrypto,
+                        webcrypto: {
+                            getRandomValues: a => cryptoNode.webcrypto.getRandomValues(a),
+                            subtle: {
+                                importKey: async (fmt, keyData, algo, ext, usages) => {
+                                    const b = Buffer.from(keyData instanceof ArrayBuffer ? keyData : keyData.buffer, keyData.byteOffset || 0, keyData.byteLength || keyData.length);
+                                    logs.push('SUBTLE.importKey fmt=' + fmt + ' algo=' + JSON.stringify(algo) + ' keyHex=' + b.toString('hex') + ' keyUtf8=' + b.toString('utf8'));
+                                    return cryptoNode.webcrypto.subtle.importKey(fmt, keyData, algo, ext, usages);
+                                },
+                                sign: async (algo, key, data) => {
+                                    const b = Buffer.from(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, data.byteLength || data.length);
+                                    logs.push('SUBTLE.sign algo=' + JSON.stringify(algo) + ' msgUtf8=' + b.toString('utf8'));
+                                    return cryptoNode.webcrypto.subtle.sign(algo, key, data);
+                                },
+                                digest: async (algo, data) => {
+                                    const b = Buffer.from(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, data.byteLength || data.length);
+                                    logs.push('SUBTLE.digest algo=' + JSON.stringify(algo) + ' msgUtf8=' + b.toString('utf8').slice(0, 200));
+                                    return cryptoNode.webcrypto.subtle.digest(algo, data);
+                                }
+                            }
+                        },
+                        bodyTree: JSON.parse(bodyTreeJson),
                         atob: s => Buffer.from(String(s), 'base64').toString('binary'),
                         btoa: s => Buffer.from(String(s), 'binary').toString('base64'),
                         TextEncoder, TextDecoder, URLSearchParams
@@ -814,7 +834,7 @@ class CimaNowLiveE2ETest {
                             if (parent) parent.appendChild(n);
                             for (var ch of (sp.kids||[])) __hydrate(ch, n);
                         }
-                        __hydrate(${bodyTreeJson}, null);
+                        __hydrate(__host.bodyTree, null);
                         function $(sel){
                             var els = typeof sel==='string' ? document.querySelectorAll(sel) : [sel];
                             return {
