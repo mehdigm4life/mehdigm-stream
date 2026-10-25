@@ -35,26 +35,29 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace 2>&1 | tee gradle.log
 
-      - name: Report Gradle Build Log on Failure
-        if: failure()
+      - name: Report Gradle Build & Test Summary
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           python3 - <<'PY'
           import json, os, subprocess, glob
-          txt = open("gradle.log", encoding="utf-8", errors="replace").read()[-45000:] if os.path.exists("gradle.log") else "no log"
+          txt = open("gradle.log", encoding="utf-8", errors="replace").read()[-35000:] if os.path.exists("gradle.log") else "no log"
           xmls = []
           for p in glob.glob("TimeMovies/build/test-results/**/*.xml", recursive=True):
-              xmls.append(f"\n--- {p} ---\n" + open(p, encoding="utf-8", errors="replace").read()[:8000])
+              xmls.append(f"\n--- {p} ---\n" + open(p, encoding="utf-8", errors="replace").read()[:12000])
           full = (txt + "\n" + "".join(xmls))[-55000:]
+          status = os.environ.get("JOB_STATUS", "failure")
+          conclusion = "success" if status == "success" else "failure"
           payload = {
               "name": "TimeMovies Build Log",
               "head_sha": os.environ["SHA"],
               "status": "completed",
-              "conclusion": "failure",
-              "output": {"title": "Gradle Build & Test Log", "summary": "Failure details", "text": f"```\n{full}\n```"}
+              "conclusion": conclusion,
+              "output": {"title": f"Gradle Build & Test ({conclusion})", "summary": f"Result: {conclusion}", "text": f"```\n{full}\n```"}
           }
           with open("cp.json", "w") as f:
               json.dump(payload, f)

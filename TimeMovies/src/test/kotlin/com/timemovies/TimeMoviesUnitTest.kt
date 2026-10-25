@@ -1057,7 +1057,7 @@ class TimeMoviesUnitTest {
                 req.path.endsWith(TimeMoviesApi.PATH_EMAIL_SIGN_IN) ->
                     jsonResp(200, JSONObject().put("success", true).put("status", 200).put("result", unactiveJwt).toString())
 
-                req.path.endsWith(TimeMoviesApi.PATH_EMAIL_RESEND_OTP) -> {
+                req.path.endsWith(TimeMoviesApi.PATH_EMAIL_FORGOT_OR_RESEND) -> {
                     resendCount.incrementAndGet()
                     jsonResp(200, """{"success":true,"status":200,"result":"sent"}""")
                 }
