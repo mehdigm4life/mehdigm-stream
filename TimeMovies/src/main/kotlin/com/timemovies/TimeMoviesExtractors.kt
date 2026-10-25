@@ -147,17 +147,18 @@ object TimeMoviesExtractors {
             callback(link)
         }
 
-        // Attempt 1: Internal Origin Mode (`executor_target = null`, `player_installed = false` per `rca.java`)
-        val internalGrant = requestGrantWithExecutionRetry(
+        // Attempt 1: Auto-target with `player_installed = true` (`executor_target = null` per `at5.java`),
+        // allowing `api.apks.lol` to return inline `media`, `external` DoomPlayer ticket, or `grant` on 1st call.
+        val primaryGrant = requestGrantWithExecutionRetry(
             action = action,
             payload = payload,
             executorTarget = null,
-            playerInstalled = false,
+            playerInstalled = true,
         )
-        if (internalGrant != null && internalGrant.ok) {
+        if (primaryGrant != null && primaryGrant.ok) {
             processGrantPayload(
                 action = action,
-                grantPayload = internalGrant,
+                grantPayload = primaryGrant,
                 subtitleCallback = subtitleCallback,
                 callback = trackingCallback,
             )
@@ -165,23 +166,38 @@ object TimeMoviesExtractors {
 
         if (emitted) return true
 
-        // Attempt 2: External `DoomVideoPlayer` Mode (`executor_target = "external"`, `player_installed = true`)
-        // Triggered when internal mode was refused (e.g. `player_not_installed` on external-only capability)
-        // or returned no playable URLs without charging quota.
-        val shouldTryExternal = internalGrant == null ||
-            !internalGrant.ok ||
-            !internalGrant.charged
-        if (shouldTryExternal) {
-            val externalGrant = requestGrantWithExecutionRetry(
+        // Attempt 2: Explicit External `DoomVideoPlayer` Mode (`executor_target = "external"`, `player_installed = true`)
+        val reuseOpId = primaryGrant?.operationId?.takeIf { primaryGrant.charged && it.isNotBlank() }
+        val externalGrant = requestGrantWithExecutionRetry(
+            action = action,
+            payload = payload,
+            executorTarget = "external",
+            playerInstalled = true,
+            initialOperationId = reuseOpId,
+        )
+        if (externalGrant != null && externalGrant.ok) {
+            processGrantPayload(
+                action = action,
+                grantPayload = externalGrant,
+                subtitleCallback = subtitleCallback,
+                callback = trackingCallback,
+            )
+        }
+
+        if (emitted) return true
+
+        // Attempt 3: Explicit Internal Origin Mode (`executor_target = null`, `player_installed = false`)
+        if (primaryGrant == null || !primaryGrant.charged) {
+            val internalOnlyGrant = requestGrantWithExecutionRetry(
                 action = action,
                 payload = payload,
-                executorTarget = "external",
-                playerInstalled = true,
+                executorTarget = null,
+                playerInstalled = false,
             )
-            if (externalGrant != null && externalGrant.ok) {
+            if (internalOnlyGrant != null && internalOnlyGrant.ok) {
                 processGrantPayload(
                     action = action,
-                    grantPayload = externalGrant,
+                    grantPayload = internalOnlyGrant,
                     subtitleCallback = subtitleCallback,
                     callback = trackingCallback,
                 )
@@ -200,6 +216,7 @@ object TimeMoviesExtractors {
         payload: LinkPayload,
         executorTarget: String?,
         playerInstalled: Boolean,
+        initialOperationId: String? = null,
     ): MediaGrantPayload? {
         val attemptKey = UUID.randomUUID().toString()
         val first = TimeMoviesApi.requestMediaGrant(
@@ -210,6 +227,7 @@ object TimeMoviesExtractors {
             seasonId = payload.seasonId,
             executorTarget = executorTarget,
             playerInstalled = playerInstalled,
+            operationId = initialOperationId,
             clientAttemptKey = attemptKey,
         ) ?: return null
 
@@ -238,15 +256,22 @@ object TimeMoviesExtractors {
     ): Boolean {
         var found = false
 
-        // 1. Inline `media` inside `MediaGrantResponse`
+        // 1. Inline `media` inside `MediaGrantResponse` (`Lex;->F` priority 1)
         if (grantPayload.media != null) {
             if (processMediaV2Payload(action, grantPayload.media, subtitleCallback, callback)) {
                 found = true
             }
         }
 
-        // 2. Origin grant token (`X-Media-Grant` -> `GET /v2/media/{manifest|download}`)
-        if (!grantPayload.grant.isNullOrBlank()) {
+        // 2. External `DoomVideoPlayer` execution descriptor / ticket (`timesnizz://` / `timesdizz://`, priority 2)
+        if (grantPayload.external != null) {
+            if (processExternalExecution(action, grantPayload.external, subtitleCallback, callback)) {
+                found = true
+            }
+        }
+
+        // 3. Origin grant token fallback (`X-Media-Grant` -> `GET /v2/media/{manifest|download}`) when neither inline nor external emitted
+        if (!found && !grantPayload.grant.isNullOrBlank()) {
             val originMedia = TimeMoviesApi.fetchOriginMedia(
                 action = action,
                 grantToken = grantPayload.grant,
@@ -256,13 +281,6 @@ object TimeMoviesExtractors {
                 if (processMediaV2Payload(action, originMedia, subtitleCallback, callback)) {
                     found = true
                 }
-            }
-        }
-
-        // 3. External `DoomVideoPlayer` execution descriptor / ticket (`timesnizz://` / `timesdizz://`)
-        if (grantPayload.external != null) {
-            if (processExternalExecution(action, grantPayload.external, subtitleCallback, callback)) {
-                found = true
             }
         }
 

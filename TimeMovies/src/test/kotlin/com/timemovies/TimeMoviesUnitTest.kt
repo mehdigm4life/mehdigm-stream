@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -729,7 +730,9 @@ class TimeMoviesUnitTest {
     @Test
     fun testLiveApiApksLolConnectivityClockSyncAndDoomPlayerWhenOnline() {
         val ast = TimeMoviesApi.getAppSettings() ?: return
-        assertTrue(ast.has("v") || ast.has("m") || ast.length() >= 0)
+        assertTrue(ast.optBoolean("iv47", true))
+        assertTrue(ast.optString("vdl").startsWith("timesnizz://") || ast.length() > 0)
+        assertTrue(ast.optString("ddl").startsWith("timesdizz://") || ast.length() > 0)
         assertTrue("Clock offset must be persisted after live response", TimeMoviesPrefs.hasPersistedClockOffset)
 
         // 1. Live VirtualDeviceProfile + "Mehdi" Sign-Up validation against production `api.apks.lol`
@@ -740,33 +743,45 @@ class TimeMoviesUnitTest {
             signUpProbe.message.orEmpty().contains("Request verification failed", ignoreCase = true),
         )
 
-        // 2. Live `GET /v2/media/manifest` & `GET /v2/media/download` route verification on `api.apks.lol`
-        for (mediaPath in listOf("manifest", "download")) {
-            val mediaReq = okhttp3.Request.Builder()
-                .url("${TimeMoviesCrypto.MEDIA_V2_BASE_URL}$mediaPath")
-                .get()
-                .header("User-Agent", "okhttp/4.12.0")
-                .header("Accept", "application/json")
-                .header("x-b", TimeMoviesCrypto.APP_BUILD)
-                .header("ai", TimeMoviesCrypto.APP_ID)
-                .header("av", TimeMoviesCrypto.APP_VERSION_TOKEN)
-                .header("X-Media-Grant", "probe_invalid_grant")
-                .build()
-            TimeMoviesApi.plainClient.newCall(mediaReq).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                assertFalse(
-                    "GET /v2/media/$mediaPath must route to MediaV2 controller, not Express Cannot GET: $body",
-                    body.contains("Cannot GET", ignoreCase = true),
-                )
-            }
+        // 2. Live `POST /api/v4.7/app/media/grant` route verification on `api.apks.lol`
+        val grantBody = """{"action":"watch","surface":1,"package":"com.extremeqr.proapps","file_code":"probe_fc","work_id":"probe_wk"}"""
+            .toByteArray(Charsets.UTF_8)
+            .toRequestBody(null)
+        val grantReq = okhttp3.Request.Builder()
+            .url("${TimeMoviesCrypto.APP_BASE_URL}media/grant")
+            .post(grantBody)
+            .header("User-Agent", "okhttp/4.12.0")
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .header("x-b", TimeMoviesCrypto.APP_BUILD)
+            .header("ai", TimeMoviesCrypto.APP_ID)
+            .header("av", TimeMoviesCrypto.APP_VERSION_TOKEN)
+            .build()
+        TimeMoviesApi.plainClient.newCall(grantReq).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            assertNotEquals("POST media/grant must exist (not 404)", 404, resp.code)
+            assertFalse(body.contains("Cannot POST", ignoreCase = true))
         }
 
-        // 3. Live `DoomVideoPlayer` v1.6 `resolve-play` & `resolve-download` route verification
+        // 3. Live `DoomVideoPlayer` v1.6 `settings`, `resolve-play`, & `resolve-download` route verification
+        val settingsReq = okhttp3.Request.Builder()
+            .url("${TimeMoviesCrypto.DOOM_BASE_URL}settings")
+            .get()
+            .header("User-Agent", "okhttp/4.12.0")
+            .header("Accept", "application/json")
+            .header("x-b", TimeMoviesCrypto.DOOM_BUILD)
+            .header("ai", TimeMoviesCrypto.DOOM_APP_ID)
+            .build()
+        TimeMoviesApi.plainClient.newCall(settingsReq).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            assertNotEquals("DoomPlayer v1.6 settings must exist (not 404)", 404, resp.code)
+            assertFalse(body.contains("Cannot GET", ignoreCase = true))
+        }
+
         for (doomEndpoint in listOf("resolve-play", "resolve-download")) {
-            val reqBody = okhttp3.RequestBody.create(
-                null,
-                """{"src":"invalid_probe_ticket"}""".toByteArray(Charsets.UTF_8),
-            )
+            val reqBody = """{"src":"invalid_probe_ticket"}"""
+                .toByteArray(Charsets.UTF_8)
+                .toRequestBody(null)
             val doomReq = okhttp3.Request.Builder()
                 .url("${TimeMoviesCrypto.DOOM_BASE_URL}$doomEndpoint")
                 .post(reqBody)

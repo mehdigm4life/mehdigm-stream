@@ -399,13 +399,25 @@ object TimeMoviesCrypto {
             String(base64DecodeFlexible(afterHost), Charsets.UTF_8)
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
 
-        // Query-style payload inside base64 (if any)
-        if ((decoded.startsWith("src=") || decoded.contains("&src=") || decoded.startsWith("url=")) && '/' !in decoded.substringBefore('=')) {
+        // Query-style payload inside base64 (`NavGraphKt.parseDeepPlayerQueryArgs`)
+        if (
+            (
+                decoded.startsWith("src=") ||
+                    decoded.contains("&src=") ||
+                    decoded.startsWith("vidUrl=") ||
+                    decoded.contains("&vidUrl=") ||
+                    decoded.startsWith("url=") ||
+                    decoded.contains("&url=")
+                ) && '/' !in decoded.substringBefore('=')
+        ) {
             val map = decoded.removePrefix("?").split('&').mapNotNull { kv ->
                 val idx = kv.indexOf('=')
                 if (idx <= 0) null else kv.substring(0, idx) to safeUrlDecode(kv.substring(idx + 1)).orEmpty()
             }.toMap()
-            val src = map["src"]?.ifBlank { null } ?: map["url"]?.ifBlank { null } ?: return null
+            val src = map["src"]?.ifBlank { null }
+                ?: map["vidUrl"]?.ifBlank { null }
+                ?: map["url"]?.ifBlank { null }
+                ?: return null
             val ieFlag = map["ie"]?.lowercase(Locale.US)
             val isTicket = when (ieFlag) {
                 "true", "1" -> true
@@ -415,9 +427,9 @@ object TimeMoviesCrypto {
             return DoomDeepLinkPayload(
                 srcOrUrl = src,
                 title = map["title"],
-                profileId = map["pid"] ?: map["p"],
-                workId = map["wk"] ?: map["workId"],
-                episodeId = map["ep"]?.takeUnless { it == "@" },
+                profileId = map["pid"] ?: map["profileId"] ?: map["p"],
+                workId = map["wk"] ?: map["workId"] ?: map["w"],
+                episodeId = (map["ep"] ?: map["episodeId"] ?: map["e"])?.takeUnless { it == "@" },
                 isEncryptedTicket = isTicket,
                 scheme = detectedScheme,
             )
