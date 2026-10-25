@@ -2,6 +2,8 @@ package com.timemovies
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -21,7 +23,6 @@ import android.widget.TextView
 import android.widget.Toast
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
-import java.lang.ref.WeakReference
 import java.util.concurrent.Executors
 
 @CloudstreamPlugin
@@ -30,8 +31,13 @@ class TimeMoviesPlugin : Plugin() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
 
     override fun load(context: Context) {
-        appContextRef = WeakReference(context.applicationContext ?: context)
+        appContext = context.applicationContext ?: context
         TimeMoviesPrefs.init(context)
+
+        // Warm up OTA pre-activated account pool (`TimeMovies/pool.enc`) in background
+        ioExecutor.execute {
+            runCatching { TimeMoviesPool.refreshRemotePool(force = false) }
+        }
 
         // Register main TimeMovies v4.7 provider
         registerMainAPI(TimeMovies())
@@ -124,7 +130,7 @@ class TimeMoviesPlugin : Plugin() {
         }
 
         val headerTitle = TextView(ctx).apply {
-            text = "🎬 إعدادات TimeMovies (v4.7)"
+            text = "🎬 إعدادات TimeMovies (v3)"
             setTextColor(Color.WHITE)
             textSize = 18.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -132,12 +138,15 @@ class TimeMoviesPlugin : Plugin() {
         root.addView(headerTitle)
 
         val subHeader = TextView(ctx).apply {
-            text = "إدارة الحساب، الملف الشخصي، حماية الجهاز الافتراضية، ومشغل DoomPlayer المدمج"
+            text = "التشغيل التلقائي المدمج (Pool)، إدارة الحساب الشخصي/VIP، وتجاوز حظر الأجهزة"
             setTextColor(Color.parseColor("#9AA0B4"))
             textSize = 12.5f
             setPadding(0, dp(ctx, 4), 0, dp(ctx, 14))
         }
         root.addView(subHeader)
+
+        val poolCount = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
+        val hasActiveAccess = TimeMoviesPrefs.isSignedIn || poolCount > 0
 
         val statusCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -151,9 +160,13 @@ class TimeMoviesPlugin : Plugin() {
         }
 
         val statusBadge = TextView(ctx).apply {
-            text = if (TimeMoviesPrefs.isSignedIn) "✅ متصل بحساب TimeMovies" else "⚠️ لم يتم تسجيل الدخول بعد"
+            text = when {
+                TimeMoviesPrefs.isSignedIn -> "✅ متصل بحسابك الشخصي في TimeMovies"
+                poolCount > 0 -> "✅ التشغيل التلقائي مفعّل ($poolCount حساب مدمج نشط)"
+                else -> "⚠️ لم يتم تسجيل الدخول بعد"
+            }
             setTextColor(
-                if (TimeMoviesPrefs.isSignedIn) Color.parseColor("#4ADE80")
+                if (hasActiveAccess) Color.parseColor("#4ADE80")
                 else Color.parseColor("#FBBF24")
             )
             textSize = 14f
@@ -171,7 +184,11 @@ class TimeMoviesPlugin : Plugin() {
 
         if (!TimeMoviesPrefs.isSignedIn) {
             val hintText = TextView(ctx).apply {
-                text = "يتطلب خادم TimeMovies الرسمي (v4.7) حساباً مجانياً أو VIP لتصفح المكتبة وتشغيل الروابط. تتضمن الإضافة نظام جهاز افتراضي معزول لتجاوز حظر الأجهزة تلقائياً."
+                text = if (poolCount > 0) {
+                    "الإضافة تعمل تلقائياً عبر الحسابات المدمجة (مع تبديل تلقائي عند انتهاء الحصة اليومية). يمكنك اختيارياً تسجيل الدخول بحسابك الشخصي أو VIP أدناه."
+                } else {
+                    "يتطلب خادم TimeMovies الرسمي (v4.7) حساباً مفعّلاً لتصفح المكتبة وتشغيل الروابط. تتضمن الإضافة نظام جهاز افتراضي معزول لتجاوز حظر الأجهزة تلقائياً."
+                }
                 setTextColor(Color.parseColor("#9AA0B4"))
                 textSize = 12f
                 setPadding(0, dp(ctx, 8), 0, 0)
@@ -287,6 +304,28 @@ class TimeMoviesPlugin : Plugin() {
             root.addView(
                 makeActionButton(
                     ctx = ctx,
+                    label = "📦 نسخ حزمة الحساب المفعّل لـ Pool الإضافة",
+                    bgColor = Color.parseColor("#0D9488"),
+                ) {
+                    toast(ctx, "جاري تحضير وتشفير حزمة الجلسة المفعّلة...")
+                    ioExecutor.execute {
+                        val exported = TimeMoviesPool.exportCurrentPersonalSessionBundle()
+                        runOnUi(ctx) {
+                            exported.onSuccess { sealedLine ->
+                                copyToClipboard(ctx, "TimeMovies Pool Bundle", sealedLine)
+                                dialog.dismiss()
+                                showExportedBundleDialog(ctx, sealedLine)
+                            }.onFailure { err ->
+                                toast(ctx, "❌ ${err.message ?: "تعذر تصدير الحزمة"}")
+                            }
+                        }
+                    }
+                }
+            )
+
+            root.addView(
+                makeActionButton(
+                    ctx = ctx,
                     label = "🔄 مزامنة الجلسة ومفتاح التشفير (ECDSA P-256)",
                     bgColor = Color.parseColor("#374151"),
                 ) {
@@ -313,15 +352,26 @@ class TimeMoviesPlugin : Plugin() {
             root.addView(
                 makeActionButton(
                     ctx = ctx,
-                    label = "🚪 تسجيل الخروج",
+                    label = "🚪 تسجيل الخروج من الحساب الشخصي",
                     bgColor = Color.parseColor("#DC2626"),
                 ) {
                     TimeMoviesPrefs.signOut()
-                    toast(ctx, "تم تسجيل الخروج من TimeMovies")
+                    toast(ctx, "تم تسجيل الخروج من الحساب الشخصي")
                     dialog.dismiss()
                 }
             )
         }
+
+        root.addView(
+            makeActionButton(
+                ctx = ctx,
+                label = "⚡ إدارة / مزامنة الحسابات التلقائية المدمجة (Pool)",
+                bgColor = Color.parseColor("#1E293B"),
+            ) {
+                dialog.dismiss()
+                showPoolManagerDialog(ctx)
+            }
+        )
 
         scroll.addView(root)
         dialog = AlertDialog.Builder(ctx)
@@ -329,6 +379,80 @@ class TimeMoviesPlugin : Plugin() {
             .setNegativeButton("إغلاق", null)
             .create()
         dialog.show()
+    }
+
+    private fun showExportedBundleDialog(ctx: Context, sealedLine: String) {
+        AlertDialog.Builder(ctx)
+            .setTitle("📦 تم نسخ حزمة Pool للحافظة!")
+            .setMessage(
+                "تم تشفير الجلسة المفعّلة (بدون أي كلمة مرور) ونسخها للحافظة بنجاح:\n\n" +
+                    "• لتفعيلها لكل مستخدمي المستودع تلقائياً: الصق هذا السطر داخل ملف TimeMovies/pool.enc في فرع main على GitHub (يمكنك إضافة عدة أسطر لعدة حسابات للتبديل التلقائي).\n" +
+                    "• أو اضغط (إضافة محلياً أيضاً) لتجربة وضع Pool على جهازك فوراً بعد تسجيل الخروج."
+            )
+            .setPositiveButton("➕ إضافة محلياً أيضاً") { _, _ ->
+                val total = TimeMoviesPool.addLocalPoolBundles(sealedLine)
+                toast(ctx, "✅ تمت الإضافة لمخزن الجهاز المحلي (إجمالي الحزم المحلية: $total)")
+            }
+            .setNegativeButton("تم", null)
+            .show()
+    }
+
+    private fun showPoolManagerDialog(ctx: Context) {
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(ctx, 20), dp(ctx, 12), dp(ctx, 20), dp(ctx, 4))
+        }
+
+        val countNow = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
+        val infoView = TextView(ctx).apply {
+            text = "عدد الحسابات التلقائية المتاحة حالياً: $countNow\n" +
+                "يمكنك مزامنة الحزم المنشورة في المستودع أو لصق أسطر tm3pool:v1:... إضافية أدناه:"
+            textSize = 13f
+            setPadding(0, 0, 0, dp(ctx, 8))
+        }
+        val bundleInput = EditText(ctx).apply {
+            hint = "tm3pool:v1:..."
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2
+        }
+
+        container.addView(infoView)
+        container.addView(bundleInput)
+
+        AlertDialog.Builder(ctx)
+            .setTitle("⚡ الحسابات التلقائية المدمجة (Pool)")
+            .setView(container)
+            .setPositiveButton("🔄 مزامنة من المستودع") { _, _ ->
+                toast(ctx, "جاري جلب أحدث حسابات Pool وتصفير مؤقت الحصة...")
+                ioExecutor.execute {
+                    val raw = bundleInput.text?.toString()?.trim().orEmpty()
+                    if (raw.isNotBlank()) {
+                        TimeMoviesPool.addLocalPoolBundles(raw)
+                    }
+                    TimeMoviesPool.clearAllCooldowns()
+                    TimeMoviesPool.refreshRemotePool(force = true)
+                    val total = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
+                    runOnUi(ctx) {
+                        toast(ctx, "✅ اكتملت المزامنة — الحسابات التلقائية النشطة: $total")
+                    }
+                }
+            }
+            .setNeutralButton("➕ حفظ السطر الملصوق") { _, _ ->
+                val raw = bundleInput.text?.toString()?.trim().orEmpty()
+                if (raw.isBlank()) {
+                    toast(ctx, "الرجاء لصق سطر يبدأ بـ tm3pool:v1:...")
+                    return@setNeutralButton
+                }
+                val added = TimeMoviesPool.addLocalPoolBundles(raw)
+                if (added > 0) {
+                    toast(ctx, "✅ تم حفظ وتفعيل الحزمة بنجاح (الإجمالي المحلي: $added)")
+                } else {
+                    toast(ctx, "❌ صيغة الحزمة غير صالحة")
+                }
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
     }
 
     private fun showSignInDialog(ctx: Context) {
@@ -551,6 +675,13 @@ class TimeMoviesPlugin : Plugin() {
         }
     }
 
+    private fun copyToClipboard(ctx: Context, label: String, text: String) {
+        runCatching {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+            cm.setPrimaryClip(ClipData.newPlainText(label, text))
+        }
+    }
+
     private fun runOnUi(ctx: Context, block: () -> Unit) {
         Handler(Looper.getMainLooper()).post {
             val act = ctx as? Activity
@@ -566,11 +697,11 @@ class TimeMoviesPlugin : Plugin() {
 
     companion object {
         @Volatile
-        private var appContextRef: WeakReference<Context>? = null
+        private var appContext: Context? = null
 
         fun notifyUserAr(message: String) {
             runCatching {
-                val ctx = appContextRef?.get() ?: return
+                val ctx = appContext ?: return
                 val mainLooper = Looper.getMainLooper() ?: return
                 Handler(mainLooper).post {
                     runCatching {

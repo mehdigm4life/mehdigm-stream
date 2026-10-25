@@ -3,13 +3,12 @@ package com.timemovies
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONObject
-import java.lang.ref.WeakReference
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Persistent preference, auth session, ECDSA P-256 keypair, and Virtual Retail Handset Identity store
- * for TimeMovies v4.7.
+ * Persistent preference, auth session, ECDSA P-256 keypair, Virtual Retail Handset Identity,
+ * and Built-in Account Pool overlay store for TimeMovies v4.7 (v3).
  *
  * Security & Privacy note:
  * Never reads or transmits physical `android.os.Build.*` or `Settings.Secure.ANDROID_ID` properties
@@ -33,6 +32,24 @@ object TimeMoviesPrefs {
     private const val KEY_CLOCK_OFFSET_MS = "clock_offset_ms"
     private const val KEY_CLOCK_OFFSET_SET = "clock_offset_set"
     private const val KEY_PREFER_ARABIC = "prefer_arabic_titles"
+
+    // Built-in Pre-Activated Pool keys
+    private const val KEY_REMOTE_POOL_BUNDLES = "remote_pool_bundles_raw"
+    private const val KEY_REMOTE_POOL_FETCHED_MS = "remote_pool_fetched_ms"
+    private const val KEY_LOCAL_POOL_BUNDLES = "local_pool_bundles_raw"
+    private const val KEY_POOL_RUNTIME_STATE = "pool_runtime_state_json"
+
+    private val SYNC_COMMIT_KEYS = setOf(
+        KEY_AUTH_TOKEN,
+        KEY_PENDING_OTP_TOKEN,
+        KEY_PENDING_OTP_EMAIL,
+        KEY_EC_PRIV,
+        KEY_EC_PUB,
+        KEY_DEVICE_KEY_ID,
+        KEY_DEVICE_KEY_SCOPE,
+        KEY_VIRTUAL_DEVICE_JSON,
+        KEY_LOCAL_POOL_BUNDLES,
+    )
 
     data class VirtualDeviceProfile(
         val displayLabel: String,
@@ -133,7 +150,7 @@ object TimeMoviesPrefs {
                     return null
                 }
                 VirtualDeviceProfile(
-                    displayLabel = o.optString("displayLabel", "$model"),
+                    displayLabel = o.optString("displayLabel", model),
                     name = o.optString("name", model),
                     deviceName = o.optString("deviceName", model),
                     uniqueId = uniqueId,
@@ -375,8 +392,15 @@ object TimeMoviesPrefs {
         ),
     )
 
+    /**
+     * Strong `Application` context reference so ART GC never collects CloudStream's temporary
+     * `PluginContext` wrapper while the user switches to Gmail to copy an OTP code.
+     */
     @Volatile
-    private var contextRef: WeakReference<Context>? = null
+    private var appContext: Context? = null
+
+    @Volatile
+    private var unitTestIsolatedMode: Boolean = false
 
     private val memoryFallback = ConcurrentHashMap<String, String>()
     private val secureRandom = SecureRandom()
@@ -391,12 +415,34 @@ object TimeMoviesPrefs {
     @Volatile
     internal var doomBaseUrlOverride: String? = null
 
+    @Volatile
+    internal var remotePoolUrlsOverride: List<String>? = null
+
     fun init(context: Context) {
-        contextRef = WeakReference(context.applicationContext ?: context)
+        unitTestIsolatedMode = false
+        appContext = context.applicationContext ?: resolveHostApplicationContext() ?: context
+    }
+
+    private fun resolveHostApplicationContext(): Context? {
+        if (unitTestIsolatedMode) return null
+        return runCatching {
+            val at = Class.forName("android.app.ActivityThread")
+            val m = at.getMethod("currentApplication")
+            (m.invoke(null) as? Context)?.let { return it }
+            null
+        }.getOrNull() ?: runCatching {
+            val acra = Class.forName("com.lagradost.cloudstream3.AcraApplication")
+            val companionField = acra.getDeclaredField("Companion")
+            companionField.isAccessible = true
+            val companion = companionField.get(null)
+            val getCtx = companion.javaClass.getMethod("getContext")
+            getCtx.invoke(companion) as? Context
+        }.getOrNull()
     }
 
     private fun prefs(): SharedPreferences? {
-        val ctx = contextRef?.get() ?: return null
+        if (unitTestIsolatedMode) return null
+        val ctx = appContext ?: resolveHostApplicationContext()?.also { appContext = it } ?: return null
         return runCatching {
             ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         }.getOrNull()
@@ -406,18 +452,26 @@ object TimeMoviesPrefs {
         val sp = prefs()
         if (sp != null) {
             val v = sp.getString(key, null)
-            if (!v.isNullOrBlank()) return v
+            if (!v.isNullOrBlank()) {
+                memoryFallback[key] = v
+                return v
+            }
         }
         return memoryFallback[key]?.takeIf { it.isNotBlank() } ?: default
     }
 
     private fun putString(key: String, value: String?) {
+        val syncCommit = key in SYNC_COMMIT_KEYS
         if (value.isNullOrBlank()) {
             memoryFallback.remove(key)
-            prefs()?.edit()?.remove(key)?.apply()
+            prefs()?.edit()?.remove(key)?.let { editor ->
+                if (syncCommit) editor.commit() else editor.apply()
+            }
         } else {
             memoryFallback[key] = value
-            prefs()?.edit()?.putString(key, value)?.apply()
+            prefs()?.edit()?.putString(key, value)?.let { editor ->
+                if (syncCommit) editor.commit() else editor.apply()
+            }
         }
     }
 
@@ -434,7 +488,7 @@ object TimeMoviesPrefs {
         return String(out)
     }
 
-    private fun buildFreshVirtualDevice(excludeModel: String? = null): VirtualDeviceProfile {
+    internal fun buildSyntheticDevice(excludeModel: String? = null): VirtualDeviceProfile {
         val candidates = HANDSET_TEMPLATES.filter { it.model != excludeModel }.ifEmpty { HANDSET_TEMPLATES }
         val tpl = candidates[secureRandom.nextInt(candidates.size)]
         val uniqueId = randomHex(8) // 16 lowercase hex chars (ANDROID_ID format)
@@ -477,31 +531,30 @@ object TimeMoviesPrefs {
         if (!existingRaw.isNullOrBlank()) {
             VirtualDeviceProfile.fromStorageJson(existingRaw)?.let { return it }
         }
-        val created = buildFreshVirtualDevice()
+        val created = buildSyntheticDevice()
         putString(KEY_VIRTUAL_DEVICE_JSON, created.toStorageJson())
         return created
     }
 
     /**
-     * Rotates the virtual retail handset identity, generates a brand-new P-256 ECDSA keypair,
-     * and clears any previous session/device-key bindings so a fresh account cannot be linked
+     * Rotates the virtual retail handset identity, generates a brand-new canonical P-256 ECDSA keypair,
+     * and clears any previous personal session/device-key bindings so a fresh account cannot be linked
      * to any prior device or banned hardware fingerprint.
      */
     @Synchronized
     fun rotateVirtualDeviceIdentity(): VirtualDeviceProfile {
         val currentModel = getString(KEY_VIRTUAL_DEVICE_JSON)
             ?.let { VirtualDeviceProfile.fromStorageJson(it)?.model }
-        val fresh = buildFreshVirtualDevice(excludeModel = currentModel)
+        val fresh = buildSyntheticDevice(excludeModel = currentModel)
         putString(KEY_VIRTUAL_DEVICE_JSON, fresh.toStorageJson())
         clearSessionAndDeviceKeys()
-        // Pre-generate a fresh P-256 keypair for the new virtual device
         val kp = TimeMoviesCrypto.generateP256KeyPair()
         putString(KEY_EC_PRIV, kp.privateKeyPkcs8B64Url)
         putString(KEY_EC_PUB, kp.publicKeySpkiB64Url)
         return fresh
     }
 
-    // ---- Auth Token & User Session ----
+    // ---- Personal Auth Token & User Session ----
 
     var authToken: String?
         get() = getString(KEY_AUTH_TOKEN)
@@ -537,6 +590,24 @@ object TimeMoviesPrefs {
 
     val isSignedIn: Boolean
         get() = !authToken.isNullOrBlank()
+
+    // ---- Built-in Account Pool Persistence ----
+
+    var remotePoolBundlesRaw: String?
+        get() = getString(KEY_REMOTE_POOL_BUNDLES)
+        set(value) = putString(KEY_REMOTE_POOL_BUNDLES, value)
+
+    var remotePoolFetchedAtMs: Long
+        get() = getString(KEY_REMOTE_POOL_FETCHED_MS)?.toLongOrNull() ?: 0L
+        set(value) = putString(KEY_REMOTE_POOL_FETCHED_MS, value.toString())
+
+    var localPoolBundlesRaw: String?
+        get() = getString(KEY_LOCAL_POOL_BUNDLES)
+        set(value) = putString(KEY_LOCAL_POOL_BUNDLES, value)
+
+    var poolRuntimeStateJson: String?
+        get() = getString(KEY_POOL_RUNTIME_STATE)
+        set(value) = putString(KEY_POOL_RUNTIME_STATE, value)
 
     // ---- Server Clock Offset ----
 
@@ -585,15 +656,26 @@ object TimeMoviesPrefs {
         deviceKeyScope = scope
     }
 
+    /**
+     * Returns the stored P-256 keypair, validating & upgrading its ASN.1 DER encoding to canonical
+     * 91-byte SPKI + 138-byte PKCS#8. If a legacy v2 `BC` keypair was malformed, heals it automatically.
+     */
     @Synchronized
     fun getOrCreateDeviceKeyPair(): TimeMoviesCrypto.EcKeyMaterial {
         val priv = getString(KEY_EC_PRIV)
         val pub = getString(KEY_EC_PUB)
         if (!priv.isNullOrBlank() && !pub.isNullOrBlank()) {
-            return TimeMoviesCrypto.EcKeyMaterial(
-                privateKeyPkcs8B64Url = priv,
-                publicKeySpkiB64Url = pub,
-            )
+            val validated = TimeMoviesCrypto.normalizeOrValidateKeyPair(priv, pub)
+            if (validated != null) {
+                if (validated.privateKeyPkcs8B64Url != priv || validated.publicKeySpkiB64Url != pub) {
+                    putString(KEY_EC_PRIV, validated.privateKeyPkcs8B64Url)
+                    putString(KEY_EC_PUB, validated.publicKeySpkiB64Url)
+                }
+                return validated
+            }
+            // Stored keypair failed cryptographic validation — clear stale `dk` and heal keypair
+            deviceKeyId = null
+            deviceKeyScope = null
         }
         val generated = TimeMoviesCrypto.generateP256KeyPair()
         putString(KEY_EC_PRIV, generated.privateKeyPkcs8B64Url)
@@ -640,10 +722,13 @@ object TimeMoviesPrefs {
 
     @Synchronized
     internal fun resetAllForTests() {
+        unitTestIsolatedMode = true
+        appContext = null
         memoryFallback.clear()
         apiBaseUrlOverride = null
         mediaV2BaseUrlOverride = null
         doomBaseUrlOverride = null
+        remotePoolUrlsOverride = null
     }
 
     // ---- JWT Claim Inspection Helper (`AU` Claims) ----
@@ -658,10 +743,10 @@ object TimeMoviesPrefs {
         }.getOrNull()
     }
 
-    fun computeTokenScope(token: String): String {
+    fun computeTokenScope(token: String, fallbackDeviceId: String = deviceId): String {
         val claims = decodeJwtClaims(token)
         val userId = claims?.optString("_id", "")?.trim().orEmpty()
-        val devClaim = claims?.optString("d", "")?.trim().orEmpty().ifEmpty { deviceId }
+        val devClaim = claims?.optString("d", "")?.trim().orEmpty().ifEmpty { fallbackDeviceId }
         return if (userId.isNotEmpty()) {
             "$userId|$devClaim"
         } else {
@@ -671,10 +756,19 @@ object TimeMoviesPrefs {
 
     fun getAccountSummaryAr(): String {
         val tk = authToken
+        val poolCount = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
+        val poolSuffix = if (poolCount > 0) {
+            "\nمخزن الحسابات التلقائي (Pool): $poolCount حساب نشط للتبديل التلقائي"
+        } else {
+            ""
+        }
+
         if (tk.isNullOrBlank()) {
             val pendingMail = pendingOtpEmail
             return if (!pendingMail.isNullOrBlank() && !pendingOtpToken.isNullOrBlank()) {
-                "حساب بانتظار التفعيل (OTP): $pendingMail\nالجهاز الافتراضي: $virtualDeviceLabel"
+                "حساب شخصي بانتظار التفعيل (OTP): $pendingMail\nالجهاز الافتراضي: $virtualDeviceLabel$poolSuffix"
+            } else if (poolCount > 0) {
+                "وضع التشغيل التلقائي المفعّل (Pool: $poolCount حساب جاهز بدون تسجيل دخول)\nالجهاز الافتراضي الشخصي: $virtualDeviceLabel"
             } else {
                 "غير مسجل الدخول\nالجهاز الافتراضي: $virtualDeviceLabel"
             }
@@ -693,6 +787,6 @@ object TimeMoviesPrefs {
         }.joinToString(" | ")
         val prof = profileName?.takeIf { it.isNotBlank() }?.let { " — الملف: $it" }.orEmpty()
         val line1 = if (quotaInfo.isNotEmpty()) "$email ($planBadge — $quotaInfo)$prof" else "$email ($planBadge)$prof"
-        return "$line1\nالجهاز الافتراضي: $virtualDeviceLabel"
+        return "$line1\nالجهاز الافتراضي: $virtualDeviceLabel$poolSuffix"
     }
 }

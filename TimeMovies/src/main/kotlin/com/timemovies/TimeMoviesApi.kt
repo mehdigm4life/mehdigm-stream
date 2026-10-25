@@ -41,14 +41,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Pure-Kotlin HTTP client for TimeMovies v4.7 (`api.apks.lol`) & DoomVideoPlayer v1.6 (`1065` / `1126`).
  *
- * Implements:
- * - Proactive + response-driven server clock synchronization (`Date` HTTP header + persisted offset)
- * - Token-scoped NIST P-256 ECDSA challenge-response device key enrollment (`c81d2e...` -> `e4ad21...`)
- * - 13-line canonical request signing (`dk`, `ds`, `da = ECDSA_SHA256_DER`)
- * - 100% synthetic retail handset `UserDevice` telemetry (device-ban bypass; zero `Build.*` reads)
- * - Automatic 401/403 clock/key re-sync & `RefreshTokenBody(sid, rasplab_install_id)` session refresh
- * - Automatic `USP` profile selection & default profile creation (`83fd64...`) for new accounts
- * - MediaV2 grant + `GET /v2/media/{manifest|download|cast}` + DoomVideoPlayer v1.6/v1.5 resolvers
+ * v3 Highlights:
+ * - Isolated `AuthSessionContext` supporting Personal Account, Pending OTP Session, and Multi-Account
+ *   Built-in Pool (`TimeMoviesPool`) with zero cross-contamination of device fingerprints or keys.
+ * - Permanent fix for Android OTP `"Request verification failed."`:
+ *   - Canonical 91-byte SPKI & 138-byte PKCS#8 keys (`AndroidOpenSSL` provider-pinned)
+ *   - Never rotates keypair mid-session (`409 rotation_requires_signin` prevention)
+ *   - Explicit enrollment verification & clock-sync retry before every signed request
+ *   - Satisfies `b13.java:75` minimum 6-character `name` check on wire
+ * - Automatic multi-account failover across `TimeMoviesPool` slots on quota exhaustion (`fq`/`dcr`) or `401`/`403`.
  */
 object TimeMoviesApi {
 
@@ -81,6 +82,17 @@ object TimeMoviesApi {
     private const val DOOM_LEGACY_PLAY = "8cf0b2fa26d74fcbb3f08c4f1907a1bc"
     private const val DOOM_LEGACY_DOWNLOAD = "5d18c7a3f0414e6b9c210e9a78d5f4a2"
 
+    private val QUOTA_OR_POOL_ROTATE_REASONS = setOf(
+        "quota_exhausted",
+        "insufficient_quota",
+        "daily_limit",
+        "limit_reached",
+        "target_over_limit",
+        "device_limit",
+        "max_devices",
+        "blocked_by_plan",
+    )
+
     private val JSON_MEDIA_TYPE = "application/json; charset=UTF-8".toMediaType()
 
     private val clockSyncedInProcess = AtomicBoolean(false)
@@ -89,6 +101,12 @@ object TimeMoviesApi {
 
     @Volatile
     var lastMediaRefusalReason: String? = null
+
+    @Volatile
+    var lastEnrollmentError: String? = null
+
+    @Volatile
+    private var lastSuccessfulGrantSession: AuthSessionContext? = null
 
     val plainClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -104,6 +122,13 @@ object TimeMoviesApi {
     fun resetRuntimeStateForTests() {
         clockSyncedInProcess.set(false)
         lastMediaRefusalReason = null
+        lastEnrollmentError = null
+        lastSuccessfulGrantSession = null
+        TimeMoviesPool.resetForTests()
+    }
+
+    fun hasUsableAuth(allowNetworkFetch: Boolean = true): Boolean {
+        return TimeMoviesPrefs.isSignedIn || TimeMoviesPool.hasAnySlot(allowNetworkFetch = allowNetworkFetch)
     }
 
     fun apiBaseUrl(): String = TimeMoviesPrefs.apiBaseUrlOverride ?: TimeMoviesCrypto.API_BASE_URL
@@ -198,11 +223,183 @@ object TimeMoviesApi {
         return sb.toString().trim()
     }
 
+    // ---- Isolated Authentication Session Contexts (Personal, Pending-OTP, Built-In Pool Slot) ----
+
+    internal sealed class AuthSessionContext {
+        abstract val authToken: String
+        abstract val profileId: String
+        abstract val profileMaturity: String
+        abstract val virtualDevice: TimeMoviesPrefs.VirtualDeviceProfile
+        abstract val keyPair: TimeMoviesCrypto.EcKeyMaterial
+        abstract val canRefreshToken: Boolean
+        abstract val canRegenerateKeyOnBadKey400: Boolean
+
+        abstract fun getCachedDeviceKeyId(): String?
+        abstract fun saveDeviceKeyId(dk: String?)
+        abstract fun regenerateKeyPairOn400()
+        abstract fun saveRefreshedToken(newToken: String)
+        abstract fun saveResolvedProfile(profile: UserProfile)
+    }
+
+    internal object UnauthenticatedSessionContext : AuthSessionContext() {
+        override val authToken: String = ""
+        override val profileId: String = ""
+        override val profileMaturity: String = ""
+        override val virtualDevice: TimeMoviesPrefs.VirtualDeviceProfile
+            get() = TimeMoviesPrefs.getOrCreateVirtualDevice()
+        override val keyPair: TimeMoviesCrypto.EcKeyMaterial
+            get() = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+        override val canRefreshToken: Boolean = false
+        override val canRegenerateKeyOnBadKey400: Boolean = false
+        override fun getCachedDeviceKeyId(): String? = null
+        override fun saveDeviceKeyId(dk: String?) = Unit
+        override fun regenerateKeyPairOn400() = Unit
+        override fun saveRefreshedToken(newToken: String) = Unit
+        override fun saveResolvedProfile(profile: UserProfile) = Unit
+    }
+
+    internal object PersonalSessionContext : AuthSessionContext() {
+        override val authToken: String
+            get() = TimeMoviesPrefs.authToken.orEmpty()
+        override val profileId: String
+            get() = TimeMoviesPrefs.profileId.orEmpty()
+        override val profileMaturity: String
+            get() = if (profileId.isNotEmpty()) TimeMoviesPrefs.profileMaturity.toString() else ""
+        override val virtualDevice: TimeMoviesPrefs.VirtualDeviceProfile
+            get() = TimeMoviesPrefs.getOrCreateVirtualDevice()
+        override val keyPair: TimeMoviesCrypto.EcKeyMaterial
+            get() = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+        override val canRefreshToken: Boolean = true
+        override val canRegenerateKeyOnBadKey400: Boolean = true
+
+        override fun getCachedDeviceKeyId(): String? {
+            val tk = authToken
+            if (tk.isBlank()) return null
+            val scope = TimeMoviesPrefs.computeTokenScope(tk, virtualDevice.deviceId)
+            return TimeMoviesPrefs.getDeviceKeyIdForScope(scope)
+        }
+
+        override fun saveDeviceKeyId(dk: String?) {
+            if (dk.isNullOrBlank()) {
+                TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
+            } else {
+                val scope = TimeMoviesPrefs.computeTokenScope(authToken, virtualDevice.deviceId)
+                TimeMoviesPrefs.setDeviceKeyIdForScope(scope, dk)
+            }
+        }
+
+        override fun regenerateKeyPairOn400() {
+            TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = true)
+        }
+
+        override fun saveRefreshedToken(newToken: String) {
+            val oldTk = authToken
+            val devId = virtualDevice.deviceId
+            val oldScope = TimeMoviesPrefs.computeTokenScope(oldTk, devId)
+            val newScope = TimeMoviesPrefs.computeTokenScope(newToken, devId)
+            val prevDk = TimeMoviesPrefs.getDeviceKeyIdForScope(oldScope)
+            TimeMoviesPrefs.authToken = newToken
+            if (prevDk != null && oldScope == newScope) {
+                TimeMoviesPrefs.setDeviceKeyIdForScope(newScope, prevDk)
+            }
+        }
+
+        override fun saveResolvedProfile(profile: UserProfile) {
+            saveActiveProfile(profile)
+        }
+    }
+
+    internal class OtpPendingSessionContext(@Volatile private var tokenValue: String) : AuthSessionContext() {
+        override val authToken: String
+            get() = tokenValue
+        override val profileId: String = ""
+        override val profileMaturity: String = ""
+        override val virtualDevice: TimeMoviesPrefs.VirtualDeviceProfile
+            get() = TimeMoviesPrefs.getOrCreateVirtualDevice()
+        override val keyPair: TimeMoviesCrypto.EcKeyMaterial
+            get() = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+        override val canRefreshToken: Boolean = false
+        override val canRegenerateKeyOnBadKey400: Boolean = true
+
+        override fun getCachedDeviceKeyId(): String? {
+            if (tokenValue.isBlank()) return null
+            val scope = TimeMoviesPrefs.computeTokenScope(tokenValue, virtualDevice.deviceId)
+            return TimeMoviesPrefs.getDeviceKeyIdForScope(scope)
+        }
+
+        override fun saveDeviceKeyId(dk: String?) {
+            if (dk.isNullOrBlank()) {
+                TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
+            } else {
+                val scope = TimeMoviesPrefs.computeTokenScope(tokenValue, virtualDevice.deviceId)
+                TimeMoviesPrefs.setDeviceKeyIdForScope(scope, dk)
+            }
+        }
+
+        override fun regenerateKeyPairOn400() {
+            TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = true)
+        }
+
+        override fun saveRefreshedToken(newToken: String) {
+            tokenValue = newToken
+            TimeMoviesPrefs.pendingOtpToken = newToken
+        }
+
+        override fun saveResolvedProfile(profile: UserProfile) = Unit
+    }
+
+    internal class PoolSlotSessionContext(val slotId: String) : AuthSessionContext() {
+        private fun currentSlot(): TimeMoviesPool.EffectivePoolSlot? =
+            TimeMoviesPool.loadAllSlots(allowNetworkFetch = false).firstOrNull { it.slotId == slotId }
+
+        override val authToken: String
+            get() = currentSlot()?.effectiveToken.orEmpty()
+        override val profileId: String
+            get() = currentSlot()?.effectiveProfileId.orEmpty()
+        override val profileMaturity: String
+            get() = currentSlot()?.effectiveMaturity.orEmpty()
+        override val virtualDevice: TimeMoviesPrefs.VirtualDeviceProfile
+            get() = currentSlot()?.bundle?.virtualDevice ?: TimeMoviesPrefs.getOrCreateVirtualDevice()
+        override val keyPair: TimeMoviesCrypto.EcKeyMaterial
+            get() = currentSlot()?.bundle?.keyPair ?: TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+        override val canRefreshToken: Boolean = true
+        // Never regenerate a pool slot's keypair — its public key was permanently bound at account activation!
+        override val canRegenerateKeyOnBadKey400: Boolean = false
+
+        override fun getCachedDeviceKeyId(): String? = currentSlot()?.effectiveDeviceKeyId
+
+        override fun saveDeviceKeyId(dk: String?) {
+            TimeMoviesPool.updateSlotRuntime(slotId) { st ->
+                st.copy(enrolledDeviceKeyId = dk)
+            }
+        }
+
+        override fun regenerateKeyPairOn400() = Unit
+
+        override fun saveRefreshedToken(newToken: String) {
+            TimeMoviesPool.updateSlotRuntime(slotId) { st ->
+                st.copy(refreshedAuthToken = newToken, authFailedUntilMs = 0L)
+            }
+        }
+
+        override fun saveResolvedProfile(profile: UserProfile) {
+            TimeMoviesPool.updateSlotRuntime(slotId) { st ->
+                st.copy(resolvedProfileId = profile.id, resolvedMaturity = profile.maturity)
+            }
+        }
+    }
+
     // ---- Core Signed v4.7 Request Executor (`q52.java` + `V47DeviceSigningInterceptor`) ----
 
     private data class RawHttpResult(
         val code: Int,
         val body: String,
+    )
+
+    private data class EnrollAttemptResult(
+        val dk: String?,
+        val httpCode: Int,
+        val errorMessage: String?,
     )
 
     private fun isVerificationOrKeyFailure(code: Int, body: String): Boolean {
@@ -214,44 +411,32 @@ object TimeMoviesApi {
             lower.contains("invalid signature")
     }
 
-    private fun executeV47Request(
+    private fun executeV47RequestWithSession(
         url: String,
         method: String = "GET",
         rawJsonBody: String? = null,
-        tokenOverride: String? = null,
+        session: AuthSessionContext,
         noAuth: Boolean = false,
         extraHeaders: Map<String, String> = emptyMap(),
         allowRetry: Boolean = true,
     ): RawHttpResult {
         val httpUrl = url.toHttpUrl()
-        val tk = when {
-            noAuth -> ""
-            tokenOverride != null -> tokenOverride
-            else -> TimeMoviesPrefs.authToken.orEmpty()
-        }
-
-        // CRITICAL (`q52.java` + OTP flow):
-        // Attach `x-p` and `m-a` ONLY when authenticating with the active signed-in session token!
-        // Never attach stale profile headers to an unactivated `pendingOtpToken` (`tokenOverride`).
-        val isActiveSessionToken = !noAuth &&
-            tk.isNotEmpty() &&
-            (tokenOverride == null || tokenOverride == TimeMoviesPrefs.authToken)
-
-        val profileId = if (isActiveSessionToken) TimeMoviesPrefs.profileId.orEmpty() else ""
-        val maturity = if (isActiveSessionToken && profileId.isNotEmpty()) {
-            TimeMoviesPrefs.profileMaturity.toString()
-        } else {
-            ""
-        }
+        val tk = if (noAuth) "" else session.authToken
+        val profileId = if (noAuth || tk.isEmpty()) "" else session.profileId
+        val maturity = if (profileId.isNotEmpty()) session.profileMaturity else ""
 
         val mustSign = TimeMoviesCrypto.shouldAttachDeviceSignature(httpUrl, tk)
         var dk: String? = null
         if (mustSign) {
             syncServerClockIfNeeded(force = false)
-            dk = ensureDeviceKeyEnrolled(tk)
+            dk = ensureSessionDeviceKeyEnrolled(session)
+            if (dk.isNullOrBlank()) {
+                // Force clock resync and try enrollment once more before giving up
+                syncServerClockIfNeeded(force = true)
+                dk = ensureSessionDeviceKeyEnrolled(session)
+            }
         }
 
-        // Compute `timestamp` AFTER clock sync / enrollment so `t` matches server `Date` within milliseconds
         val timestamp = serverNowMs().toString()
         val nonce = UUID.randomUUID().toString()
 
@@ -287,9 +472,9 @@ object TimeMoviesApi {
         }
 
         if (mustSign && !dk.isNullOrBlank()) {
-            val keyPair = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+            val kp = session.keyPair
             val sigHeaders = TimeMoviesCrypto.signV47Request(
-                privateKeyPkcs8B64Url = keyPair.privateKeyPkcs8B64Url,
+                privateKeyPkcs8B64Url = kp.privateKeyPkcs8B64Url,
                 method = upperMethod,
                 url = httpUrl,
                 timestamp = timestamp,
@@ -312,40 +497,26 @@ object TimeMoviesApi {
 
         if (allowRetry && tk.isNotEmpty() && !TimeMoviesCrypto.isExemptFromDeviceVerification(httpUrl)) {
             if (isVerificationOrKeyFailure(initial.code, initial.body)) {
-                // Step 1: Force fresh server clock sync + clear cached `dk` and re-enroll
+                // Step 1: Sync server clock & re-enroll with the SAME keypair (never triggering 409 rotation_requires_signin)
                 syncServerClockIfNeeded(force = true)
-                TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
+                session.saveDeviceKeyId(null)
 
-                if (tokenOverride != null) {
-                    val freshDk = ensureDeviceKeyEnrolled(tokenOverride, forceRegenerateOnFail = true)
-                    if (!freshDk.isNullOrBlank()) {
-                        return executeV47Request(
-                            url = url,
-                            method = method,
-                            rawJsonBody = rawJsonBody,
-                            tokenOverride = tokenOverride,
-                            noAuth = noAuth,
-                            extraHeaders = extraHeaders,
-                            allowRetry = false,
-                        )
-                    }
-                } else {
-                    if (initial.code == 401) {
-                        tryRefreshAuthToken()
-                    }
-                    val activeToken = TimeMoviesPrefs.authToken.orEmpty()
-                    if (activeToken.isNotEmpty()) {
-                        ensureDeviceKeyEnrolled(activeToken, forceRegenerateOnFail = true)
-                        return executeV47Request(
-                            url = url,
-                            method = method,
-                            rawJsonBody = rawJsonBody,
-                            tokenOverride = null,
-                            noAuth = noAuth,
-                            extraHeaders = extraHeaders,
-                            allowRetry = false,
-                        )
-                    }
+                if (initial.code == 401 && session.canRefreshToken) {
+                    tryRefreshSessionAuthToken(session)
+                }
+
+                val retryToken = session.authToken
+                if (retryToken.isNotBlank()) {
+                    ensureSessionDeviceKeyEnrolled(session)
+                    return executeV47RequestWithSession(
+                        url = url,
+                        method = method,
+                        rawJsonBody = rawJsonBody,
+                        session = session,
+                        noAuth = noAuth,
+                        extraHeaders = extraHeaders,
+                        allowRetry = false,
+                    )
                 }
             }
         }
@@ -354,119 +525,186 @@ object TimeMoviesApi {
     }
 
     /**
-     * Enrolls the ECDSA P-256 public key with `api.apks.lol` (`pr4.java`) for `authToken`'s scope.
+     * Enrolls `session.keyPair` on `api.apks.lol` (`c81d2e...` -> `e4ad21...`).
+     * Never rotates the keypair unless `400` bad-key was explicitly returned (`a.java:1121`),
+     * preventing `409 rotation_requires_signin` (`a.java:1126`).
      */
+    internal fun ensureSessionDeviceKeyEnrolled(session: AuthSessionContext): String? {
+        if (session.authToken.isBlank()) return null
+        session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        synchronized(enrollmentLock) {
+            session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+
+            syncServerClockIfNeeded(force = false)
+            val first = enrollSessionOnce(session)
+            if (!first.dk.isNullOrBlank()) {
+                lastEnrollmentError = null
+                return first.dk
+            }
+
+            syncServerClockIfNeeded(force = true)
+            if (first.httpCode == 400 && session.canRegenerateKeyOnBadKey400) {
+                session.regenerateKeyPairOn400()
+            }
+            val second = enrollSessionOnce(session)
+            if (!second.dk.isNullOrBlank()) {
+                lastEnrollmentError = null
+                return second.dk
+            }
+
+            lastEnrollmentError = second.errorMessage ?: first.errorMessage ?: "HTTP ${second.httpCode}"
+            return null
+        }
+    }
+
     fun ensureDeviceKeyEnrolled(
         authToken: String,
         forceRegenerateOnFail: Boolean = false,
     ): String? {
         if (authToken.isBlank()) return null
-        val scope = TimeMoviesPrefs.computeTokenScope(authToken)
-        TimeMoviesPrefs.getDeviceKeyIdForScope(scope)?.let { return it }
+        val session: AuthSessionContext = when (authToken) {
+            TimeMoviesPrefs.authToken -> PersonalSessionContext
+            else -> OtpPendingSessionContext(authToken)
+        }
+        val dk = ensureSessionDeviceKeyEnrolled(session)
+        if (!dk.isNullOrBlank()) return dk
+        if (forceRegenerateOnFail && session.canRegenerateKeyOnBadKey400) {
+            session.regenerateKeyPairOn400()
+            return ensureSessionDeviceKeyEnrolled(session)
+        }
+        return null
+    }
 
-        synchronized(enrollmentLock) {
-            TimeMoviesPrefs.getDeviceKeyIdForScope(scope)?.let { return it }
+    private fun enrollSessionOnce(session: AuthSessionContext): EnrollAttemptResult {
+        return try {
+            val kp = session.keyPair
 
-            syncServerClockIfNeeded(force = false)
-
-            enrollOnce(authToken, scope)?.let { return it }
-
-            // Retry with forced clock sync + regenerated P-256 keypair if first enrollment failed
-            syncServerClockIfNeeded(force = true)
-            if (forceRegenerateOnFail) {
-                TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = true)
+            // 1. `GET c81d2e64a4d64d8faea7e1abf4cb8c13` -> `{cid, ch, exp}`
+            val chRes = executeV47RequestWithSession(
+                url = "${apiBaseUrl()}$PATH_DEVICE_CHALLENGE",
+                method = "GET",
+                session = session,
+                allowRetry = false,
+            )
+            if (chRes.code !in 200..299 || chRes.body.isBlank()) {
+                val msg = runCatching { JSONObject(chRes.body).optNonBlank("message") }.getOrNull()
+                return EnrollAttemptResult(null, chRes.code, msg ?: "Challenge HTTP ${chRes.code}")
             }
-            return enrollOnce(authToken, scope)
+            val chJson = JSONObject(chRes.body)
+            val chResult = chJson.optJSONObject("result") ?: chJson
+            val cid = chResult.optNonBlank("cid")
+            val ch = chResult.optNonBlank("ch")
+            if (cid.isNullOrBlank() || ch.isNullOrBlank()) {
+                val msg = chJson.optNonBlank("message") ?: "Missing challenge cid/ch"
+                return EnrollAttemptResult(null, chJson.optInt("status", chRes.code), msg)
+            }
+
+            // 2. Sign `"$cid\n$ch\n$pk\nECDSA_SHA256_DER"` (`np0.N`)
+            val challengePayload = TimeMoviesCrypto.buildEnrollmentChallengePayload(
+                cid = cid,
+                challenge = ch,
+                publicKeySpkiB64Url = kp.publicKeySpkiB64Url,
+            )
+            val sigB64Url = TimeMoviesCrypto.signEcdsaSha256DerB64Url(
+                privateKeyPkcs8B64Url = kp.privateKeyPkcs8B64Url,
+                messageBytes = challengePayload,
+            )
+
+            // 3. `POST e4ad21d4b1fc41bca62d94bd972e93f6` -> `{dk, alg, st}`
+            val registerBody = JSONObject().apply {
+                put("cid", cid)
+                put("pk", kp.publicKeySpkiB64Url)
+                put("sig", sigB64Url)
+                put("alg", TimeMoviesCrypto.SIGNING_ALGORITHM)
+            }.toString()
+
+            val regRes = executeV47RequestWithSession(
+                url = "${apiBaseUrl()}$PATH_DEVICE_REGISTER",
+                method = "POST",
+                rawJsonBody = registerBody,
+                session = session,
+                allowRetry = false,
+            )
+            if (regRes.code !in 200..299 || regRes.body.isBlank()) {
+                val msg = runCatching { JSONObject(regRes.body).optNonBlank("message") }.getOrNull()
+                return EnrollAttemptResult(null, regRes.code, msg ?: "Enroll HTTP ${regRes.code}")
+            }
+            val regJson = JSONObject(regRes.body)
+            val regResult = regJson.optJSONObject("result") ?: regJson
+            val dk = regResult.optNonBlank("dk")
+            if (dk.isNullOrBlank()) {
+                val status = regJson.optInt("status", regRes.code)
+                val msg = regJson.optNonBlank("message") ?: "Enroll rejected ($status)"
+                return EnrollAttemptResult(null, status, msg)
+            }
+
+            session.saveDeviceKeyId(dk)
+            EnrollAttemptResult(dk, regRes.code, null)
+        } catch (err: Throwable) {
+            EnrollAttemptResult(null, 0, err.message ?: err.javaClass.simpleName)
         }
     }
 
-    private fun enrollOnce(authToken: String, scope: String): String? = runCatching {
-        val keyPair = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
-
-        // 1. `GET c81d2e64a4d64d8faea7e1abf4cb8c13` -> `{cid, ch, exp}`
-        val chRes = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_DEVICE_CHALLENGE",
-            method = "GET",
-            tokenOverride = authToken,
-            allowRetry = false,
-        )
-        if (chRes.code !in 200..299 || chRes.body.isBlank()) return null
-        val chJson = JSONObject(chRes.body)
-        val chResult = chJson.optJSONObject("result") ?: chJson
-        val cid = chResult.optNonBlank("cid") ?: return null
-        val ch = chResult.optNonBlank("ch") ?: return null
-
-        // 2. Sign `"$cid\n$ch\n$pk\nECDSA_SHA256_DER"`
-        val challengePayload = TimeMoviesCrypto.buildEnrollmentChallengePayload(
-            cid = cid,
-            challenge = ch,
-            publicKeySpkiB64Url = keyPair.publicKeySpkiB64Url,
-        )
-        val sigB64Url = TimeMoviesCrypto.signEcdsaSha256DerB64Url(
-            privateKeyPkcs8B64Url = keyPair.privateKeyPkcs8B64Url,
-            messageBytes = challengePayload,
-        )
-
-        // 3. `POST e4ad21d4b1fc41bca62d94bd972e93f6` -> `{dk, alg, st}`
-        val registerBody = JSONObject().apply {
-            put("cid", cid)
-            put("pk", keyPair.publicKeySpkiB64Url)
-            put("sig", sigB64Url)
-            put("alg", TimeMoviesCrypto.SIGNING_ALGORITHM)
-        }.toString()
-
-        val regRes = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_DEVICE_REGISTER",
-            method = "POST",
-            rawJsonBody = registerBody,
-            tokenOverride = authToken,
-            allowRetry = false,
-        )
-        if (regRes.code !in 200..299 || regRes.body.isBlank()) return null
-        val regJson = JSONObject(regRes.body)
-        val regResult = regJson.optJSONObject("result") ?: regJson
-        val dk = regResult.optNonBlank("dk") ?: return null
-
-        TimeMoviesPrefs.setDeviceKeyIdForScope(scope, dk)
-        dk
-    }.getOrNull()
-
     /**
-     * Refreshes JWT via `POST d4f34a2a4f0249bbb3c92a7e45f3e1c2` with `RefreshTokenBody(sid, rasplab_install_id)`.
+     * Refreshes JWT via `POST d4f34a2a4f0249bbb3c92a7e45f3e1c2` with `RefreshTokenBody(sid, rasplab_install_id)`
+     * using `session`'s own isolated `rasplabInstallId`!
      */
-    private fun tryRefreshAuthToken(): Boolean = synchronized(refreshLock) {
+    private fun tryRefreshSessionAuthToken(session: AuthSessionContext): Boolean = synchronized(refreshLock) {
         runCatching {
-            val currentToken = TimeMoviesPrefs.authToken ?: return@runCatching false
+            val currentToken = session.authToken.takeIf { it.isNotBlank() } ?: return@runCatching false
             val claims = TimeMoviesPrefs.decodeJwtClaims(currentToken)
             val sid = claims?.optNonBlank("sid")
             val refreshBody = JSONObject().apply {
                 if (!sid.isNullOrBlank()) put("sid", sid)
-                put("rasplab_install_id", TimeMoviesPrefs.rasplabInstallId)
+                put("rasplab_install_id", session.virtualDevice.rasplabInstallId)
             }.toString()
 
-            val res = executeV47Request(
+            val res = executeV47RequestWithSession(
                 url = "${apiBaseUrl()}$PATH_REFRESH_TOKEN",
                 method = "POST",
                 rawJsonBody = refreshBody,
-                tokenOverride = currentToken,
+                session = session,
                 allowRetry = false,
             )
             if (res.code !in 200..299 || res.body.isBlank()) return@runCatching false
             val obj = JSONObject(res.body)
             val newToken = obj.optNonBlank("result")
             if (isEnvelopeOk(obj) && looksLikeJwt(newToken)) {
-                val oldScope = TimeMoviesPrefs.computeTokenScope(currentToken)
-                val newScope = TimeMoviesPrefs.computeTokenScope(newToken!!)
-                val prevDk = TimeMoviesPrefs.getDeviceKeyIdForScope(oldScope)
-                TimeMoviesPrefs.authToken = newToken
-                if (prevDk != null && oldScope == newScope) {
-                    TimeMoviesPrefs.setDeviceKeyIdForScope(newScope, prevDk)
-                }
+                session.saveRefreshedToken(newToken!!)
                 true
             } else {
                 false
             }
         }.getOrDefault(false)
+    }
+
+    // ---- Session Failover Helpers (Personal + Built-In Pool) ----
+
+    private fun <T> executeCatalogWithFailover(block: (AuthSessionContext) -> T?): T? {
+        if (TimeMoviesPrefs.isSignedIn) {
+            ensureSessionProfileInitialized(PersonalSessionContext)
+            block(PersonalSessionContext)?.let { return it }
+        }
+
+        val candidates = TimeMoviesPool.getCatalogCandidateSlots()
+        for (slot in candidates) {
+            val slotSession = PoolSlotSessionContext(slot.slotId)
+            ensureSessionProfileInitialized(slotSession)
+            val result = block(slotSession)
+            if (result != null) {
+                TimeMoviesPool.markSlotHealthy(slot.slotId)
+                return result
+            }
+            TimeMoviesPool.markSlotAuthFailed(slot.slotId)
+        }
+        return null
+    }
+
+    private fun ensureSessionProfileInitialized(session: AuthSessionContext) {
+        if (session.profileId.isEmpty() && session.authToken.isNotBlank()) {
+            syncAppDataAndSelectMainProfileForSession(session)
+        }
     }
 
     // ---- Synthetic Virtual Device Telemetry (`UserDevice.java` + `wh7.java`) ----
@@ -491,10 +729,11 @@ object TimeMoviesApi {
         }.toString()
 
         val res = runCatching {
-            executeV47Request(
+            executeV47RequestWithSession(
                 url = "${apiBaseUrl()}$PATH_EMAIL_SIGN_IN",
                 method = "POST",
                 rawJsonBody = payload,
+                session = UnauthenticatedSessionContext,
                 noAuth = true,
                 allowRetry = false,
             )
@@ -518,7 +757,8 @@ object TimeMoviesApi {
                 if (refusal != null && refusal.action == 2) {
                     TimeMoviesPrefs.pendingOtpToken = token
                     TimeMoviesPrefs.pendingOtpEmail = cleanEmail
-                    ensureDeviceKeyEnrolled(token)
+                    TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
+                    ensureSessionDeviceKeyEnrolled(OtpPendingSessionContext(token))
                     return@runCatching ApiEnvelope(
                         false,
                         status,
@@ -534,7 +774,7 @@ object TimeMoviesApi {
                 TimeMoviesPrefs.pendingOtpEmail = null
                 TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
 
-                ensureDeviceKeyEnrolled(token)
+                ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                 syncAppDataAndSelectMainProfile()
 
                 ApiEnvelope(true, status, message, token, refusal)
@@ -548,8 +788,7 @@ object TimeMoviesApi {
 
     /**
      * Registers a new free account (`UserEmailSignUp`).
-     * Automatically rotates to a brand-new synthetic retail Android handset identity first so
-     * users whose real hardware was banned in the official TimeMovies app are never flagged.
+     * Rotates to a brand-new synthetic retail Android handset + canonical 91B SPKI P-256 keypair first.
      */
     fun signUpWithEmail(
         name: String,
@@ -560,7 +799,8 @@ object TimeMoviesApi {
     ): ApiEnvelope<String> {
         val cleanEmail = email.trim().lowercase(Locale.US)
         val rawName = name.trim().ifEmpty { "Mehdi" }
-        val cleanName = if (rawName.length < 5) rawName.padEnd(5, 'i') else rawName
+        // `b13.java:75` enforces `name.length >= 6` — pad short names like `"Mehdi"` -> `"Mehdi M"` cleanly!
+        val cleanName = if (rawName.length >= 6) rawName else "$rawName M".padEnd(6, 'i')
 
         if (rotateVirtualDevice) {
             TimeMoviesPrefs.rotateVirtualDeviceIdentity()
@@ -585,10 +825,11 @@ object TimeMoviesApi {
         }.toString()
 
         val res = runCatching {
-            executeV47Request(
+            executeV47RequestWithSession(
                 url = "${apiBaseUrl()}$PATH_EMAIL_SIGN_UP",
                 method = "POST",
                 rawJsonBody = payload,
+                session = UnauthenticatedSessionContext,
                 noAuth = true,
                 allowRetry = false,
             )
@@ -617,12 +858,12 @@ object TimeMoviesApi {
                     TimeMoviesPrefs.userEmail = cleanEmail
                     TimeMoviesPrefs.pendingOtpToken = null
                     TimeMoviesPrefs.pendingOtpEmail = null
-                    ensureDeviceKeyEnrolled(token)
+                    ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                     syncAppDataAndSelectMainProfile()
                 } else {
                     TimeMoviesPrefs.pendingOtpToken = token
                     TimeMoviesPrefs.pendingOtpEmail = cleanEmail
-                    runCatching { ensureDeviceKeyEnrolled(token) }
+                    ensureSessionDeviceKeyEnrolled(OtpPendingSessionContext(token))
                 }
                 ApiEnvelope(true, status, message, token, refusal)
             } else {
@@ -645,6 +886,18 @@ object TimeMoviesApi {
             return ApiEnvelope(false, 0, "يرجى إدخال رمز التفعيل (OTP)", null)
         }
 
+        val otpSession = OtpPendingSessionContext(pendingToken)
+        syncServerClockIfNeeded(force = false)
+        var dk = ensureSessionDeviceKeyEnrolled(otpSession)
+        if (dk.isNullOrBlank()) {
+            syncServerClockIfNeeded(force = true)
+            dk = ensureSessionDeviceKeyEnrolled(otpSession)
+        }
+        if (dk.isNullOrBlank()) {
+            val detail = lastEnrollmentError?.let { " ($it)" }.orEmpty()
+            return ApiEnvelope(false, 0, "تعذر تسجيل مفتاح أمان الجهاز لدى الخادم قبل التفعيل$detail", null)
+        }
+
         val payload = JSONObject().apply {
             put("otp", cleanOtp)
             put("isOtpError", false)
@@ -652,11 +905,11 @@ object TimeMoviesApi {
         }.toString()
 
         val res = runCatching {
-            executeV47Request(
+            executeV47RequestWithSession(
                 url = "${apiBaseUrl()}$PATH_EMAIL_ACTIVATE_OTP",
                 method = "POST",
                 rawJsonBody = payload,
-                tokenOverride = pendingToken,
+                session = otpSession,
                 allowRetry = true,
             )
         }.getOrElse { err ->
@@ -676,9 +929,10 @@ object TimeMoviesApi {
             val resultStr = obj.optNonBlank("result")
 
             if (res.code in 200..299 && ok) {
-                val activatedToken = if (looksLikeJwt(resultStr)) resultStr!! else pendingToken
-                val oldScope = TimeMoviesPrefs.computeTokenScope(pendingToken)
-                val newScope = TimeMoviesPrefs.computeTokenScope(activatedToken)
+                val activatedToken = if (looksLikeJwt(resultStr)) resultStr!! else otpSession.authToken
+                val devId = TimeMoviesPrefs.deviceId
+                val oldScope = TimeMoviesPrefs.computeTokenScope(otpSession.authToken, devId)
+                val newScope = TimeMoviesPrefs.computeTokenScope(activatedToken, devId)
                 val existingDk = TimeMoviesPrefs.getDeviceKeyIdForScope(oldScope)
 
                 TimeMoviesPrefs.authToken = activatedToken
@@ -686,10 +940,10 @@ object TimeMoviesApi {
                 TimeMoviesPrefs.pendingOtpToken = null
                 TimeMoviesPrefs.pendingOtpEmail = null
 
-                if (existingDk != null && oldScope == newScope) {
+                if (!existingDk.isNullOrBlank()) {
                     TimeMoviesPrefs.setDeviceKeyIdForScope(newScope, existingDk)
                 } else {
-                    ensureDeviceKeyEnrolled(activatedToken)
+                    ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                 }
 
                 syncAppDataAndSelectMainProfile()
@@ -719,18 +973,19 @@ object TimeMoviesApi {
         val pendingTk = TimeMoviesPrefs.pendingOtpToken
         val res = runCatching {
             if (!pendingTk.isNullOrBlank()) {
-                executeV47Request(
+                executeV47RequestWithSession(
                     url = "${apiBaseUrl()}$PATH_EMAIL_FORGOT_OR_RESEND",
                     method = "POST",
                     rawJsonBody = payload,
-                    tokenOverride = pendingTk,
-                    allowRetry = true,
+                    session = OtpPendingSessionContext(pendingTk),
+                    allowRetry = false,
                 )
             } else {
-                executeV47Request(
+                executeV47RequestWithSession(
                     url = "${apiBaseUrl()}$PATH_EMAIL_FORGOT_OR_RESEND",
                     method = "POST",
                     rawJsonBody = payload,
+                    session = UnauthenticatedSessionContext,
                     noAuth = true,
                     allowRetry = false,
                 )
@@ -752,7 +1007,7 @@ object TimeMoviesApi {
             if (res.code in 200..299 && ok) {
                 if (looksLikeJwt(tok)) {
                     TimeMoviesPrefs.pendingOtpToken = tok
-                    runCatching { ensureDeviceKeyEnrolled(tok!!) }
+                    ensureSessionDeviceKeyEnrolled(OtpPendingSessionContext(tok!!))
                 }
                 ApiEnvelope(true, status, msg ?: "تم إرسال رمز تفعيل جديد إلى بريدك الإلكتروني", tok)
             } else {
@@ -773,7 +1028,7 @@ object TimeMoviesApi {
         TimeMoviesPrefs.pendingOtpEmail = null
         TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
         syncServerClockIfNeeded(force = true)
-        val dk = ensureDeviceKeyEnrolled(clean)
+        val dk = ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
         val profile = syncAppDataAndSelectMainProfile()
         return if (profile != null || !dk.isNullOrBlank()) {
             true to "تم تفعيل التوكن وربط مفتاح الجهاز بنجاح"
@@ -786,33 +1041,31 @@ object TimeMoviesApi {
 
     fun syncAppDataAndSelectMainProfile(): UserProfile? {
         if (!TimeMoviesPrefs.isSignedIn) return null
+        return syncAppDataAndSelectMainProfileForSession(PersonalSessionContext)
+    }
+
+    internal fun syncAppDataAndSelectMainProfileForSession(session: AuthSessionContext): UserProfile? {
+        if (session.authToken.isBlank()) return null
 
         // 1. Sync `AppData` (`POST 546635c490224ed1a74961d8e06198d1`) — updates `tk` & `ausp` if returned
         runCatching {
             val body = JSONObject().apply {
-                put("device", buildUserDeviceJson())
+                put("device", session.virtualDevice.toApiUserDeviceJson())
             }.toString()
-            val res = executeV47Request(
+            val res = executeV47RequestWithSession(
                 url = "${apiBaseUrl()}$PATH_APP_DATA",
                 method = "POST",
                 rawJsonBody = body,
+                session = session,
             )
             if (res.code in 200..299 && res.body.isNotBlank()) {
                 val obj = JSONObject(res.body)
                 val resObj = obj.optJSONObject("result") ?: obj
 
                 val updatedTk = resObj.optNonBlank("tk")
-                if (looksLikeJwt(updatedTk) && updatedTk != TimeMoviesPrefs.authToken) {
-                    val prevToken = TimeMoviesPrefs.authToken.orEmpty()
-                    val prevScope = TimeMoviesPrefs.computeTokenScope(prevToken)
-                    val nextScope = TimeMoviesPrefs.computeTokenScope(updatedTk!!)
-                    val prevDk = TimeMoviesPrefs.getDeviceKeyIdForScope(prevScope)
-                    TimeMoviesPrefs.authToken = updatedTk
-                    if (prevDk != null && prevScope == nextScope) {
-                        TimeMoviesPrefs.setDeviceKeyIdForScope(nextScope, prevDk)
-                    } else {
-                        ensureDeviceKeyEnrolled(updatedTk)
-                    }
+                if (looksLikeJwt(updatedTk) && updatedTk != session.authToken) {
+                    session.saveRefreshedToken(updatedTk!!)
+                    ensureSessionDeviceKeyEnrolled(session)
                 }
 
                 val ausp = resObj.optJSONObject("ausp")
@@ -820,7 +1073,7 @@ object TimeMoviesApi {
                     ?: resObj.optJSONObject("au")?.optJSONArray("usps")?.optJSONObject(0)
                 if (ausp != null) {
                     parseUserProfile(ausp)?.let { prof ->
-                        saveActiveProfile(prof)
+                        session.saveResolvedProfile(prof)
                         return prof
                     }
                 }
@@ -828,39 +1081,42 @@ object TimeMoviesApi {
         }
 
         // 2. Fetch existing profiles (`GET 2468218428cc4065b0e37dc68c950505`)
-        val profiles = fetchUserProfiles()
+        val profiles = fetchUserProfilesForSession(session)
         val chosen = profiles.firstOrNull { it.isMain && !it.isPinSet && !it.isVipLocked }
             ?: profiles.firstOrNull { !it.isPinSet && !it.isVipLocked }
             ?: profiles.firstOrNull()
         if (chosen != null) {
-            saveActiveProfile(chosen)
+            session.saveResolvedProfile(chosen)
             return chosen
         }
 
         // 3. Newly registered account with zero profiles -> auto-create `"Mehdi"` main profile (`POST 83fd64...`)
-        return createDefaultMainProfile()
+        return createDefaultMainProfileForSession(session)
     }
 
     fun fetchUserProfiles(): List<UserProfile> {
         if (!TimeMoviesPrefs.isSignedIn) return emptyList()
-        return runCatching {
-            val res = executeV47Request(
-                url = "${apiBaseUrl()}$PATH_USER_PROFILES",
-                method = "GET",
-            )
-            if (res.code !in 200..299 || res.body.isBlank()) return emptyList()
-            val obj = JSONObject(res.body)
-            val arr = obj.optJSONArray("result") ?: return emptyList()
-            val out = ArrayList<UserProfile>(arr.length())
-            for (i in 0 until arr.length()) {
-                val item = arr.optJSONObject(i) ?: continue
-                parseUserProfile(item)?.let { out.add(it) }
-            }
-            out
-        }.getOrDefault(emptyList())
+        return fetchUserProfilesForSession(PersonalSessionContext)
     }
 
-    private fun createDefaultMainProfile(): UserProfile? = runCatching {
+    private fun fetchUserProfilesForSession(session: AuthSessionContext): List<UserProfile> = runCatching {
+        val res = executeV47RequestWithSession(
+            url = "${apiBaseUrl()}$PATH_USER_PROFILES",
+            method = "GET",
+            session = session,
+        )
+        if (res.code !in 200..299 || res.body.isBlank()) return emptyList()
+        val obj = JSONObject(res.body)
+        val arr = obj.optJSONArray("result") ?: return emptyList()
+        val out = ArrayList<UserProfile>(arr.length())
+        for (i in 0 until arr.length()) {
+            val item = arr.optJSONObject(i) ?: continue
+            parseUserProfile(item)?.let { out.add(it) }
+        }
+        out
+    }.getOrDefault(emptyList())
+
+    private fun createDefaultMainProfileForSession(session: AuthSessionContext): UserProfile? = runCatching {
         val createPayload = JSONObject().apply {
             put("name", "Mehdi")
             put("isNameError", false)
@@ -893,20 +1149,21 @@ object TimeMoviesApi {
             put("subtitle_bottom_padding", 16.0)
         }.toString()
 
-        val res = executeV47Request(
+        val res = executeV47RequestWithSession(
             url = "${apiBaseUrl()}$PATH_CREATE_PROFILE",
             method = "POST",
             rawJsonBody = createPayload,
+            session = session,
         )
         if (res.code in 200..299 && res.body.isNotBlank()) {
             val resObj = JSONObject(res.body).optJSONObject("result")
             val created = resObj?.let { parseUserProfile(it) }
             if (created != null) {
-                saveActiveProfile(created)
+                session.saveResolvedProfile(created)
                 return created
             }
         }
-        fetchUserProfiles().firstOrNull()?.also { saveActiveProfile(it) }
+        fetchUserProfilesForSession(session).firstOrNull()?.also { session.saveResolvedProfile(it) }
     }.getOrNull()
 
     fun saveActiveProfile(profile: UserProfile) {
@@ -915,12 +1172,14 @@ object TimeMoviesApi {
         TimeMoviesPrefs.profileMaturity = profile.maturity
     }
 
-    // ---- Catalog, Home, Filters, Genres, Search, Work Details ----
+    // ---- Catalog, Home, Filters, Genres, Search, Work Details (Personal + Pool Failover) ----
 
     fun getAppSettings(): JSONObject? = runCatching {
-        val res = executeV47Request(
+        val session = if (TimeMoviesPrefs.isSignedIn) PersonalSessionContext else UnauthenticatedSessionContext
+        val res = executeV47RequestWithSession(
             url = "${apiBaseUrl()}$PATH_APP_SETTINGS",
             method = "GET",
+            session = session,
             noAuth = !TimeMoviesPrefs.isSignedIn,
             allowRetry = false,
         )
@@ -932,87 +1191,95 @@ object TimeMoviesApi {
         }
     }.getOrNull()
 
-    fun getHome(): HomeResponse? = runCatching {
-        if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
-            syncAppDataAndSelectMainProfile()
-        }
-        val res = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_HOME",
-            method = "GET",
-        )
-        if (res.code !in 200..299 || res.body.isBlank()) return null
-        val obj = JSONObject(res.body)
-        if (!isEnvelopeOk(obj)) return null
-        val resObj = obj.optJSONObject("result") ?: return null
-        parseHomeResponse(resObj)
-    }.getOrNull()
+    fun getHome(): HomeResponse? = executeCatalogWithFailover { session ->
+        runCatching {
+            val res = executeV47RequestWithSession(
+                url = "${apiBaseUrl()}$PATH_HOME",
+                method = "GET",
+                session = session,
+            )
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val obj = JSONObject(res.body)
+            if (!isEnvelopeOk(obj)) return@runCatching null
+            val resObj = obj.optJSONObject("result") ?: return@runCatching null
+            parseHomeResponse(resObj)
+        }.getOrNull()
+    }
 
-    fun getPageFilter(level: Int, page0Based: Int): PageFilterResult? = runCatching {
-        if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
-            syncAppDataAndSelectMainProfile()
-        }
-        val url = "${apiBaseUrl()}$PATH_PAGE_FILTER".toHttpUrl().newBuilder()
-            .addQueryParameter("page", page0Based.coerceAtLeast(0).toString())
-            .addQueryParameter("level", level.toString())
-            .build()
-            .toString()
+    fun getPageFilter(level: Int, page0Based: Int): PageFilterResult? = executeCatalogWithFailover { session ->
+        runCatching {
+            val url = "${apiBaseUrl()}$PATH_PAGE_FILTER".toHttpUrl().newBuilder()
+                .addQueryParameter("page", page0Based.coerceAtLeast(0).toString())
+                .addQueryParameter("level", level.toString())
+                .build()
+                .toString()
 
-        val res = executeV47Request(url = url, method = "GET")
-        if (res.code !in 200..299 || res.body.isBlank()) return null
-        val resObj = JSONObject(res.body).optJSONObject("result") ?: return null
-        val works = parseWorkCardList(resObj.optJSONArray("works"))
-        PageFilterResult(
-            works = works,
-            page = resObj.optInt("page", page0Based),
-            isLast = resObj.optBoolean("is_last", works.isEmpty()),
-        )
-    }.getOrNull()
+            val res = executeV47RequestWithSession(url = url, method = "GET", session = session)
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val resObj = JSONObject(res.body).optJSONObject("result") ?: return@runCatching null
+            val works = parseWorkCardList(resObj.optJSONArray("works"))
+            PageFilterResult(
+                works = works,
+                page = resObj.optInt("page", page0Based),
+                isLast = resObj.optBoolean("is_last", works.isEmpty()),
+            )
+        }.getOrNull()
+    }
 
     fun getCategoryPage(
         catId: String,
         lastId: String?,
         lastVal: String?,
-    ): CategoryPageResult? = runCatching {
-        val urlBuilder = "${apiBaseUrl()}$PATH_CATEGORY_MORE".toHttpUrl().newBuilder()
-            .addQueryParameter("catId", catId)
-        if (!lastId.isNullOrBlank()) urlBuilder.addQueryParameter("li", lastId)
-        if (!lastVal.isNullOrBlank()) urlBuilder.addQueryParameter("lv", lastVal)
+    ): CategoryPageResult? = executeCatalogWithFailover { session ->
+        runCatching {
+            val urlBuilder = "${apiBaseUrl()}$PATH_CATEGORY_MORE".toHttpUrl().newBuilder()
+                .addQueryParameter("catId", catId)
+            if (!lastId.isNullOrBlank()) urlBuilder.addQueryParameter("li", lastId)
+            if (!lastVal.isNullOrBlank()) urlBuilder.addQueryParameter("lv", lastVal)
 
-        val res = executeV47Request(url = urlBuilder.build().toString(), method = "GET")
-        if (res.code !in 200..299 || res.body.isBlank()) return null
-        val resObj = JSONObject(res.body).optJSONObject("result") ?: return null
-        val works = parseWorkCardList(resObj.optJSONArray("works"))
-        CategoryPageResult(
-            works = works,
-            lastId = resObj.optNonBlank("last_id") ?: resObj.optNonBlank("lastId"),
-            lastVal = resObj.optNonBlank("last_val") ?: resObj.optNonBlank("lastVal"),
-            isLast = resObj.optBoolean("is_last", works.isEmpty()),
-        )
-    }.getOrNull()
-
-    fun getGenres(): List<GenreItem> = runCatching {
-        val res = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_GENRES_LIST",
-            method = "GET",
-        )
-        if (res.code !in 200..299 || res.body.isBlank()) return emptyList()
-        val arr = JSONObject(res.body).optJSONArray("result") ?: return emptyList()
-        val out = ArrayList<GenreItem>(arr.length())
-        for (i in 0 until arr.length()) {
-            val g = arr.optJSONObject(i) ?: continue
-            val id = g.optNonBlank("_id") ?: continue
-            val nEn = g.optNonBlank("n") ?: g.optNonBlank("nr") ?: continue
-            out.add(
-                GenreItem(
-                    id = id,
-                    nameEn = nEn,
-                    nameAr = g.optNonBlank("nr"),
-                    code = g.optNonBlank("cd"),
-                )
+            val res = executeV47RequestWithSession(
+                url = urlBuilder.build().toString(),
+                method = "GET",
+                session = session,
             )
-        }
-        out
-    }.getOrDefault(emptyList())
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val resObj = JSONObject(res.body).optJSONObject("result") ?: return@runCatching null
+            val works = parseWorkCardList(resObj.optJSONArray("works"))
+            CategoryPageResult(
+                works = works,
+                lastId = resObj.optNonBlank("last_id") ?: resObj.optNonBlank("lastId"),
+                lastVal = resObj.optNonBlank("last_val") ?: resObj.optNonBlank("lastVal"),
+                isLast = resObj.optBoolean("is_last", works.isEmpty()),
+            )
+        }.getOrNull()
+    }
+
+    fun getGenres(): List<GenreItem> = executeCatalogWithFailover { session ->
+        runCatching {
+            val res = executeV47RequestWithSession(
+                url = "${apiBaseUrl()}$PATH_GENRES_LIST",
+                method = "GET",
+                session = session,
+            )
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val arr = JSONObject(res.body).optJSONArray("result") ?: return@runCatching null
+            val out = ArrayList<GenreItem>(arr.length())
+            for (i in 0 until arr.length()) {
+                val g = arr.optJSONObject(i) ?: continue
+                val id = g.optNonBlank("_id") ?: continue
+                val nEn = g.optNonBlank("n") ?: g.optNonBlank("nr") ?: continue
+                out.add(
+                    GenreItem(
+                        id = id,
+                        nameEn = nEn,
+                        nameAr = g.optNonBlank("nr"),
+                        code = g.optNonBlank("cd"),
+                    )
+                )
+            }
+            out.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    } ?: emptyList()
 
     fun getGenreWorks(
         genreId: String,
@@ -1021,72 +1288,72 @@ object TimeMoviesApi {
         lastId: String? = null,
         sort: Int = 0,
         sortDir: Int = 1,
-    ): GenrePageResult? = runCatching {
-        val urlBuilder = "${apiBaseUrl()}$PATH_GENRE_WORKS".toHttpUrl().newBuilder()
-            .addQueryParameter("gId", genreId)
-            .addQueryParameter("ism", isMovie.toString())
-            .addQueryParameter("s", sort.toString())
-            .addQueryParameter("sd", sortDir.toString())
-        if (!lastAt.isNullOrBlank()) urlBuilder.addQueryParameter("la", lastAt)
-        if (!lastId.isNullOrBlank()) urlBuilder.addQueryParameter("li", lastId)
+    ): GenrePageResult? = executeCatalogWithFailover { session ->
+        runCatching {
+            val urlBuilder = "${apiBaseUrl()}$PATH_GENRE_WORKS".toHttpUrl().newBuilder()
+                .addQueryParameter("gId", genreId)
+                .addQueryParameter("ism", isMovie.toString())
+                .addQueryParameter("s", sort.toString())
+                .addQueryParameter("sd", sortDir.toString())
+            if (!lastAt.isNullOrBlank()) urlBuilder.addQueryParameter("la", lastAt)
+            if (!lastId.isNullOrBlank()) urlBuilder.addQueryParameter("li", lastId)
 
-        val res = executeV47Request(url = urlBuilder.build().toString(), method = "GET")
-        if (res.code !in 200..299 || res.body.isBlank()) return null
-        val resObj = JSONObject(res.body).optJSONObject("result") ?: return null
-        val works = parseWorkCardList(resObj.optJSONArray("works"))
-        GenrePageResult(
-            works = works,
-            lastAt = resObj.optNonBlank("last_at") ?: resObj.optNonBlank("lastAt"),
-            lastId = resObj.optNonBlank("last_id") ?: resObj.optNonBlank("lastId"),
-            isLast = resObj.optBoolean("is_last", works.isEmpty()),
-        )
-    }.getOrNull()
+            val res = executeV47RequestWithSession(
+                url = urlBuilder.build().toString(),
+                method = "GET",
+                session = session,
+            )
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val resObj = JSONObject(res.body).optJSONObject("result") ?: return@runCatching null
+            val works = parseWorkCardList(resObj.optJSONArray("works"))
+            GenrePageResult(
+                works = works,
+                lastAt = resObj.optNonBlank("last_at") ?: resObj.optNonBlank("lastAt"),
+                lastId = resObj.optNonBlank("last_id") ?: resObj.optNonBlank("lastId"),
+                isLast = resObj.optBoolean("is_last", works.isEmpty()),
+            )
+        }.getOrNull()
+    }
 
-    fun searchTriple(query: String, page0Based: Int = 0): SearchResultPage? = runCatching {
-        if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
-            syncAppDataAndSelectMainProfile()
-        }
-        val url = "${apiBaseUrl()}$PATH_SEARCH".toHttpUrl().newBuilder()
-            .addQueryParameter("search", query.trim())
-            .addQueryParameter("page", page0Based.coerceAtLeast(0).toString())
-            .build()
-            .toString()
+    fun searchTriple(query: String, page0Based: Int = 0): SearchResultPage? = executeCatalogWithFailover { session ->
+        runCatching {
+            val url = "${apiBaseUrl()}$PATH_SEARCH".toHttpUrl().newBuilder()
+                .addQueryParameter("search", query.trim())
+                .addQueryParameter("page", page0Based.coerceAtLeast(0).toString())
+                .build()
+                .toString()
 
-        val res = executeV47Request(url = url, method = "GET")
-        if (res.code !in 200..299 || res.body.isBlank()) return null
-        val resObj = JSONObject(res.body).optJSONObject("result") ?: return null
-        val movies = parseWorkCardList(resObj.optJSONArray("movies"))
-            .map { if (it.isMovie == null) it.copy(isMovie = true) else it }
-        val series = parseWorkCardList(resObj.optJSONArray("series"))
-            .map { if (it.isMovie == null) it.copy(isMovie = false) else it }
-        SearchResultPage(
-            movies = movies,
-            series = series,
-            page = resObj.optInt("page", page0Based),
-            isLastMovies = resObj.optBoolean("is_last_movies", movies.isEmpty()),
-            isLastSeries = resObj.optBoolean("is_last_series", series.isEmpty()),
-        )
-    }.getOrNull()
+            val res = executeV47RequestWithSession(url = url, method = "GET", session = session)
+            if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+            val resObj = JSONObject(res.body).optJSONObject("result") ?: return@runCatching null
+            val movies = parseWorkCardList(resObj.optJSONArray("movies"))
+                .map { if (it.isMovie == null) it.copy(isMovie = true) else it }
+            val series = parseWorkCardList(resObj.optJSONArray("series"))
+                .map { if (it.isMovie == null) it.copy(isMovie = false) else it }
+            SearchResultPage(
+                movies = movies,
+                series = series,
+                page = resObj.optInt("page", page0Based),
+                isLastMovies = resObj.optBoolean("is_last_movies", movies.isEmpty()),
+                isLastSeries = resObj.optBoolean("is_last_series", series.isEmpty()),
+            )
+        }.getOrNull()
+    }
 
     fun getWorkDetails(workId: String): WorkDetails? {
-        if (TimeMoviesPrefs.isSignedIn) {
-            if (TimeMoviesPrefs.profileId.isNullOrBlank()) {
-                syncAppDataAndSelectMainProfile()
-            }
+        val fromAuthenticated = executeCatalogWithFailover { session ->
             runCatching {
                 val url = "${apiBaseUrl()}$PATH_WORK_DETAILS".toHttpUrl().newBuilder()
                     .addQueryParameter("wk", workId.trim())
                     .build()
                     .toString()
-                val res = executeV47Request(url = url, method = "GET")
-                if (res.code in 200..299 && res.body.isNotBlank()) {
-                    val resObj = JSONObject(res.body).optJSONObject("result")
-                    if (resObj != null) {
-                        parseWorkDetails(resObj)?.let { return it }
-                    }
-                }
-            }
+                val res = executeV47RequestWithSession(url = url, method = "GET", session = session)
+                if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+                val resObj = JSONObject(res.body).optJSONObject("result") ?: return@runCatching null
+                parseWorkDetails(resObj)
+            }.getOrNull()
         }
+        if (fromAuthenticated != null) return fromAuthenticated
         return getDoomPlayerWorkFallback(workId)
     }
 
@@ -1115,41 +1382,74 @@ object TimeMoviesApi {
         }
     }.getOrNull()
 
-    // ---- Media V2 Qualities, Grant, Origin (`GET /v2/media/*`), & DoomVideoPlayer Resolvers ----
+    // ---- Media V2 Qualities, Grant (with Multi-Account Quota Failover!), & DoomVideoPlayer Resolvers ----
 
-    fun getMediaQualities(fileCode: String, action: String = "download"): List<MediaQualityItem> = runCatching {
-        val payload = JSONObject().apply {
-            put("action", action)
-            put("file_code", fileCode)
-            put("surface", 1)
-        }.toString()
-        val res = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_MEDIA_QUALITIES",
+    fun getMediaQualities(fileCode: String, action: String = "download"): List<MediaQualityItem> =
+        executeCatalogWithFailover { session ->
+            runCatching {
+                val payload = JSONObject().apply {
+                    put("action", action)
+                    put("file_code", fileCode)
+                    put("surface", 1)
+                }.toString()
+                val res = executeV47RequestWithSession(
+                    url = "${apiBaseUrl()}$PATH_MEDIA_QUALITIES",
+                    method = "POST",
+                    rawJsonBody = payload,
+                    session = session,
+                )
+                if (res.code !in 200..299 || res.body.isBlank()) return@runCatching null
+                val obj = JSONObject(res.body)
+                val resObj = obj.optJSONObject("result") ?: obj
+                val qArr = resObj.optJSONArray("qualities") ?: return@runCatching null
+                val out = ArrayList<MediaQualityItem>(qArr.length())
+                for (i in 0 until qArr.length()) {
+                    val row = qArr.optJSONObject(i) ?: continue
+                    val q = row.optDoubleOrNull("quality")?.toInt() ?: row.optIntOrNull("quality") ?: continue
+                    out.add(
+                        MediaQualityItem(
+                            quality = q,
+                            size = row.optNonBlank("size"),
+                            locked = row.optBoolean("locked", false),
+                        )
+                    )
+                }
+                out
+            }.getOrNull()
+        } ?: emptyList()
+
+    private fun shouldFailoverPoolOnGrantRefusal(reason: String?, httpCode: Int): Boolean {
+        if (httpCode in setOf(401, 402, 403, 429)) return true
+        val norm = reason?.trim()?.lowercase(Locale.US).orEmpty()
+        if (norm.isEmpty()) return false
+        if (norm in QUOTA_OR_POOL_ROTATE_REASONS) return true
+        return norm.contains("quota") ||
+            norm.contains("limit") ||
+            norm.contains("device") ||
+            norm.contains("plan") ||
+            norm.contains("vip")
+    }
+
+    private fun executeSingleGrantAttempt(
+        session: AuthSessionContext,
+        bodyJson: String,
+    ): Pair<Int, MediaGrantPayload?> = runCatching {
+        ensureSessionProfileInitialized(session)
+        val res = executeV47RequestWithSession(
+            url = "${apiBaseUrl()}$PATH_MEDIA_GRANT",
             method = "POST",
-            rawJsonBody = payload,
+            rawJsonBody = bodyJson,
+            session = session,
         )
-        if (res.code !in 200..299 || res.body.isBlank()) return emptyList()
+        if (res.body.isBlank()) return res.code to null
         val obj = JSONObject(res.body)
         val resObj = obj.optJSONObject("result") ?: obj
-        val qArr = resObj.optJSONArray("qualities") ?: return emptyList()
-        val out = ArrayList<MediaQualityItem>(qArr.length())
-        for (i in 0 until qArr.length()) {
-            val row = qArr.optJSONObject(i) ?: continue
-            val q = row.optDoubleOrNull("quality")?.toInt() ?: row.optIntOrNull("quality") ?: continue
-            out.add(
-                MediaQualityItem(
-                    quality = q,
-                    size = row.optNonBlank("size"),
-                    locked = row.optBoolean("locked", false),
-                )
-            )
-        }
-        out
-    }.getOrDefault(emptyList())
+        res.code to parseMediaGrant(resObj)
+    }.getOrDefault(0 to null)
 
     /**
      * Calls `POST /api/v4.7/app/media/grant` (`MediaGrantRequest.java` + `at5.java`).
-     * Supports `operationId` & `clientAttemptKey` for idempotent `ExecutionFailed` retry.
+     * Automatically rotates across Built-in Pool slots whenever an account reaches its daily quota!
      */
     fun requestMediaGrant(
         action: String,
@@ -1163,48 +1463,91 @@ object TimeMoviesApi {
         codes: List<String>? = null,
         operationId: String? = null,
         clientAttemptKey: String = UUID.randomUUID().toString(),
-    ): MediaGrantPayload? = runCatching {
-        if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
-            syncAppDataAndSelectMainProfile()
+    ): MediaGrantPayload? {
+        val buildGrantBody: (String?, String) -> String = { opId, attemptKey ->
+            JSONObject().apply {
+                put("action", action)
+                put("surface", 1)
+                put("package", TimeMoviesCrypto.APP_PACKAGE)
+                put("file_code", fileCode)
+                put("work_id", workId)
+                if (!episodeId.isNullOrBlank()) put("episode_id", episodeId)
+                if (!seasonId.isNullOrBlank()) put("season_id", seasonId)
+                if (quality != null) put("quality", quality)
+                if (!codes.isNullOrEmpty()) put("codes", JSONArray(codes))
+                if (!executorTarget.isNullOrBlank()) put("executor_target", executorTarget)
+                put("player_installed", playerInstalled)
+                if (!opId.isNullOrBlank()) put("operation_id", opId)
+                put("client_attempt_key", attemptKey)
+            }.toString()
         }
 
-        val bodyJson = JSONObject().apply {
-            put("action", action)
-            put("surface", 1)
-            put("package", TimeMoviesCrypto.APP_PACKAGE)
-            put("file_code", fileCode)
-            put("work_id", workId)
-            if (!episodeId.isNullOrBlank()) put("episode_id", episodeId)
-            if (!seasonId.isNullOrBlank()) put("season_id", seasonId)
-            if (quality != null) put("quality", quality)
-            if (!codes.isNullOrEmpty()) put("codes", JSONArray(codes))
-            if (!executorTarget.isNullOrBlank()) put("executor_target", executorTarget)
-            put("player_installed", playerInstalled)
-            if (!operationId.isNullOrBlank()) put("operation_id", operationId)
-            put("client_attempt_key", clientAttemptKey)
-        }.toString()
+        var lastRefusalPayload: MediaGrantPayload? = null
 
-        val res = executeV47Request(
-            url = "${apiBaseUrl()}$PATH_MEDIA_GRANT",
-            method = "POST",
-            rawJsonBody = bodyJson,
-        )
-        if (res.body.isBlank()) return null
-        val obj = JSONObject(res.body)
-        val resObj = obj.optJSONObject("result") ?: obj
-        val parsed = parseMediaGrant(resObj)
-        if (!parsed.ok && !parsed.reason.isNullOrBlank() && parsed.reason != "player_not_installed") {
-            lastMediaRefusalReason = parsed.reason
+        // 1. Personal account first (if signed in)
+        if (TimeMoviesPrefs.isSignedIn) {
+            val (code, parsed) = executeSingleGrantAttempt(
+                session = PersonalSessionContext,
+                bodyJson = buildGrantBody(operationId, clientAttemptKey),
+            )
+            if (parsed != null) {
+                if (parsed.ok || parsed.reason == "player_not_installed" || parsed.reason == "execution_failed") {
+                    lastSuccessfulGrantSession = PersonalSessionContext
+                    return parsed
+                }
+                lastRefusalPayload = parsed
+                if (!parsed.reason.isNullOrBlank()) {
+                    lastMediaRefusalReason = parsed.reason
+                }
+                // If personal failure is NOT a quota/device/plan limit, don't mask it
+                if (!shouldFailoverPoolOnGrantRefusal(parsed.reason, code)) {
+                    return parsed
+                }
+            }
         }
-        parsed
-    }.getOrNull()
+
+        // 2. Built-in Pre-Activated Pool Slots (automatic round-robin + quota failover!)
+        val poolCandidates = TimeMoviesPool.getMediaCandidateSlots()
+        for ((idx, slot) in poolCandidates.withIndex()) {
+            val slotSession = PoolSlotSessionContext(slot.slotId)
+            // Fresh attempt key when failing over to a distinct pool account (`operationId` belongs to a single account)
+            val effectiveOpId = if (idx == 0 && !TimeMoviesPrefs.isSignedIn) operationId else null
+            val effectiveAttemptKey = if (idx == 0 && !TimeMoviesPrefs.isSignedIn) {
+                clientAttemptKey
+            } else {
+                UUID.randomUUID().toString()
+            }
+
+            val (code, parsed) = executeSingleGrantAttempt(
+                session = slotSession,
+                bodyJson = buildGrantBody(effectiveOpId, effectiveAttemptKey),
+            )
+            if (parsed != null && (parsed.ok || parsed.reason == "player_not_installed" || parsed.reason == "execution_failed")) {
+                TimeMoviesPool.markSlotHealthy(slot.slotId)
+                lastSuccessfulGrantSession = slotSession
+                if (parsed.ok) lastMediaRefusalReason = null
+                return parsed
+            }
+
+            if (code == 401 || code == 403) {
+                TimeMoviesPool.markSlotAuthFailed(slot.slotId)
+            } else if (parsed != null && shouldFailoverPoolOnGrantRefusal(parsed.reason, code)) {
+                TimeMoviesPool.markSlotQuotaExhausted(slot.slotId)
+            }
+
+            if (parsed != null) {
+                lastRefusalPayload = parsed
+                if (!parsed.reason.isNullOrBlank() && parsed.reason != "player_not_installed") {
+                    lastMediaRefusalReason = parsed.reason
+                }
+            }
+        }
+
+        return lastRefusalPayload
+    }
 
     /**
-     * Executes `fx.D` / `fx.R0` (`Lex;->F`, `q52.java:512`) against `https://api.apks.lol/v2/media/`:
-     * - `GET /v2/media/manifest` (`action == "watch"`)
-     * - `GET /v2/media/download` (`action == "download"`)
-     * - `GET /v2/media/cast` (`action == "cast"`)
-     * - `POST /v2/media/season` (`action == "season_download"`, body `{"codes":[...]}`)
+     * Executes `fx.D` / `fx.R0` (`Lex;->F`, `q52.java:512`) against `https://api.apks.lol/v2/media/`.
      */
     fun fetchOriginMedia(
         action: String,
@@ -1227,10 +1570,16 @@ object TimeMoviesApi {
             null
         }
 
-        val res = executeV47Request(
+        val preferredSession = lastSuccessfulGrantSession
+            ?: if (TimeMoviesPrefs.isSignedIn) PersonalSessionContext
+            else TimeMoviesPool.getCatalogCandidateSlots().firstOrNull()?.let { PoolSlotSessionContext(it.slotId) }
+            ?: return null
+
+        val res = executeV47RequestWithSession(
             url = url,
             method = method,
             rawJsonBody = body,
+            session = preferredSession,
             extraHeaders = mapOf("X-Media-Grant" to grantToken),
             allowRetry = true,
         )

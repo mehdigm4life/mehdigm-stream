@@ -140,6 +140,7 @@ class TimeMoviesUnitTest {
                     401 -> "Unauthorized"
                     403 -> "Forbidden"
                     404 -> "Not Found"
+                    409 -> "Conflict"
                     else -> "Status"
                 }
                 val head = buildString {
@@ -205,15 +206,24 @@ class TimeMoviesUnitTest {
     }
 
     @Test
-    fun testBase64UrlRoundTripJwtClaimsAndOtpNormalization() {
+    fun testCanonicalP256SpkiPkcs8SelfTestAndOtpNormalization() {
+        val kp = TimeMoviesCrypto.generateP256KeyPair()
+        val spkiBytes = TimeMoviesCrypto.base64DecodeFlexible(kp.publicKeySpkiB64Url)
+        val pkcs8Bytes = TimeMoviesCrypto.base64DecodeFlexible(kp.privateKeyPkcs8B64Url)
+
+        assertEquals("SPKI must be strictly canonical 91 bytes", 91, spkiBytes.size)
+        assertEquals("PKCS#8 must be canonical 138 bytes", 138, pkcs8Bytes.size)
+        assertTrue(kp.publicKeySpkiB64Url.startsWith("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE"))
+        assertNotNull(TimeMoviesCrypto.normalizeOrValidateKeyPair(kp.publicKeySpkiB64Url, kp.privateKeyPkcs8B64Url))
+
         val sample = """{"_id":"674e4e33ecd3e83dbef4adaa","e":"mehdi@gmail.com","sid":"sess_01","fq":5,"dcr":2,"iv":false}"""
+        val sig = TimeMoviesCrypto.signEcdsaSha256DerB64Url(kp.privateKeyPkcs8B64Url, sample.toByteArray(Charsets.UTF_8))
+        assertTrue(TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(kp.publicKeySpkiB64Url, sample.toByteArray(Charsets.UTF_8), sig))
+
         val encoded = TimeMoviesCrypto.base64UrlEncodeNoPad(sample.toByteArray(Charsets.UTF_8))
         assertFalse(encoded.contains("="))
         assertFalse(encoded.contains("+"))
         assertFalse(encoded.contains("/"))
-
-        val decoded = String(TimeMoviesCrypto.base64DecodeFlexible(encoded), Charsets.UTF_8)
-        assertEquals(sample, decoded)
 
         val fakeJwt = "${TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256"}""".toByteArray())}.$encoded.sig"
         val claims = TimeMoviesPrefs.decodeJwtClaims(fakeJwt)
@@ -221,7 +231,6 @@ class TimeMoviesUnitTest {
         assertEquals("mehdi@gmail.com", claims!!.optString("e"))
         assertEquals("sess_01", claims.optString("sid"))
 
-        // Arabic-Indic & Eastern-Arabic OTP digit normalization
         assertEquals("482910", TimeMoviesApi.normalizeOtpCode(" ٤٨٢-٩١٠ "))
         assertEquals("739105", TimeMoviesApi.normalizeOtpCode("۷۳۹ ۱۰۵"))
     }
@@ -252,9 +261,10 @@ class TimeMoviesUnitTest {
     }
 
     @Test
-    fun testEndToEndSignUpWithMehdiAndOtpActivationWithClockSkewAnd401Recovery() {
+    fun testEndToEndSignUpWithMehdiAndOtpActivationWithoutKeyRotation409() {
         val serverSkewMs = 300_000L
         val enrolledKeys = ConcurrentHashMap<String, String>()
+        val sessionBoundPk = ConcurrentHashMap<String, String>()
         val otpAttempts = AtomicInteger(0)
         var capturedSignUpName: String? = null
         var capturedSignUpRasplabId: String? = null
@@ -294,17 +304,29 @@ class TimeMoviesUnitTest {
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) -> {
+                    val xt = req.header("x-t").orEmpty()
                     val bodyObj = JSONObject(req.body)
                     val cid = bodyObj.getString("cid")
                     val pk = bodyObj.getString("pk")
                     val sig = bodyObj.getString("sig")
+
+                    // Enforce strict 91-byte SPKI & `409 rotation_requires_signin` on session key rotation!
+                    val spkiBytes = TimeMoviesCrypto.base64DecodeFlexible(pk)
+                    if (spkiBytes.size != 91) {
+                        return@MiniHttpServer jsonResp(400, """{"success":false,"message":"invalid_spki_len"}""", nowServer)
+                    }
+                    val previousPk = sessionBoundPk.putIfAbsent(xt, pk)
+                    if (previousPk != null && previousPk != pk) {
+                        return@MiniHttpServer jsonResp(409, """{"success":false,"message":"rotation_requires_signin","status":409}""", nowServer)
+                    }
+
                     val msgBytes = TimeMoviesCrypto.buildEnrollmentChallengePayload(cid, "challenge_nonce_xyz", pk)
                     if (!TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(pk, msgBytes, sig)) {
                         return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Invalid enrollment signature"}""", nowServer)
                     }
                     val newDk = "dk_${enrolledKeys.size + 1}"
                     enrolledKeys[newDk] = pk
-                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"$newDk","alg":"ECDSA_SHA256_DER","st":1}}""", nowServer)
+                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"$newDk","alg":"ECDSA_SHA256_DER","st":"active"}}""", nowServer)
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_EMAIL_ACTIVATE_OTP) -> {
@@ -342,7 +364,7 @@ class TimeMoviesUnitTest {
                         return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
 
-                    // Inject stale-dk verification failure on attempt 1 to prove automatic recovery!
+                    // Inject stale-dk verification failure on attempt 1 to prove non-rotating re-enrollment recovery!
                     if (attempt == 1) {
                         enrolledKeys.remove(dk)
                         return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
@@ -389,7 +411,8 @@ class TimeMoviesUnitTest {
 
             val signUpRes = TimeMoviesApi.signUpWithEmail("", "mehdi@gmail.com", "StrongPass123")
             assertTrue("Sign-up must succeed", signUpRes.success)
-            assertEquals("Default/example name must be Mehdi", "Mehdi", capturedSignUpName)
+            assertTrue("Default name must start with Mehdi and be >= 6 chars per b13.java:75",
+                capturedSignUpName.orEmpty().startsWith("Mehdi") && capturedSignUpName.orEmpty().length >= 6)
             assertTrue(Regex("^[0-9a-f]{32}$").matches(capturedSignUpRasplabId.orEmpty()))
             assertNotNull(TimeMoviesPrefs.pendingOtpToken)
 
@@ -400,6 +423,204 @@ class TimeMoviesUnitTest {
             assertTrue(TimeMoviesApi.looksLikeJwt(TimeMoviesPrefs.authToken))
             assertEquals("prof_mehdi_main", TimeMoviesPrefs.profileId)
             assertEquals("Mehdi", TimeMoviesPrefs.profileName)
+
+            // Also verify 1-click Pool bundle export of the activated session
+            val exported = TimeMoviesPool.exportCurrentPersonalSessionBundle().getOrThrow()
+            assertTrue(exported.startsWith("tm3pool:v1:"))
+            val unsealed = JSONObject(TimeMoviesCrypto.unsealPoolBundleJson(exported)!!)
+            assertEquals(TimeMoviesPrefs.authToken, unsealed.getString("tk"))
+            assertEquals("prof_mehdi_main", unsealed.getString("pid"))
+        }
+    }
+
+    @Test
+    fun testPoolBundleSealUnsealLoginlessBrowsingAndQuotaExhaustedFailover() = runBlocking {
+        val kp1 = TimeMoviesCrypto.generateP256KeyPair()
+        val kp2 = TimeMoviesCrypto.generateP256KeyPair()
+        val tk1 = makeTestJwt("pool_usr_1", "pool1@gmail.com", "aabbccddeeff0011", "sid_pool_1")
+        val tk2 = makeTestJwt("pool_usr_2", "pool2@gmail.com", "aabbccddeeff0022", "sid_pool_2")
+
+        val enrolledKeys = ConcurrentHashMap<String, String>().apply {
+            put("dk_pool_1", kp1.publicKeySpkiB64Url)
+            put("dk_pool_2", kp2.publicKeySpkiB64Url)
+        }
+        val grantCallsByToken = ConcurrentHashMap<String, AtomicInteger>()
+        lateinit var baseOrigin: String
+
+        MiniHttpServer { req ->
+            val path = req.path
+            val rawQuery = req.rawQuery
+
+            // Verify ECDSA v4.7 signature on every protected pool request!
+            if (!path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) && !path.startsWith("/v2/media/")) {
+                val dk = req.header("dk").orEmpty()
+                val ds = req.header("ds").orEmpty()
+                val xt = req.header("x-t").orEmpty()
+                val xp = req.header("x-p").orEmpty()
+                val ma = req.header("m-a").orEmpty()
+                val tStr = req.header("t").orEmpty()
+                val n = req.header("n").orEmpty()
+                val pk = enrolledKeys[dk]
+                val fullUrl = "$baseOrigin$path${if (rawQuery != null) "?$rawQuery" else ""}".toHttpUrl()
+                val canonical = TimeMoviesCrypto.buildCanonicalV47SigningPayload(
+                    method = req.method,
+                    url = fullUrl,
+                    timestamp = tStr,
+                    nonce = n,
+                    rawBody = req.body,
+                    authToken = xt,
+                    profileId = xp,
+                    maturity = ma,
+                    deviceKeyId = dk,
+                )
+                if (pk == null || !TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(pk, canonical.toByteArray(), ds)) {
+                    return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""")
+                }
+            }
+
+            when {
+                path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":{"v":1092}}""")
+
+                path.endsWith(TimeMoviesApi.PATH_WORK_DETAILS) -> {
+                    val wk = JSONObject().apply {
+                        put("_id", "wk_pool_movie_77")
+                        put("ism", true)
+                        put("tl", "The Odyssey")
+                        put("tlr", "الأوديسة")
+                        put("fc", "fc_odyssey_2026")
+                    }
+                    jsonResp(200, JSONObject().put("success", true).put("result", wk).toString())
+                }
+
+                path.endsWith("/media/grant") -> {
+                    val xt = req.header("x-t").orEmpty()
+                    grantCallsByToken.computeIfAbsent(xt) { AtomicInteger(0) }.incrementAndGet()
+
+                    // Pool Slot #1 has exhausted its daily free quota!
+                    if (xt == tk1) {
+                        return@MiniHttpServer jsonResp(
+                            200,
+                            """{"ok":false,"charged":false,"denial":{"reason":"quota_exhausted","message":"Daily limit reached"}}""",
+                        )
+                    }
+
+                    // Pool Slot #2 succeeds!
+                    assertEquals(tk2, xt)
+                    assertEquals("prof_pool_2", req.header("x-p"))
+                    val action = JSONObject(req.body).getString("action")
+                    val grantTok = if (action == "watch") "pool2_watch_grant" else "pool2_dl_grant"
+                    jsonResp(
+                        200,
+                        JSONObject().apply {
+                            put("ok", true)
+                            put("target", 1)
+                            put("charged", true)
+                            put("grant", grantTok)
+                        }.toString(),
+                    )
+                }
+
+                path == "/v2/media/manifest" -> {
+                    assertEquals("pool2_watch_grant", req.header("X-Media-Grant"))
+                    assertEquals("prof_pool_2", req.header("x-p"))
+                    jsonResp(
+                        200,
+                        JSONObject().apply {
+                            put("ok", true)
+                            put("action", "watch")
+                            put("src", "$baseOrigin/cdn/pool/odyssey_1080p.m3u8")
+                        }.toString(),
+                    )
+                }
+
+                path == "/v2/media/download" -> {
+                    assertEquals("pool2_dl_grant", req.header("X-Media-Grant"))
+                    assertEquals("prof_pool_2", req.header("x-p"))
+                    val sources = JSONArray().put(
+                        JSONObject().apply {
+                            put("quality", 1080)
+                            put("name", "1080p FHD")
+                            put("link", "$baseOrigin/cdn/pool/odyssey_1080p.mp4")
+                        }
+                    )
+                    jsonResp(200, JSONObject().put("ok", true).put("sources", sources).toString())
+                }
+
+                path == "/cdn/pool/odyssey_1080p.m3u8" -> {
+                    val m3u8 = """
+                        #EXTM3U
+                        #EXT-X-VERSION:3
+                        #EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080
+                        prog_1080.m3u8
+                    """.trimIndent()
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
+                }
+
+                else -> jsonResp(404, """{"ok":false}""")
+            }
+        }.use { server ->
+            baseOrigin = server.baseOrigin
+            TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
+            TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
+            TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
+
+            // Confirm user is NOT personally signed in!
+            TimeMoviesPrefs.signOut()
+            assertFalse(TimeMoviesPrefs.isSignedIn)
+
+            // Seal and register 2 pre-activated pool accounts
+            val sealed1 = TimeMoviesCrypto.sealPoolBundleJson(
+                JSONObject().apply {
+                    put("id", "slot_1")
+                    put("tk", tk1)
+                    put("dk", "dk_pool_1")
+                    put("pk", kp1.publicKeySpkiB64Url)
+                    put("sk", kp1.privateKeyPkcs8B64Url)
+                    put("pid", "prof_pool_1")
+                    put("mat", 5)
+                }.toString()
+            )
+            val sealed2 = TimeMoviesCrypto.sealPoolBundleJson(
+                JSONObject().apply {
+                    put("id", "slot_2")
+                    put("tk", tk2)
+                    put("dk", "dk_pool_2")
+                    put("pk", kp2.publicKeySpkiB64Url)
+                    put("sk", kp2.privateKeyPkcs8B64Url)
+                    put("pid", "prof_pool_2")
+                    put("mat", 5)
+                }.toString()
+            )
+            assertEquals(2, TimeMoviesPool.addLocalPoolBundles("$sealed1\n$sealed2"))
+            assertTrue("Pool must satisfy hasUsableAuth without personal login", TimeMoviesApi.hasUsableAuth(allowNetworkFetch = false))
+
+            // 1. Loginless `load()` details fetch via Pool
+            val provider = TimeMovies()
+            val loadResp = provider.load("https://timemovies.app/work/wk_pool_movie_77?type=movie")
+            assertNotNull("Loginless load() must return MovieLoadResponse", loadResp)
+            assertEquals("الأوديسة", loadResp!!.name)
+
+            // 2. Loginless `loadLinks()` where Slot #1 fails with `quota_exhausted` -> auto-rotates to Slot #2!
+            val links = ArrayList<ExtractorLink>()
+            val subs = ArrayList<SubtitleFile>()
+            val ok = provider.loadLinks(
+                data = TimeMoviesModels.LinkPayload(
+                    workId = "wk_pool_movie_77",
+                    fileCode = "",
+                    isMovie = true,
+                    title = "الأوديسة",
+                ).toJson(),
+                isCasting = false,
+                subtitleCallback = { subs.add(it) },
+                callback = { links.add(it) },
+            )
+
+            assertTrue("Loginless Pool failover loadLinks() must succeed", ok)
+            assertEquals("Slot #1 must be tried once then cooled down on quota_exhausted", 1, grantCallsByToken[tk1]?.get() ?: 0)
+            assertEquals("Slot #2 must handle both watch + download grants", 2, grantCallsByToken[tk2]?.get() ?: 0)
+            assertTrue(links.any { it.type == ExtractorLinkType.M3U8 && it.url.endsWith("prog_1080.m3u8") })
+            assertTrue(links.any { it.type == ExtractorLinkType.VIDEO && it.url.endsWith("odyssey_1080p.mp4") })
         }
     }
 
@@ -417,7 +638,7 @@ class TimeMoviesUnitTest {
                     jsonResp(200, """{"success":true,"status":200,"result":{"cid":"cid_1","ch":"ch_1","exp":9999999999}}""")
 
                 req.path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
-                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"dk_live_1","alg":"ECDSA_SHA256_DER","st":1}}""")
+                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"dk_live_1","alg":"ECDSA_SHA256_DER","st":"active"}}""")
 
                 req.path.endsWith(TimeMoviesApi.PATH_WORK_DETAILS) -> {
                     val wk = JSONObject().apply {
@@ -571,7 +792,7 @@ class TimeMoviesUnitTest {
                     jsonResp(200, """{"success":true,"result":{"cid":"c2","ch":"h2","exp":9999999999}}""")
 
                 req.path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
-                    jsonResp(200, """{"success":true,"result":{"dk":"dk_2","alg":"ECDSA_SHA256_DER","st":1}}""")
+                    jsonResp(200, """{"success":true,"result":{"dk":"dk_2","alg":"ECDSA_SHA256_DER","st":"active"}}""")
 
                 req.path.endsWith("/media/grant") -> {
                     val body = JSONObject(req.body)
@@ -736,7 +957,7 @@ class TimeMoviesUnitTest {
         assertTrue("Clock offset must be persisted after live response", TimeMoviesPrefs.hasPersistedClockOffset)
 
         // 1. Live VirtualDeviceProfile + "Mehdi" Sign-Up validation against production `api.apks.lol`
-        val signUpProbe = TimeMoviesApi.signUpWithEmail("Mehdi", "mehdi.v2.check@mailinator.com", "MehdiPass2026!")
+        val signUpProbe = TimeMoviesApi.signUpWithEmail("Mehdi", "mehdi.v3.check@mailinator.com", "MehdiPass2026!")
         assertNotNull(signUpProbe.message)
         assertFalse(
             "Sign-up must NOT fail with Request verification failed: ${signUpProbe.message}",

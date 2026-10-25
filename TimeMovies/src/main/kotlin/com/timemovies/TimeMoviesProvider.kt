@@ -114,15 +114,15 @@ class TimeMovies : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse =
         withContext(Dispatchers.IO) {
-            if (!TimeMoviesPrefs.isSignedIn) {
+            if (!TimeMoviesApi.hasUsableAuth()) {
                 if (page > 1) return@withContext newHomePageResponse(emptyList(), hasNext = false)
                 val noticeItem = newMovieSearchResponse(
-                    name = "⚙️ اضغط على إعدادات إضافة TimeMovies لتسجيل الدخول أو إنشاء حساب مجاني",
+                    name = "⚙️ اضغط على إعدادات إضافة TimeMovies لتسجيل الدخول أو تحديث الحسابات التلقائية",
                     url = "$mainUrl/auth-required",
                     type = TvType.Movie,
                 )
                 return@withContext newHomePageResponse(
-                    listOf(HomePageList("تسجيل الدخول مطلوب (TimeMovies)", listOf(noticeItem))),
+                    listOf(HomePageList("تفعيل الجلسة مطلوب (TimeMovies)", listOf(noticeItem))),
                     hasNext = false,
                 )
             }
@@ -260,7 +260,7 @@ class TimeMovies : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun search(query: String): List<SearchResponse> = withContext(Dispatchers.IO) {
-        if (query.isBlank() || !TimeMoviesPrefs.isSignedIn) return@withContext emptyList()
+        if (query.isBlank() || !TimeMoviesApi.hasUsableAuth()) return@withContext emptyList()
         val preferAr = TimeMoviesPrefs.preferArabic
         val res = TimeMoviesApi.searchTriple(query, page0Based = 0) ?: return@withContext emptyList()
         val combined = ArrayList<SearchResponse>(res.movies.size + res.series.size)
@@ -270,7 +270,7 @@ class TimeMovies : MainAPI() {
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList = withContext(Dispatchers.IO) {
-        if (query.isBlank() || !TimeMoviesPrefs.isSignedIn) {
+        if (query.isBlank() || !TimeMoviesApi.hasUsableAuth()) {
             return@withContext newSearchResponseList(emptyList(), hasNext = false)
         }
         val preferAr = TimeMoviesPrefs.preferArabic
@@ -286,7 +286,7 @@ class TimeMovies : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse = withContext(Dispatchers.IO) {
         if (url.endsWith("/auth-required")) {
-            throw ErrorLoadingException("يرجى فتح إعدادات إضافة TimeMovies ⚙️ وتسجيل الدخول بحسابك أو إنشاء حساب مجاني أولاً")
+            throw ErrorLoadingException("يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية")
         }
 
         val workId = extractWorkIdFromUrl(url)
@@ -296,8 +296,8 @@ class TimeMovies : MainAPI() {
 
         val details = TimeMoviesApi.getWorkDetails(workId)
             ?: throw ErrorLoadingException(
-                if (!TimeMoviesPrefs.isSignedIn) {
-                    "يرجى تسجيل الدخول بحساب TimeMovies من إعدادات الإضافة ⚙️"
+                if (!TimeMoviesApi.hasUsableAuth()) {
+                    "يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية"
                 } else {
                     "تعذر تحميل تفاصيل العمل ($workId)"
                 }
@@ -427,8 +427,8 @@ class TimeMovies : MainAPI() {
     ): Boolean {
         val initialPayload = LinkPayload.fromJson(data) ?: return false
 
-        if (!TimeMoviesPrefs.isSignedIn) {
-            TimeMoviesPlugin.notifyUserAr("يرجى تسجيل الدخول بحساب TimeMovies من إعدادات الإضافة ⚙️ لتشغيل المحتوى")
+        if (!TimeMoviesApi.hasUsableAuth()) {
+            TimeMoviesPlugin.notifyUserAr("يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية")
             return false
         }
 

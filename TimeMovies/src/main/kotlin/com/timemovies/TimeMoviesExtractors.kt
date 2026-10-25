@@ -91,8 +91,8 @@ object TimeMoviesExtractors {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        if (!TimeMoviesPrefs.isSignedIn) return false
-        if (TimeMoviesPrefs.profileId.isNullOrBlank()) {
+        if (!TimeMoviesApi.hasUsableAuth()) return false
+        if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
             TimeMoviesApi.syncAppDataAndSelectMainProfile()
         }
 
