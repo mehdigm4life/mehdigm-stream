@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -29,9 +30,45 @@ jobs:
 
       - name: Configure Android SDK, test, and build TimeMovies plugin
         run: |
+          set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon
+          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
+
+      - name: Publish Gradle & JUnit diagnostics to Check Run
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, subprocess
+          log = ""
+          if os.path.exists("/tmp/gradle.log"):
+              with open("/tmp/gradle.log", "r", encoding="utf-8", errors="replace") as f:
+                  log = f.read()
+          xmls = []
+          for p in sorted(glob.glob("TimeMovies/build/test-results/testDebugUnitTest/*.xml")):
+              with open(p, "r", encoding="utf-8", errors="replace") as f:
+                  xmls.append(f.read()[:20000])
+          body = ("### XML\n```xml\n" + "\n".join(xmls) + "\n```\n### Gradle Tail\n```\n" + log[-38000:] + "\n```")[:64000]
+          payload = {
+              "name": "TimeMovies Diagnostics",
+              "head_sha": os.environ["GITHUB_SHA"],
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {
+                  "title": "Gradle & JUnit Output",
+                  "summary": body,
+              },
+          }
+          with open("/tmp/cr.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f)
+          subprocess.run([
+              "gh", "api", "--method", "POST",
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",
+              "--input", "/tmp/cr.json",
+          ], check=False)
+          PY
 
       - name: Upload TimeMovies.cs3 artifact
         uses: actions/upload-artifact@v4
