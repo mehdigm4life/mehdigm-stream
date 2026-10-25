@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -170,7 +171,19 @@ object CimaNowGatewaySolver {
                     mediaPlaybackRequiresUserGesture = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     cacheMode = WebSettings.LOAD_DEFAULT
+                    setSupportMultipleWindows(true)
+                    javaScriptCanOpenWindowsAutomatically = false
                     userAgentString = cleanChromeUa
+                }
+
+                // Swallow target="_blank" popups/logos so they never hijack the main WebView
+                wv.webChromeClient = object : WebChromeClient() {
+                    override fun onCreateWindow(
+                        view: WebView?,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message?,
+                    ): Boolean = false
                 }
 
                 runCatching {
@@ -230,17 +243,26 @@ object CimaNowGatewaySolver {
 
             withTimeoutOrNull(WEBVIEW_TIMEOUT_MS) {
                 val startedMs = SystemClock.uptimeMillis()
+                var firstBtnSeenMs = 0L
                 var lastTsTapMs = 0L
                 var lastBtnTapMs = 0L
+                var tsTapCount = 0
 
-                // Let initial gateway redirects + Turnstile bootstrap run undisturbed first
-                delay(2_500L)
+                // Let initial gateway redirects + non-interactive Turnstile run undisturbed first
+                delay(3_500L)
 
                 while (!deferred.isCompleted) {
                     delay(500L)
                     if (deferred.isCompleted) break
 
-                    val elapsedMs = SystemClock.uptimeMillis() - startedMs
+                    val nowMs = SystemClock.uptimeMillis()
+                    val elapsedMs = nowMs - startedMs
+                    val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 11_000L)
+                    val allowTsTap = if (firstBtnSeenMs == 0L) {
+                        elapsedMs >= 4_500L
+                    } else {
+                        nowMs - firstBtnSeenMs >= 7_500L
+                    }
                     val probeResult = withContext(Dispatchers.Main) {
                         val wv = webViewRef ?: return@withContext ""
                         wv.url?.let { cur ->
@@ -249,10 +271,13 @@ object CimaNowGatewaySolver {
                                 return@withContext "DONE"
                             }
                         }
-                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(elapsedMs >= 11_000L, elapsedMs >= 6_500L))
+                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(allowBtnForce, allowTsTap))
                     }
 
                     if (deferred.isCompleted || probeResult == "DONE") break
+                    if (firstBtnSeenMs == 0L && probeResult.contains("HASBTN")) {
+                        firstBtnSeenMs = SystemClock.uptimeMillis()
+                    }
 
                     when {
                         probeResult.startsWith("URL:") -> {
@@ -263,9 +288,9 @@ object CimaNowGatewaySolver {
                             }
                         }
                         probeResult.startsWith("BTN:") -> {
-                            val now = SystemClock.uptimeMillis()
-                            if (now - lastBtnTapMs >= 1_800L) {
-                                lastBtnTapMs = now
+                            if (firstBtnSeenMs == 0L) firstBtnSeenMs = nowMs
+                            if (nowMs - lastBtnTapMs >= 1_800L) {
+                                lastBtnTapMs = nowMs
                                 val coords = parseCssCoords(probeResult.removePrefix("BTN:"))
                                 if (coords != null) {
                                     dispatchTrustedTap(webViewRef, coords.first, coords.second)
@@ -273,20 +298,14 @@ object CimaNowGatewaySolver {
                             }
                         }
                         probeResult.startsWith("TS:") -> {
-                            val now = SystemClock.uptimeMillis()
-                            if (now - lastTsTapMs >= 5_500L) {
-                                lastTsTapMs = now
-                                val sides = probeResult.removePrefix("TS:").split('|')
-                                val leftCoords = sides.getOrNull(0)?.let { parseCssCoords(it) }
-                                val rightCoords = sides.getOrNull(1)?.let { parseCssCoords(it) }
-                                if (leftCoords != null) {
-                                    dispatchTrustedTap(webViewRef, leftCoords.first, leftCoords.second)
-                                }
-                                if (rightCoords != null) {
-                                    delay(220L)
-                                    if (!deferred.isCompleted) {
-                                        dispatchTrustedTap(webViewRef, rightCoords.first, rightCoords.second)
-                                    }
+                            val payload = probeResult.removePrefix("TS:").removeSuffix(":HASBTN")
+                            if (nowMs - lastTsTapMs >= 5_000L) {
+                                lastTsTapMs = nowMs
+                                val sides = payload.split('|')
+                                val primary = sides.getOrNull(tsTapCount % sides.size)?.let { parseCssCoords(it) }
+                                tsTapCount++
+                                if (primary != null) {
+                                    dispatchTrustedTap(webViewRef, primary.first, primary.second)
                                 }
                             }
                         }
@@ -341,21 +360,45 @@ object CimaNowGatewaySolver {
                         }
                     }
                     if ($tsTapFlag && h !== '#watch-ready') {
-                        var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-                        if (ts) {
-                            var tr = ts.getBoundingClientRect();
-                            if (tr.width > 40 && tr.height > 20) {
-                                ts.scrollIntoView({block: 'center', inline: 'center'});
-                                tr = ts.getBoundingClientRect();
-                                if (tr.top >= 0 && tr.left >= 0) {
-                                    var cy = Math.round(tr.top + tr.height / 2);
-                                    var lx = Math.round(tr.left + 28);
-                                    var rx = Math.round(tr.right - 28);
-                                    return 'TS:' + lx + ',' + cy + '|' + rx + ',' + cy;
+                        var candidates = [
+                            '.cf-turnstile',
+                            '[data-sitekey]',
+                            '#challenge-stage > div',
+                            'html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div',
+                            'iframe[src*="challenges.cloudflare.com"]'
+                        ];
+                        var box = null;
+                        for (var ci = 0; ci < candidates.length; ci++) {
+                            var el = document.querySelector(candidates[ci]);
+                            if (el) {
+                                var r0 = el.getBoundingClientRect();
+                                if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
+                            }
+                        }
+                        if (!box) {
+                            var divs = document.querySelectorAll('div');
+                            for (var di = 0; di < divs.length; di++) {
+                                var dr = divs[di].getBoundingClientRect();
+                                if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
+                                    box = divs[di];
+                                    break;
                                 }
                             }
                         }
+                        if (box) {
+                            box.scrollIntoView({block: 'center', inline: 'center'});
+                            var tr = box.getBoundingClientRect();
+                            if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
+                                var cy = Math.round(tr.top + tr.height / 2);
+                                var lx = Math.round(tr.left + 28);
+                                var rx = Math.round(tr.right - 28);
+                                var isRtl = (navigator.language || '').toLowerCase().indexOf('ar') === 0;
+                                var pair = isRtl ? (rx + ',' + cy + '|' + lx + ',' + cy) : (lx + ',' + cy + '|' + rx + ',' + cy);
+                                return 'TS:' + pair + (btn ? ':HASBTN' : '');
+                            }
+                        }
                     }
+                    return btn ? 'WAIT:HASBTN' : 'WAIT';
                 } catch(e) {}
                 return 'WAIT';
             })();
@@ -448,7 +491,7 @@ object CimaNowGatewaySolver {
                 ];
                 const xvfb = '/usr/bin/xvfb-run';
                 const proc = fs.existsSync(xvfb)
-                    ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: 'ignore' })
+                    ? spawn(xvfb, ['-a', '-s', '-screen 0 1280x1024x24', chromeBin, ...args], { stdio: 'ignore' })
                     : spawn(chromeBin, ['--headless=new', ...args], { stdio: 'ignore' });
                 function cleanup(out) {
                     try { fs.writeFileSync(outPath, JSON.stringify(out), 'utf8'); } catch(e) {}
@@ -500,13 +543,13 @@ object CimaNowGatewaySolver {
                     await send('Network.enable');
                     await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
-                    let lastTsClick = 0, lastBtnClick = 0;
+                    let lastTsClick = 0, lastBtnClick = 0, firstBtnMs = 0;
                     const tap = async (x, y) => {
                         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
                         await new Promise(r => setTimeout(r, 60));
                         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
                     };
-                    for (let ms = 0; ms < 28000; ms += 500) {
+                    for (let ms = 0; ms < 34000; ms += 500) {
                         await new Promise(r => setTimeout(r, 500));
                         if (getLinkReqId && (getLinkDone || ms >= 9000) && !minted) {
                             const rb = await send('Network.getResponseBody', { requestId: getLinkReqId });
@@ -520,18 +563,23 @@ object CimaNowGatewaySolver {
                             try { await send('Browser.close'); } catch(e) {}
                             return cleanup({ url: minted, diag });
                         }
-                        // Avoid any CDP Runtime.evaluate during the first 11.5s so Turnstile solves undisturbed!
-                        if (ms < 11500) continue;
+                        // Let initial redirect + non-interactive Turnstile run undisturbed for first 4.5s
+                        if (ms < 4500) continue;
+                        // Once blog-post.html (#downloadbtn) appears, give Stage B 7.0s undisturbed before probing/tapping
+                        if (firstBtnMs > 0 && ms - firstBtnMs < 7000) continue;
+                        const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 11000);
+                        const allowTsTap = firstBtnMs === 0 ? (ms >= 4500) : (ms - firstBtnMs >= 7500);
                         const probe = await send('Runtime.evaluate', {
                             expression: `(function(){
                                 try {
                                     var loc = String(location.href || '');
+                                    var ttl = String(document.title || '').slice(0, 28);
                                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
                                     var btn = document.getElementById('downloadbtn');
                                     var h = btn ? String(btn.getAttribute('href') || '') : '';
                                     if (btn) {
                                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
-                                        if (h === '#watch-ready' || (h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
+                                        if (h === '#watch-ready' || (${'$'}{allowBtnForce} && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
                                             if (btn.hidden || getComputedStyle(btn).display === 'none') {
                                                 btn.removeAttribute('hidden');
                                                 btn.style.setProperty('display', 'inline-block', 'important');
@@ -541,22 +589,53 @@ object CimaNowGatewaySolver {
                                             if (br.width > 4 && br.height > 4) return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2);
                                         }
                                     }
-                                    if (h !== '#watch-ready') {
-                                        var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-                                        if (ts) {
-                                            ts.scrollIntoView({block:'center', inline:'center'});
-                                            var tr = ts.getBoundingClientRect();
-                                            if (tr.width > 40 && tr.height > 20 && tr.top >= 0 && tr.left >= 0) {
-                                                return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height/2);
+                                    if (${'$'}{allowTsTap} && h !== '#watch-ready') {
+                                        var sels = [
+                                            '.cf-turnstile',
+                                            '[data-sitekey]',
+                                            '#challenge-stage > div',
+                                            'html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div',
+                                            'iframe[src*="challenges.cloudflare.com"]'
+                                        ];
+                                        var box = null;
+                                        for (var i = 0; i < sels.length; i++) {
+                                            var el = document.querySelector(sels[i]);
+                                            if (el) {
+                                                var r0 = el.getBoundingClientRect();
+                                                if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
+                                            }
+                                        }
+                                        if (!box) {
+                                            var divs = document.querySelectorAll('div');
+                                            for (var di = 0; di < divs.length; di++) {
+                                                var dr = divs[di].getBoundingClientRect();
+                                                if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
+                                                    box = divs[di];
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (box) {
+                                            box.scrollIntoView({block:'center', inline:'center'});
+                                            var tr = box.getBoundingClientRect();
+                                            if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
+                                                var cy = Math.round(tr.top + tr.height/2);
+                                                var isRtl = (navigator.language || '').toLowerCase().indexOf('ar') === 0;
+                                                var tx = isRtl ? Math.round(tr.right - 28) : Math.round(tr.left + 28);
+                                                return 'TS:' + tx + ',' + cy + (btn ? ':HASBTN' : '');
                                             }
                                         }
                                     }
-                                    return 'WAIT:h=' + h + ',loc=' + loc.slice(0, 45);
+                                    return 'WAIT:btn=' + (!!btn) + ',h=' + h + ',ttl=' + ttl + ',loc=' + loc.slice(0, 42);
                                 } catch(e) { return 'ERR:' + e.message; }
                             })()`,
                             returnByValue: true
                         });
                         const pv = (probe && probe.result && probe.result.result && probe.result.result.value) ? String(probe.result.result.value) : '';
+                        if (!firstBtnMs && (pv.includes('btn=true') || pv.includes(':HASBTN') || pv.startsWith('BTN:'))) {
+                            firstBtnMs = ms;
+                            diag.push('firstBtn=' + ms);
+                        }
                         if (ms % 3000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
                             try { await send('Browser.close'); } catch(e) {}
@@ -565,10 +644,14 @@ object CimaNowGatewaySolver {
                             lastBtnClick = ms;
                             const [bx, by] = pv.slice(4).split(',').map(Number);
                             if (bx > 0 && by > 0) await tap(bx, by);
-                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 5500) {
+                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 5000) {
                             lastTsClick = ms;
-                            const [tx, ty] = pv.slice(3).split(',').map(Number);
-                            if (tx > 0 && ty > 0) await tap(tx, ty);
+                            const clean = pv.slice(3).replace(':HASBTN', '');
+                            const [tx, ty] = clean.split(',').map(Number);
+                            if (tx > 0 && ty > 0) {
+                                diag.push('tapTS@' + ms + '=' + tx + ',' + ty);
+                                await tap(tx, ty);
+                            }
                         }
                     }
                     try { await send('Browser.close'); } catch(e) {}
@@ -582,7 +665,7 @@ object CimaNowGatewaySolver {
                     .redirectErrorStream(true)
                     .redirectOutput(File("/dev/null"))
                     .start()
-                val finished = p.waitFor(42L, TimeUnit.SECONDS)
+                val finished = p.waitFor(46L, TimeUnit.SECONDS)
                 if (!finished) {
                     p.destroyForcibly()
                 }

@@ -107,8 +107,10 @@ object CimaNowCrypto {
 
     fun safeJsonObject(raw: String?): JSONObject? {
         val t = raw?.trim() ?: return null
-        if (!t.startsWith("{")) return null
-        return runCatching { JSONObject(t) }.getOrNull()
+        val braceIdx = t.indexOf('{')
+        if (braceIdx < 0 || !t.endsWith("}")) return null
+        val slice = if (braceIdx == 0) t else t.substring(braceIdx)
+        return runCatching { JSONObject(slice) }.getOrNull()
     }
 
     // ── 1. `rm.freex2line.online` Gateway Unpacker & HMAC-SHA256 Signer ─────
