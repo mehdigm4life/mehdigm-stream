@@ -326,8 +326,12 @@ class CimaNowLiveE2ETest {
                 for (ci in 0 until cookiesArr.length()) {
                     val co = cookiesArr.getJSONObject(ci)
                     val dom = co.optString("domain").trimStart('.')
-                    if (dom.isNotBlank()) {
-                        session.cookieStore.seedCookies("https://$dom/", mapOf(co.optString("name") to co.optString("value")))
+                    val cName = co.optString("name")
+                    val cVal = co.optString("value")
+                    val hUrl = okhttp3.HttpUrl.Builder().scheme("https").host(dom.ifBlank { "cimanow.cc" }).build()
+                    if (dom.isNotBlank() && cName.isNotBlank()) {
+                        val ck = okhttp3.Cookie.Builder().name(cName).value(cVal).domain(dom).path("/").build()
+                        session.cookieStore.saveFromResponse(hUrl, listOf(ck))
                     }
                 }
             }
@@ -336,8 +340,16 @@ class CimaNowLiveE2ETest {
                 if (decoded != null && mintedUrl.startsWith("http")) {
                     val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
                     for (tab in decoded.serverTabs.take(6)) {
-                        val emb = CimaNowExtractors.fetchServerEmbedUrl(session, watchOrigin, mintedUrl, tab, decoded.coreToken, decoded.sigSalt)
-                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> embed=$emb")
+                        val sig = CimaNowCrypto.calcCoreSig(decoded.coreToken, tab.dataId, tab.dataIndex, decoded.sigSalt)
+                        val coreUrl = "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
+                            "?token=${java.net.URLEncoder.encode(decoded.coreToken, "UTF-8")}" +
+                            "&action=switch&index=${java.net.URLEncoder.encode(tab.dataIndex, "UTF-8")}" +
+                            "&id=${java.net.URLEncoder.encode(tab.dataId, "UTF-8")}" +
+                            "&_s=${java.net.URLEncoder.encode(sig, "UTF-8")}"
+                        val resp = session.getText(coreUrl, mintedUrl, mapOf("X-Requested-With" to "XMLHttpRequest"))
+                        val emb = resp?.second?.let { CimaNowCrypto.decodeCnBootFrame(it) }
+                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} len=${resp?.second?.length} embed=$emb raw='${resp?.second?.take(140)?.replace("
+", " ")}'")
                     }
                 }
             }
