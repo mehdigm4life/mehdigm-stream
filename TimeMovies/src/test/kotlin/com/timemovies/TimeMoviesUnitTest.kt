@@ -766,14 +766,19 @@ class TimeMoviesUnitTest {
             val mp4Links = links.filter { it.type == ExtractorLinkType.VIDEO }
 
             assertTrue("Expected Auto + 1080p + 720p HLS streams, got: $hlsLinks", hlsLinks.size >= 3)
+            val link1080 = hlsLinks.firstOrNull { it.name.contains("[1080p]") && it.quality == 1080 }
+            assertNotNull("Expected 1080p HLS variant link", link1080)
+            assertTrue("1080p variant with #EXT-X-MEDIA must be served via local Master M3U8", link1080!!.url.startsWith("http://127.0.0.1:"))
+            val local1080Body = fetchRawHttpText(link1080.url)
             assertTrue(
-                "Relative HLS variants must preserve signed master query token",
-                hlsLinks.any { it.url.endsWith("1080p/index.m3u8?sig=tok123") && it.quality == 1080 },
+                "Synthesized 1080p Master M3U8 must preserve signed query token on relative variant & subtitles",
+                local1080Body.contains("$baseOrigin/cdn/hls/interstellar/1080p/index.m3u8?sig=tok123") &&
+                    local1080Body.contains("$baseOrigin/cdn/hls/interstellar/subs/ar.vtt?sig=tok123"),
             )
             assertEquals("Expected 1080p + 720p direct MP4 download links", 2, mp4Links.size)
             assertTrue(mp4Links.any { it.quality == 1080 && it.url.endsWith("interstellar_1080p.mp4") })
             assertTrue(mp4Links.any { it.quality == 720 && it.url.endsWith("interstellar_720p.mp4") })
-            assertEquals("Expected Arabic + English HLS subtitle tracks", 2, subs.size)
+            assertEquals("Expected Arabic + English standalone .vtt subtitle tracks", 2, subs.size)
             assertTrue(subs.any { it.lang.contains("العربية") && it.url.contains("subs/ar.vtt?sig=tok123") })
         }
     }
@@ -911,11 +916,187 @@ class TimeMoviesUnitTest {
             val videoLinks = links.filter { it.type == ExtractorLinkType.VIDEO }
 
             assertTrue("Extensionless DoomPlayer play URL must be emitted as M3U8", m3u8Links.size >= 2)
-            assertTrue(m3u8Links.any { it.url == "$baseOrigin/cdn/live/dune_stream_token_xyz" })
-            assertTrue(m3u8Links.any { it.quality == 1080 && it.url.endsWith("v1080/prog.m3u8") })
+            val autoHls = m3u8Links.firstOrNull { it.name.contains("[Auto HLS]") }
+            val hls1080 = m3u8Links.firstOrNull { it.name.contains("[1080p]") && it.quality == 1080 }
+            assertNotNull("Expected Auto HLS link", autoHls)
+            assertNotNull("Expected 1080p HLS link", hls1080)
+            assertTrue(autoHls!!.url.startsWith("http://127.0.0.1:"))
+            assertTrue(hls1080!!.url.startsWith("http://127.0.0.1:"))
+            assertTrue(fetchRawHttpText(autoHls.url).contains("$baseOrigin/cdn/live/v1080/prog.m3u8"))
+            assertTrue(fetchRawHttpText(hls1080.url).contains("$baseOrigin/cdn/live/v1080/prog.m3u8"))
             assertEquals("Expected resolved DoomPlayer MP4 download link", 1, videoLinks.size)
             assertEquals("$baseOrigin/cdn/dl/dune_1080p.mp4", videoLinks[0].url)
             assertEquals(1, subs.size)
+        }
+    }
+
+    private fun fetchRawHttpText(url: String): String {
+        val req = okhttp3.Request.Builder().url(url).get().build()
+        TimeMoviesApi.plainClient.newCall(req).execute().use { resp ->
+            assertEquals("Expected HTTP 200 for $url", 200, resp.code)
+            return resp.body?.string().orEmpty()
+        }
+    }
+
+    @Test
+    fun testDemuxedDoomPlayerHlsAudioSubtitlesAndExpiredProxy404Immunity() = runBlocking {
+        val proxyMasterReads = AtomicInteger(0)
+        lateinit var baseOrigin: String
+
+        MiniHttpServer { req ->
+            when {
+                // Simulates `https://api.apks.lol/api/player/v1.6/app/m?t=...&s=...`:
+                // returns 200 OK ONLY once during `loadLinks`, then returns HTTP 404 (`ERROR_CODE_IO_BAD_HTTP_STATUS 2004`)
+                // on every subsequent request!
+                req.path == "/api/player/v1.6/app/m" -> {
+                    if (proxyMasterReads.incrementAndGet() > 1) {
+                        return@MiniHttpServer MiniResponse(404, "text/plain", "Not Found")
+                    }
+                    // Exact Kaltura `nginx-vod-module` (`sv505.egy.rocks`) demuxed layout (`#EXT-X-MEDIA` after `#EXT-X-STREAM-INF`)
+                    val cdnDir = "https://sv505.egy.rocks/gx5wj0z6m4m8obow/hls/6a660677e726aa532689b2fb.json"
+                    val tok = "token=st=1792922228~exp=1792936628~acl=/gx5wj0z6m4m8obow/hls/6a660677e726aa532689b2fb.json/*~hmac=93b9b57da"
+                    val m3u8 = """
+                        #EXTM3U
+                        #EXT-X-INDEPENDENT-SEGMENTS
+                        #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3800000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"
+                        $cdnDir/index-f1-v1.m3u8?$tok
+                        #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1850000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"
+                        $cdnDir/index-f2-v1.m3u8?$tok
+                        #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=620000,RESOLUTION=640x360,CODECS="avc1.4d401e,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"
+                        $cdnDir/index-f3-v1.m3u8?$tok
+                        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="$cdnDir/index-f1-a1.m3u8?$tok"
+                        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Ara",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="ar",URI="$cdnDir/index-f4-v1.m3u8?$tok"
+                        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Eng-SDH",DEFAULT=NO,AUTOSELECT=YES,LANGUAGE="en",URI="$cdnDir/index-f5-v1.m3u8?$tok"
+                    """.trimIndent()
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
+                }
+
+                else -> jsonResp(404, """{"ok":false}""")
+            }
+        }.use { server ->
+            baseOrigin = server.baseOrigin
+            val links = ArrayList<ExtractorLink>()
+            val subs = ArrayList<SubtitleFile>()
+
+            val ok = TimeMoviesExtractors.emitResolvedHttpUrl(
+                url = "$baseOrigin/api/player/v1.6/app/m?t=ephemeral_tok&s=sig_1",
+                sourceLabel = "DoomPlayer Stream",
+                qualityHint = null,
+                isWatch = true,
+                subtitleCallback = { subs.add(it) },
+                callback = { links.add(it) },
+            )
+
+            assertTrue(ok)
+            assertEquals("Ephemeral /app/m proxy URL must be read once during loadLinks", 1, proxyMasterReads.get())
+            assertEquals(
+                "Segmented HLS .m3u8 subtitle playlists must NOT be emitted to SubripParser subtitleCallback",
+                0,
+                subs.size,
+            )
+
+            assertEquals("Expected Auto HLS + 1080p + 720p + 360p", 4, links.size)
+            val autoLink = links.first { it.name == "DoomPlayer Stream [Auto HLS]" }
+            val link1080 = links.first { it.name == "DoomPlayer Stream [1080p]" }
+            val link720 = links.first { it.name == "DoomPlayer Stream [720p]" }
+            val link360 = links.first { it.name == "DoomPlayer Stream [360p]" }
+
+            assertEquals(1080, autoLink.quality)
+            assertEquals(1080, link1080.quality)
+            assertEquals(720, link720.quality)
+            assertEquals(360, link360.quality)
+
+            // Re-fetch `[Auto HLS]` THREE times (simulating PreviewImgM3u8 + ExoPlayer + switching back 10 mins later
+            // when upstream `/api/player/v1.6/app/m` already returns HTTP 404!):
+            repeat(3) {
+                val autoBody = fetchRawHttpText(autoLink.url)
+                assertTrue(autoBody.contains("index-f1-v1.m3u8"))
+                assertTrue(autoBody.contains("index-f2-v1.m3u8"))
+                assertTrue(autoBody.contains("index-f3-v1.m3u8"))
+                assertTrue(autoBody.contains("TYPE=AUDIO") && autoBody.contains("index-f1-a1.m3u8"))
+                assertTrue(autoBody.contains("TYPE=SUBTITLES") && autoBody.contains("index-f4-v1.m3u8"))
+                assertTrue(autoBody.contains("TYPE=SUBTITLES") && autoBody.contains("index-f5-v1.m3u8"))
+            }
+            assertEquals("Local HLS server must never touch expired /app/m again", 1, proxyMasterReads.get())
+
+            // Verify EVERY single-quality link (`1080p`, `720p`, `360p`) is a complete RFC 8216 Master M3U8
+            // containing ONLY its locked video resolution PLUS FULL AUDIO + FULL ARABIC & ENGLISH SUBTITLES!
+            val body720 = fetchRawHttpText(link720.url)
+            assertTrue("720p must contain 720p video stream", body720.contains("index-f2-v1.m3u8"))
+            assertFalse("720p must NOT contain 1080p video stream", body720.contains("index-f1-v1.m3u8"))
+            assertFalse("720p must NOT contain 360p video stream", body720.contains("index-f3-v1.m3u8"))
+            assertTrue("720p must preserve demuxed audio rendition", body720.contains("TYPE=AUDIO") && body720.contains("index-f1-a1.m3u8"))
+            assertTrue("720p must preserve Arabic & English HLS subtitles", body720.contains("index-f4-v1.m3u8") && body720.contains("index-f5-v1.m3u8"))
+
+            val body360 = fetchRawHttpText(link360.url)
+            assertTrue("360p must contain 360p video stream", body360.contains("index-f3-v1.m3u8"))
+            assertFalse("360p must NOT contain 720p video stream", body360.contains("index-f2-v1.m3u8"))
+            assertTrue("360p must preserve demuxed audio rendition", body360.contains("TYPE=AUDIO") && body360.contains("index-f1-a1.m3u8"))
+            assertTrue("360p must preserve Arabic & English HLS subtitles", body360.contains("index-f4-v1.m3u8") && body360.contains("index-f5-v1.m3u8"))
+        }
+    }
+
+    @Test
+    fun testUnactivatedAccountSignInTriggersOtpAndRefreshesJwt() {
+        val resendCount = AtomicInteger(0)
+        val refreshCount = AtomicInteger(0)
+        lateinit var unactiveJwt: String
+        lateinit var activeJwt: String
+
+        MiniHttpServer { req ->
+            when {
+                req.path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"result":{"v":1092}}""")
+
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) ->
+                    jsonResp(200, """{"success":true,"result":{"cid":"c_ia","ch":"h_ia","exp":9999999999}}""")
+
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
+                    jsonResp(200, """{"success":true,"result":{"dk":"dk_ia_1","alg":"ECDSA_SHA256_DER","st":"active"}}""")
+
+                req.path.endsWith(TimeMoviesApi.PATH_EMAIL_SIGN_IN) ->
+                    jsonResp(200, JSONObject().put("success", true).put("status", 200).put("result", unactiveJwt).toString())
+
+                req.path.endsWith(TimeMoviesApi.PATH_EMAIL_RESEND_OTP) -> {
+                    resendCount.incrementAndGet()
+                    jsonResp(200, """{"success":true,"status":200,"result":"sent"}""")
+                }
+
+                req.path.endsWith(TimeMoviesApi.PATH_EMAIL_ACTIVATE_OTP) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":"OK"}""")
+
+                req.path.endsWith(TimeMoviesApi.PATH_REFRESH_TOKEN) -> {
+                    refreshCount.incrementAndGet()
+                    jsonResp(200, JSONObject().put("success", true).put("status", 200).put("result", activeJwt).toString())
+                }
+
+                req.path.endsWith(TimeMoviesApi.PATH_APP_DATA) -> {
+                    val prof = JSONObject().put("_id", "prof_ia").put("n", "Main").put("im", true).put("m", 5)
+                    val res = JSONObject().put("profiles", JSONArray().put(prof))
+                    jsonResp(200, JSONObject().put("success", true).put("result", res).toString())
+                }
+
+                else -> jsonResp(404, """{"success":false}""")
+            }
+        }.use { server ->
+            TimeMoviesPrefs.apiBaseUrlOverride = "${server.baseOrigin}/api/v4.7/app/"
+            val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+
+            val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256"}""".toByteArray())
+            val pFalse = JSONObject().put("_id", "u_ia").put("e", "friend@gmail.com").put("d", dev.deviceId).put("sid", "s_ia").put("ia", false).toString()
+            val pTrue = JSONObject().put("_id", "u_ia").put("e", "friend@gmail.com").put("d", dev.deviceId).put("sid", "s_ia").put("ia", true).toString()
+            unactiveJwt = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(pFalse.toByteArray())}.sig1"
+            activeJwt = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(pTrue.toByteArray())}.sig2"
+
+            val signInRes = TimeMoviesApi.signInWithEmail("friend@gmail.com", "Pass1234!")
+            assertFalse("Unactivated JWT (ia=false) must NOT complete sign-in silently", signInRes.success)
+            assertEquals("Must stage pendingOtpToken for OTP dialog", unactiveJwt, TimeMoviesPrefs.pendingOtpToken)
+            assertEquals("Must auto-request OTP resend when ia=false without refusal", 1, resendCount.get())
+
+            val otpRes = TimeMoviesApi.activateEmailOtp("654321")
+            assertTrue("OTP activation must succeed: ${otpRes.message}", otpRes.success)
+            assertEquals("Must refresh JWT when activate returns non-JWT 'OK'", 1, refreshCount.get())
+            assertEquals("Saved authToken must be upgraded to ia=true JWT", activeJwt, TimeMoviesPrefs.authToken)
         }
     }
 

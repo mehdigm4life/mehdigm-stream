@@ -754,11 +754,19 @@ object TimeMoviesApi {
             val token = obj.optNonBlank("result")
 
             if (res.code in 200..299 && ok && !token.isNullOrBlank()) {
-                if (refusal != null && refusal.action == 2) {
+                val claims = TimeMoviesPrefs.decodeJwtClaims(token)
+                val explicitlyUnactivated = claims != null && (
+                    (claims.has("ia") && !claims.optBoolean("ia", true)) ||
+                        (claims.has("is_active") && !claims.optBoolean("is_active", true))
+                    )
+                if ((refusal != null && refusal.action == 2) || explicitlyUnactivated) {
                     TimeMoviesPrefs.pendingOtpToken = token
                     TimeMoviesPrefs.pendingOtpEmail = cleanEmail
                     TimeMoviesPrefs.clearDeviceKey(regenerateKeyPair = false)
                     ensureSessionDeviceKeyEnrolled(OtpPendingSessionContext(token))
+                    if (refusal == null) {
+                        runCatching { resendActivationOtp(cleanEmail) }
+                    }
                     return@runCatching ApiEnvelope(
                         false,
                         status,
@@ -929,25 +937,39 @@ object TimeMoviesApi {
             val resultStr = obj.optNonBlank("result")
 
             if (res.code in 200..299 && ok) {
-                val activatedToken = if (looksLikeJwt(resultStr)) resultStr!! else otpSession.authToken
+                val returnedFreshJwt = looksLikeJwt(resultStr)
+                val initialToken = if (returnedFreshJwt) resultStr!! else otpSession.authToken
                 val devId = TimeMoviesPrefs.deviceId
                 val oldScope = TimeMoviesPrefs.computeTokenScope(otpSession.authToken, devId)
-                val newScope = TimeMoviesPrefs.computeTokenScope(activatedToken, devId)
                 val existingDk = TimeMoviesPrefs.getDeviceKeyIdForScope(oldScope)
 
-                TimeMoviesPrefs.authToken = activatedToken
+                TimeMoviesPrefs.authToken = initialToken
                 TimeMoviesPrefs.userEmail = TimeMoviesPrefs.pendingOtpEmail
                 TimeMoviesPrefs.pendingOtpToken = null
                 TimeMoviesPrefs.pendingOtpEmail = null
 
                 if (!existingDk.isNullOrBlank()) {
-                    TimeMoviesPrefs.setDeviceKeyIdForScope(newScope, existingDk)
+                    val initScope = TimeMoviesPrefs.computeTokenScope(initialToken, devId)
+                    TimeMoviesPrefs.setDeviceKeyIdForScope(initScope, existingDk)
                 } else {
                     ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                 }
 
+                // If `UserEmailActivate` did not embed a new JWT in `result`, refresh immediately
+                // so JWT claims upgrade from `ia: false` -> `ia: true` before `media/grant`!
+                if (!returnedFreshJwt) {
+                    if (tryRefreshSessionAuthToken(PersonalSessionContext) && !existingDk.isNullOrBlank()) {
+                        val refreshed = TimeMoviesPrefs.authToken.orEmpty()
+                        if (refreshed.isNotBlank()) {
+                            val refreshedScope = TimeMoviesPrefs.computeTokenScope(refreshed, devId)
+                            TimeMoviesPrefs.setDeviceKeyIdForScope(refreshedScope, existingDk)
+                        }
+                    }
+                }
+
+                val finalToken = TimeMoviesPrefs.authToken ?: initialToken
                 syncAppDataAndSelectMainProfile()
-                ApiEnvelope(true, status, message, activatedToken, refusal)
+                ApiEnvelope(true, status, message, finalToken, refusal)
             } else {
                 ApiEnvelope(false, status, message ?: "فشل تفعيل الرمز (${res.code})", null, refusal)
             }

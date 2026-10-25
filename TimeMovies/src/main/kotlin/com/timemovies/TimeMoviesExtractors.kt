@@ -18,9 +18,16 @@ import com.timemovies.TimeMoviesModels.MediaSourceItem
 import com.timemovies.TimeMoviesModels.MediaV2Payload
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.URI
 import java.net.URLDecoder
+import java.security.MessageDigest
 import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -36,10 +43,144 @@ import java.util.concurrent.TimeUnit
  * 3. Automatically falls back to External `DoomVideoPlayer` mode (`executor_target = "external"`, `player_installed = true`)
  *    whenever internal origin is not configured or refused (`player_not_installed`), resolving encrypted
  *    `timesnizz://` & `timesdizz://` tickets via `POST /api/player/v1.6/app/resolve-play` and `resolve-download`.
- * 4. Emits untouched Auto-HLS master streams (matching `DoomVideoPlayer`'s `application/x-mpegURL` `MediaItem`),
- *    individual `#EXT-X-STREAM-INF` quality variants, embedded `#EXT-X-MEDIA:TYPE=SUBTITLES` VTT/SRT tracks,
- *    multi-quality progressive MP4/MKV downloads, DASH `.mpd` manifests, and third-party hoster links.
+ * 4. Captures ephemeral DoomPlayer proxy Master M3U8s (`/api/player/v1.6/app/m?t=...&s=...`, ~210s TTL)
+ *    once during `loadLinks`, absolutizes all 4h–24h CDN renditions (`sv*.egy.rocks`), and serves both
+ *    `[Auto HLS]` and per-quality single-variant Master M3U8s (`1080p`, `720p`, `480p`, `360p`) from
+ *    [TimeMoviesLocalHlsServer] (`http://127.0.0.1:<port>/hls/...`) so EVERY quality plays with full
+ *    demuxed `#EXT-X-MEDIA:TYPE=AUDIO` + native `#EXT-X-MEDIA:TYPE=SUBTITLES` and zero `HTTP 404` (`2004`) errors.
  */
+internal object TimeMoviesLocalHlsServer {
+    private const val MAX_ENTRIES = 128
+
+    private val store = object : LinkedHashMap<String, ByteArray>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean {
+            return size > MAX_ENTRIES
+        }
+    }
+
+    @Volatile
+    private var serverSocket: ServerSocket? = null
+
+    @Volatile
+    private var boundPort: Int = 0
+
+    @Synchronized
+    private fun ensureStarted(): Int {
+        val current = serverSocket
+        if (boundPort > 0 && current != null && !current.isClosed) {
+            return boundPort
+        }
+        return runCatching {
+            val sock = ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"))
+            serverSocket = sock
+            boundPort = sock.localPort
+            Thread(
+                {
+                    while (!sock.isClosed) {
+                        val client = try {
+                            sock.accept()
+                        } catch (_: Throwable) {
+                            if (sock.isClosed) break else continue
+                        }
+                        Thread({ handleClient(client) }, "TimeMoviesHlsConn").apply {
+                            isDaemon = true
+                            start()
+                        }
+                    }
+                },
+                "TimeMoviesHlsServer",
+            ).apply {
+                isDaemon = true
+                start()
+            }
+            boundPort
+        }.getOrDefault(0)
+    }
+
+    private fun readHttpLine(input: BufferedInputStream): String? {
+        val buf = ByteArrayOutputStream(128)
+        var sawByte = false
+        while (true) {
+            val b = input.read()
+            if (b == -1) return if (sawByte) buf.toString("UTF-8") else null
+            sawByte = true
+            if (b == '\n'.code) break
+            if (b != '\r'.code) buf.write(b)
+        }
+        return buf.toString("UTF-8")
+    }
+
+    private fun handleClient(client: Socket) {
+        client.use { sock ->
+            runCatching {
+                sock.soTimeout = 8_000
+                val input = BufferedInputStream(sock.getInputStream())
+                val requestLine = readHttpLine(input) ?: return
+                while (true) {
+                    val hdr = readHttpLine(input) ?: break
+                    if (hdr.isEmpty()) break
+                }
+
+                val parts = requestLine.split(' ')
+                val method = parts.getOrNull(0)?.uppercase(Locale.US).orEmpty()
+                val rawTarget = parts.getOrNull(1).orEmpty().substringBefore('?').substringBefore('#')
+                val key = rawTarget.substringAfterLast('/').removeSuffix(".m3u8")
+                val out = sock.getOutputStream()
+
+                if (method == "OPTIONS") {
+                    val cors = "HTTP/1.1 204 No Content\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
+                        "Connection: close\r\n\r\n"
+                    out.write(cors.toByteArray(Charsets.US_ASCII))
+                    out.flush()
+                    return
+                }
+
+                val payload = synchronized(store) { store[key] }
+                if (payload == null) {
+                    val notFound = "HTTP/1.1 404 Not Found\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n\r\n"
+                    out.write(notFound.toByteArray(Charsets.US_ASCII))
+                    out.flush()
+                    return
+                }
+
+                val headers = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: application/vnd.apple.mpegurl; charset=utf-8\r\n" +
+                    "Content-Length: ${payload.size}\r\n" +
+                    "Access-Control-Allow-Origin: *\r\n" +
+                    "Cache-Control: no-cache\r\n" +
+                    "Connection: close\r\n\r\n"
+                out.write(headers.toByteArray(Charsets.US_ASCII))
+                if (method != "HEAD") {
+                    out.write(payload)
+                }
+                out.flush()
+            }
+        }
+    }
+
+    fun registerM3u8(m3u8Content: String): String? {
+        val normalized = m3u8Content.removePrefix("\uFEFF").trim()
+        if (!normalized.startsWith("#EXTM3U", ignoreCase = true)) return null
+        val bytes = "$normalized\n".toByteArray(Charsets.UTF_8)
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val key = buildString(24) {
+            for (i in 0 until 12) {
+                append("%02x".format(digest[i]))
+            }
+        }
+        synchronized(store) {
+            store[key] = bytes
+        }
+        val port = ensureStarted()
+        if (port <= 0) return null
+        return "http://127.0.0.1:$port/hls/$key.m3u8"
+    }
+}
+
 object TimeMoviesExtractors {
 
     private val KNOWN_EXTERNAL_HOSTER_KEYWORDS = listOf(
@@ -84,6 +225,35 @@ object TimeMoviesExtractors {
         val url: String,
         val quality: Int,
         val label: String,
+    )
+
+    internal data class ParsedMediaRendition(
+        val rawLine: String,
+        val type: String,
+        val groupId: String?,
+        val name: String?,
+        val language: String?,
+        val uri: String?,
+        val isDefault: Boolean,
+    )
+
+    internal data class HlsVariantStream(
+        val streamInfLine: String,
+        val url: String,
+        val quality: Int,
+        val bandwidth: Long,
+        val baseLabel: String,
+        val displayLabel: String,
+        val audioGroupId: String?,
+        val subtitleGroupId: String?,
+    )
+
+    internal data class ParsedMasterManifest(
+        val isMaster: Boolean,
+        val absolutizedContent: String,
+        val globalHeaderLines: List<String>,
+        val mediaLines: List<ParsedMediaRendition>,
+        val variants: List<HlsVariantStream>,
     )
 
     suspend fun extractAllLinks(
@@ -568,6 +738,15 @@ object TimeMoviesExtractors {
         // 3. HLS adaptive stream:
         //    In both TimeMovies (`manifest`) and DoomVideoPlayer (`PlayerScreenKt`: `application/x-mpegURL`),
         //    every watch URL that isn't an explicit `.mp4`/`.mkv` file is an HLS playlist!
+        //    v4 Fix:
+        //    - `/api/player/v1.6/app/m?t=...&s=...` expires in ~210s (`HTTP 404` -> `ERROR_CODE_IO_BAD_HTTP_STATUS 2004`),
+        //      while its inner `sv*.egy.rocks` CDN URLs have 4h–24h tokens! Serving the absolutized manifest via
+        //      `TimeMoviesLocalHlsServer` (`http://127.0.0.1:<port>/hls/...`) eliminates `2004` errors completely.
+        //    - DoomPlayer's Kaltura `nginx-vod-module` streams (`index-f2-v1.m3u8`, `index-f3-v1.m3u8`) are demuxed
+        //      video-only tracks paired with `#EXT-X-MEDIA:TYPE=AUDIO` + `#EXT-X-MEDIA:TYPE=SUBTITLES` (`index-f4-v1.m3u8`).
+        //      Synthesizing a single-variant Master M3U8 per quality keeps FULL audio + native embedded subtitles on
+        //      EVERY resolution (`1080p`, `720p`, `480p`, `360p`), and avoids feeding segmented `.m3u8` subtitle
+        //      playlists into CloudStream's standalone `SubripParser`!
         if (isExplicitHls || (isWatch && !isExplicitProgressiveFile)) {
             val inspected = inspectHttpPayloadIfText(cleanUrl)
             if (inspected != null && looksLikeHtmlEmbed(inspected)) {
@@ -576,38 +755,64 @@ object TimeMoviesExtractors {
                 }
             }
 
-            // Always emit the untouched master HLS URL first so signed query tokens & ExoPlayer native adaptive
-            // selection work identically to `DoomVideoPlayer` (`MediaItem.Builder().setUri(dr).setMimeType("application/x-mpegURL")`)!
             val autoLabel = if (sourceLabel.contains("[")) sourceLabel else "$sourceLabel [Auto HLS]"
-            callback(
-                newExtractorLink(
-                    source = sourceLabel,
-                    name = autoLabel,
-                    url = cleanUrl,
-                    type = ExtractorLinkType.M3U8,
-                ) {
-                    this.quality = qualityHint ?: parseQualityNumber(cleanUrl) ?: Qualities.Unknown.value
-                }
-            )
+            val baseLabel = sourceLabel.substringBefore(" [").trim().ifEmpty { sourceLabel }
 
-            // If the master manifest body was readable `#EXTM3U`, also emit embedded VTT/SRT subtitles
-            // and individual `#EXT-X-STREAM-INF` quality variants (preserving parent query tokens if needed).
-            if (inspected != null && inspected.contains("#EXTM3U")) {
-                for (sub in parseHlsSubtitlesFromMaster(inspected, cleanUrl)) {
-                    subtitleCallback(
-                        newSubtitleFile(
-                            lang = sub.label,
-                            url = sub.url,
+            if (inspected != null && inspected.contains("#EXTM3U", ignoreCase = true)) {
+                val absolutized = absolutizeM3u8Manifest(inspected, cleanUrl)
+                val master = parseMasterManifestDetails(absolutized, cleanUrl)
+
+                // Only pass standalone `.vtt`/`.srt`/`.ass` subtitle files to `subtitleCallback`;
+                // segmented HLS `.m3u8` subtitle playlists (`index-f4-v1.m3u8`) MUST stay inside the
+                // Master M3U8 so Media3 `HlsMediaSource` renders them natively as `EMBEDDED_IN_VIDEO`.
+                for (sub in parseHlsSubtitlesFromMaster(absolutized, cleanUrl)) {
+                    if (isStandaloneSubtitleFileUrl(sub.url)) {
+                        subtitleCallback(
+                            newSubtitleFile(
+                                lang = sub.label,
+                                url = sub.url,
+                            )
                         )
-                    )
+                    }
                 }
-                for (variant in parseHlsVariantsFromMaster(inspected, cleanUrl)) {
-                    if (variant.url != cleanUrl) {
+
+                val autoPlayableUrl = TimeMoviesLocalHlsServer.registerM3u8(absolutized) ?: cleanUrl
+                val bestVariantQuality = master.variants
+                    .maxOfOrNull { it.quality }
+                    ?.takeIf { it > Qualities.Unknown.value }
+
+                callback(
+                    newExtractorLink(
+                        source = baseLabel,
+                        name = autoLabel,
+                        url = autoPlayableUrl,
+                        type = ExtractorLinkType.M3U8,
+                    ) {
+                        this.quality = bestVariantQuality
+                            ?: qualityHint
+                            ?: parseQualityNumber(cleanUrl)
+                            ?: Qualities.Unknown.value
+                    }
+                )
+
+                if (master.isMaster && master.variants.isNotEmpty()) {
+                    val hasSeparateMediaTracks = master.mediaLines.any {
+                        it.type == "AUDIO" || it.type == "SUBTITLES" || it.type == "CLOSED-CAPTIONS"
+                    }
+
+                    for (variant in master.variants) {
+                        if (variant.url == cleanUrl) continue
+                        val variantPlayableUrl = if (hasSeparateMediaTracks) {
+                            val singleMaster = synthesizeSingleVariantMasterM3u8(master, variant)
+                            TimeMoviesLocalHlsServer.registerM3u8(singleMaster) ?: variant.url
+                        } else {
+                            variant.url
+                        }
                         callback(
                             newExtractorLink(
-                                source = sourceLabel,
-                                name = "$sourceLabel [${variant.label}]",
-                                url = variant.url,
+                                source = baseLabel,
+                                name = "$baseLabel [${variant.displayLabel}]",
+                                url = variantPlayableUrl,
                                 type = ExtractorLinkType.M3U8,
                             ) {
                                 this.quality = variant.quality
@@ -615,7 +820,20 @@ object TimeMoviesExtractors {
                         )
                     }
                 }
+                return true
             }
+
+            // Fallback when `#EXTM3U` text could not be pre-inspected
+            callback(
+                newExtractorLink(
+                    source = baseLabel,
+                    name = autoLabel,
+                    url = cleanUrl,
+                    type = ExtractorLinkType.M3U8,
+                ) {
+                    this.quality = qualityHint ?: parseQualityNumber(cleanUrl) ?: Qualities.Unknown.value
+                }
+            )
             return true
         }
 
@@ -801,7 +1019,251 @@ object TimeMoviesExtractors {
         }
     }
 
-    // ---- HLS `#EXT-X-STREAM-INF` Variant & `#EXT-X-MEDIA:TYPE=SUBTITLES` Parsers ----
+    // ---- HLS Master Rewriter, Demuxed Single-Variant Synthesizer & Track Parsers ----
+
+    internal fun isStandaloneSubtitleFileUrl(url: String): Boolean {
+        val cleanPath = url.substringBefore('?').substringBefore('#').lowercase(Locale.US)
+        if (cleanPath.endsWith(".m3u8") || url.lowercase(Locale.US).contains(".m3u8?")) {
+            return false
+        }
+        return cleanPath.endsWith(".vtt") ||
+            cleanPath.endsWith(".srt") ||
+            cleanPath.endsWith(".ass") ||
+            cleanPath.endsWith(".ssa") ||
+            cleanPath.endsWith(".ttml") ||
+            cleanPath.endsWith(".dfxp")
+    }
+
+    private fun isProxyManifestEndpoint(url: String): Boolean {
+        val lower = url.lowercase(Locale.US)
+        return lower.contains("/api/player/") && (lower.contains("/app/m?") || lower.endsWith("/app/m"))
+    }
+
+    private fun absolutizeChildUri(masterUrl: String, masterQuery: String?, rawUri: String): String {
+        val trimmed = rawUri.trim()
+        if (trimmed.isEmpty()) return trimmed
+        if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            return trimmed
+        }
+        var resolved = resolveRelativeUrl(masterUrl, trimmed)
+        if (!masterQuery.isNullOrBlank() && !resolved.contains('?') && !isProxyManifestEndpoint(masterUrl)) {
+            resolved = "$resolved?$masterQuery"
+        }
+        return resolved
+    }
+
+    internal fun absolutizeM3u8Manifest(rawM3u8: String, masterUrl: String): String {
+        val masterQuery = runCatching { URI(masterUrl).rawQuery?.takeIf { it.isNotBlank() } }.getOrNull()
+        val uriAttrRegex = Regex("""URI="([^"]+)"""", RegexOption.IGNORE_CASE)
+        val normalizedLines = rawM3u8.removePrefix("\uFEFF").lines()
+
+        return buildString(rawM3u8.length + 256) {
+            for (rawLine in normalizedLines) {
+                val trimmed = rawLine.trim()
+                if (trimmed.isEmpty()) continue
+                if (trimmed.startsWith("#")) {
+                    val rewrittenTag = uriAttrRegex.replace(trimmed) { m ->
+                        val abs = absolutizeChildUri(masterUrl, masterQuery, m.groupValues[1])
+                        "URI=\"$abs\""
+                    }
+                    append(rewrittenTag).append('\n')
+                } else {
+                    append(absolutizeChildUri(masterUrl, masterQuery, trimmed)).append('\n')
+                }
+            }
+        }
+    }
+
+    internal fun parseMasterManifestDetails(
+        absolutizedContent: String,
+        masterUrl: String,
+    ): ParsedMasterManifest {
+        val lines = absolutizedContent.lines()
+        val globalHeaders = LinkedHashSet<String>()
+        val mediaRenditions = ArrayList<ParsedMediaRendition>()
+        val rawVariants = ArrayList<HlsVariantStream>()
+
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i].trim()
+            if (line.isEmpty() || line.equals("#EXTM3U", ignoreCase = true)) {
+                i++
+                continue
+            }
+
+            when {
+                line.startsWith("#EXT-X-VERSION:", ignoreCase = true) ||
+                    line.startsWith("#EXT-X-INDEPENDENT-SEGMENTS", ignoreCase = true) ||
+                    line.startsWith("#EXT-X-START:", ignoreCase = true) ||
+                    line.startsWith("#EXT-X-SESSION-DATA:", ignoreCase = true) ||
+                    line.startsWith("#EXT-X-SESSION-KEY:", ignoreCase = true) -> {
+                    globalHeaders.add(line)
+                }
+
+                line.startsWith("#EXT-X-MEDIA:", ignoreCase = true) -> {
+                    val attrs = line.substringAfter(':')
+                    val typeAttr = parseM3u8Attribute(attrs, "TYPE")?.uppercase(Locale.US).orEmpty()
+                    if (typeAttr.isNotEmpty()) {
+                        mediaRenditions.add(
+                            ParsedMediaRendition(
+                                rawLine = line,
+                                type = typeAttr,
+                                groupId = parseM3u8Attribute(attrs, "GROUP-ID"),
+                                name = parseM3u8Attribute(attrs, "NAME"),
+                                language = parseM3u8Attribute(attrs, "LANGUAGE"),
+                                uri = parseM3u8Attribute(attrs, "URI"),
+                                isDefault = parseM3u8Attribute(attrs, "DEFAULT")
+                                    ?.equals("YES", ignoreCase = true) == true,
+                            )
+                        )
+                    }
+                }
+
+                line.startsWith("#EXT-X-STREAM-INF:", ignoreCase = true) -> {
+                    val attrs = line.substringAfter(':')
+                    val height = Regex("""RESOLUTION=\d+x(\d+)""", RegexOption.IGNORE_CASE)
+                        .find(attrs)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toIntOrNull()
+                    val bw = Regex("""(?:^|,)BANDWIDTH=(\d+)""", RegexOption.IGNORE_CASE)
+                        .find(attrs)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toLongOrNull()
+                        ?: Regex("""AVERAGE-BANDWIDTH=(\d+)""", RegexOption.IGNORE_CASE)
+                            .find(attrs)
+                            ?.groupValues
+                            ?.getOrNull(1)
+                            ?.toLongOrNull()
+                        ?: 0L
+                    val nameAttr = parseM3u8Attribute(attrs, "NAME")
+                    val audioGroup = parseM3u8Attribute(attrs, "AUDIO")
+                    val subGroup = parseM3u8Attribute(attrs, "SUBTITLES")
+
+                    var j = i + 1
+                    while (j < lines.size) {
+                        val next = lines[j].trim()
+                        if (next.isEmpty()) {
+                            j++
+                            continue
+                        }
+                        if (next.startsWith("#")) {
+                            if (next.startsWith("#EXT-X-STREAM-INF:", ignoreCase = true)) break
+                            j++
+                            continue
+                        }
+                        val resolvedUrl = absolutizeChildUri(masterUrl, null, next)
+                        val quality = height
+                            ?: parseQualityNumber(nameAttr)
+                            ?: parseQualityNumber(resolvedUrl)
+                            ?: Qualities.Unknown.value
+                        val baseLabel = when {
+                            height != null -> "${height}p"
+                            !nameAttr.isNullOrBlank() -> nameAttr
+                            quality > Qualities.Unknown.value -> "${quality}p"
+                            else -> "HLS"
+                        }
+                        rawVariants.add(
+                            HlsVariantStream(
+                                streamInfLine = line,
+                                url = resolvedUrl,
+                                quality = quality,
+                                bandwidth = bw,
+                                baseLabel = baseLabel,
+                                displayLabel = baseLabel,
+                                audioGroupId = audioGroup,
+                                subtitleGroupId = subGroup,
+                            )
+                        )
+                        i = j
+                        break
+                    }
+                }
+            }
+            i++
+        }
+
+        val dedupedVariants = rawVariants
+            .distinctBy { it.url }
+            .sortedWith(compareByDescending<HlsVariantStream> { it.quality }.thenByDescending { it.bandwidth })
+
+        val countsByBaseLabel = dedupedVariants.groupingBy { it.baseLabel }.eachCount()
+        val finalVariants = dedupedVariants.map { v ->
+            if ((countsByBaseLabel[v.baseLabel] ?: 0) > 1 && v.bandwidth > 0L) {
+                val mbps = String.format(Locale.US, "%.1f Mbps", v.bandwidth / 1_000_000.0)
+                v.copy(displayLabel = "${v.baseLabel} • $mbps")
+            } else {
+                v
+            }
+        }
+
+        return ParsedMasterManifest(
+            isMaster = finalVariants.isNotEmpty(),
+            absolutizedContent = absolutizedContent,
+            globalHeaderLines = globalHeaders.toList(),
+            mediaLines = mediaRenditions,
+            variants = finalVariants,
+        )
+    }
+
+    internal fun synthesizeSingleVariantMasterM3u8(
+        master: ParsedMasterManifest,
+        variant: HlsVariantStream,
+    ): String {
+        val allAudio = master.mediaLines.filter { it.type == "AUDIO" }
+        val selectedAudio = if (!variant.audioGroupId.isNullOrBlank()) {
+            allAudio.filter { it.groupId.equals(variant.audioGroupId, ignoreCase = true) }
+                .ifEmpty { allAudio }
+        } else {
+            allAudio
+        }
+
+        val allSubs = master.mediaLines.filter { it.type == "SUBTITLES" }
+        val selectedSubs = if (!variant.subtitleGroupId.isNullOrBlank()) {
+            allSubs.filter { it.groupId.equals(variant.subtitleGroupId, ignoreCase = true) }
+                .ifEmpty { allSubs }
+        } else {
+            allSubs
+        }
+
+        val allCaptions = master.mediaLines.filter { it.type == "CLOSED-CAPTIONS" }
+
+        var effectiveStreamInf = variant.streamInfLine
+        val fallbackAudioGroup = selectedAudio.firstOrNull { !it.groupId.isNullOrBlank() }?.groupId
+        if (variant.audioGroupId.isNullOrBlank() && !fallbackAudioGroup.isNullOrBlank() &&
+            !effectiveStreamInf.contains("AUDIO=", ignoreCase = true)
+        ) {
+            effectiveStreamInf = "$effectiveStreamInf,AUDIO=\"$fallbackAudioGroup\""
+        }
+        val fallbackSubGroup = selectedSubs.firstOrNull { !it.groupId.isNullOrBlank() }?.groupId
+        if (variant.subtitleGroupId.isNullOrBlank() && !fallbackSubGroup.isNullOrBlank() &&
+            !effectiveStreamInf.contains("SUBTITLES=", ignoreCase = true)
+        ) {
+            effectiveStreamInf = "$effectiveStreamInf,SUBTITLES=\"$fallbackSubGroup\""
+        }
+
+        return buildString(1024) {
+            append("#EXTM3U\n")
+            if (master.globalHeaderLines.none { it.startsWith("#EXT-X-VERSION:", ignoreCase = true) }) {
+                append("#EXT-X-VERSION:3\n")
+            }
+            for (hdr in master.globalHeaderLines) {
+                append(hdr).append('\n')
+            }
+            for (aud in selectedAudio) {
+                append(aud.rawLine).append('\n')
+            }
+            for (sub in selectedSubs) {
+                append(sub.rawLine).append('\n')
+            }
+            for (cc in allCaptions) {
+                append(cc.rawLine).append('\n')
+            }
+            append(effectiveStreamInf).append('\n')
+            append(variant.url).append('\n')
+        }
+    }
 
     fun parseHlsVariantsFromMaster(
         masterContent: String,

@@ -470,6 +470,8 @@ class TimeMovies : MainAPI() {
 
     private fun translateRefusalReasonAr(reason: String): String {
         return when (reason.lowercase(Locale.US)) {
+            "account_not_activated", "email_not_verified", "not_activated" ->
+                "هذا الحساب غير مفعّل بعد — افتح إعدادات TimeMovies ⚙️ وأدخل رمز التفعيل المرسل لبريدك"
             "quota_exhausted", "insufficient_quota" ->
                 "انتهى الرصيد اليومي المجاني لهذا الحساب في TimeMovies"
             "blocked_by_plan" ->

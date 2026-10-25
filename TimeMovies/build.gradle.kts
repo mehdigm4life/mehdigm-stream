@@ -2,7 +2,7 @@ import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
-version = 3
+version = 4
 
 val generatedPoolDir = layout.buildDirectory.dir("generated/source/timemoviesPool/kotlin")
 val poolEncFile = layout.projectDirectory.file("pool.enc")
