@@ -3,8 +3,6 @@ package com.timemovies
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
@@ -17,13 +15,20 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.net.InetSocketAddress
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.URI
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
@@ -41,12 +46,147 @@ class TimeMoviesUnitTest {
         TimeMoviesApi.resetRuntimeStateForTests()
     }
 
-    private fun formatHttpDate(epochMs: Long): String {
-        val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("GMT")
-        }
-        return sdf.format(Date(epochMs))
+    // ---- Pure `java.net.ServerSocket` HTTP/1.1 Test Server (works on Android SDK + JVM) ----
+
+    private data class MiniRequest(
+        val method: String,
+        val path: String,
+        val rawQuery: String?,
+        val headers: Map<String, String>,
+        val body: String,
+    ) {
+        fun header(name: String): String? = headers[name.lowercase(Locale.US)]
     }
+
+    private data class MiniResponse(
+        val code: Int,
+        val contentType: String,
+        val body: String,
+        val serverNowMs: Long = System.currentTimeMillis(),
+    )
+
+    private class MiniHttpServer(
+        private val handler: (MiniRequest) -> MiniResponse,
+    ) : AutoCloseable {
+        private val serverSocket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        private val running = AtomicBoolean(true)
+        private val pool = Executors.newCachedThreadPool()
+        val port: Int = serverSocket.localPort
+        val baseOrigin: String = "http://127.0.0.1:$port"
+
+        init {
+            pool.execute {
+                while (running.get()) {
+                    val sock = try {
+                        serverSocket.accept()
+                    } catch (_: Throwable) {
+                        break
+                    }
+                    pool.execute { handleClient(sock) }
+                }
+            }
+        }
+
+        private fun handleClient(socket: Socket) {
+            socket.use { sock ->
+                sock.soTimeout = 10_000
+                val input = BufferedInputStream(sock.getInputStream())
+                val reqLine = readAsciiLine(input) ?: return
+                val parts = reqLine.split(' ')
+                if (parts.size < 2) return
+                val method = parts[0].trim()
+                val targetUri = URI("http://127.0.0.1${parts[1].trim()}")
+
+                val headers = LinkedHashMap<String, String>()
+                while (true) {
+                    val hLine = readAsciiLine(input) ?: break
+                    if (hLine.isEmpty()) break
+                    val idx = hLine.indexOf(':')
+                    if (idx > 0) {
+                        val k = hLine.substring(0, idx).trim().lowercase(Locale.US)
+                        val v = hLine.substring(idx + 1).trim()
+                        headers[k] = v
+                    }
+                }
+
+                val contentLen = headers["content-length"]?.toIntOrNull() ?: 0
+                val bodyBytes = ByteArray(contentLen)
+                var readTotal = 0
+                while (readTotal < contentLen) {
+                    val r = input.read(bodyBytes, readTotal, contentLen - readTotal)
+                    if (r <= 0) break
+                    readTotal += r
+                }
+                val reqBody = String(bodyBytes, 0, readTotal, Charsets.UTF_8)
+
+                val resp = try {
+                    handler(
+                        MiniRequest(
+                            method = method,
+                            path = targetUri.rawPath ?: "/",
+                            rawQuery = targetUri.rawQuery,
+                            headers = headers,
+                            body = reqBody,
+                        )
+                    )
+                } catch (t: Throwable) {
+                    MiniResponse(500, "application/json", """{"error":"${t.message}"}""")
+                }
+
+                val respBytes = resp.body.toByteArray(Charsets.UTF_8)
+                val statusText = when (resp.code) {
+                    200 -> "OK"
+                    401 -> "Unauthorized"
+                    403 -> "Forbidden"
+                    404 -> "Not Found"
+                    else -> "Status"
+                }
+                val head = buildString {
+                    append("HTTP/1.1 ${resp.code} $statusText\r\n")
+                    append("Content-Type: ${resp.contentType}\r\n")
+                    append("Date: ${formatHttpDate(resp.serverNowMs)}\r\n")
+                    append("Content-Length: ${respBytes.size}\r\n")
+                    append("Connection: close\r\n\r\n")
+                }.toByteArray(Charsets.US_ASCII)
+
+                val out = sock.getOutputStream()
+                out.write(head)
+                out.write(respBytes)
+                out.flush()
+            }
+        }
+
+        private fun readAsciiLine(input: BufferedInputStream): String? {
+            val buf = ByteArrayOutputStream()
+            var sawByte = false
+            while (true) {
+                val b = input.read()
+                if (b == -1) return if (sawByte) buf.toString("UTF-8") else null
+                sawByte = true
+                if (b == '\n'.code) break
+                if (b != '\r'.code) buf.write(b)
+            }
+            return buf.toString("UTF-8")
+        }
+
+        override fun close() {
+            running.set(false)
+            runCatching { serverSocket.close() }
+            pool.shutdownNow()
+        }
+
+        companion object {
+            fun formatHttpDate(epochMs: Long): String {
+                val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("GMT")
+                }
+                return sdf.format(Date(epochMs))
+            }
+        }
+    }
+
+    private fun jsonResp(code: Int, body: String, serverNowMs: Long = System.currentTimeMillis()): MiniResponse =
+        MiniResponse(code, "application/json; charset=utf-8", body, serverNowMs)
 
     private fun makeTestJwt(userId: String, email: String, deviceId: String, sid: String = "sid_01"): String {
         val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256","typ":"JWT"}""".toByteArray())
@@ -61,28 +201,6 @@ class TimeMoviesUnitTest {
         }.toString()
         val body = TimeMoviesCrypto.base64UrlEncodeNoPad(payload.toByteArray())
         return "$hdr.$body.test_sig"
-    }
-
-    private fun respondJson(ex: HttpExchange, code: Int, body: String, serverNowMs: Long = System.currentTimeMillis()) {
-        val bytes = body.toByteArray(Charsets.UTF_8)
-        ex.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
-        ex.responseHeaders.set("Date", formatHttpDate(serverNowMs))
-        ex.sendResponseHeaders(code, bytes.size.toLong())
-        ex.responseBody.use { it.write(bytes) }
-    }
-
-    private fun respondText(
-        ex: HttpExchange,
-        code: Int,
-        contentType: String,
-        body: String,
-        serverNowMs: Long = System.currentTimeMillis(),
-    ) {
-        val bytes = body.toByteArray(Charsets.UTF_8)
-        ex.responseHeaders.set("Content-Type", contentType)
-        ex.responseHeaders.set("Date", formatHttpDate(serverNowMs))
-        ex.sendResponseHeaders(code, bytes.size.toLong())
-        ex.responseBody.use { it.write(bytes) }
     }
 
     @Test
@@ -134,133 +252,111 @@ class TimeMoviesUnitTest {
 
     @Test
     fun testEndToEndSignUpWithMehdiAndOtpActivationWithClockSkewAnd401Recovery() {
-        // Simulate a server whose clock is +300 seconds (+5 minutes) ahead of the client!
         val serverSkewMs = 300_000L
-        val enrolledKeys = ConcurrentHashMap<String, String>() // dk -> pkSpkiB64Url
+        val enrolledKeys = ConcurrentHashMap<String, String>()
         val otpAttempts = AtomicInteger(0)
         var capturedSignUpName: String? = null
         var capturedSignUpRasplabId: String? = null
+        lateinit var baseOrigin: String
 
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        val port = server.address.port
-        val baseOrigin = "http://127.0.0.1:$port"
-        TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
-        TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
-        TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
-
-        // Pre-seed a stale profile from an older account to prove `activateEmailOtp` NEVER leaks `x-p`/`m-a`!
-        TimeMoviesPrefs.profileId = "stale_profile_from_old_account"
-        TimeMoviesPrefs.profileMaturity = 3
-
-        server.createContext("/") { ex ->
+        MiniHttpServer { req ->
             val nowServer = System.currentTimeMillis() + serverSkewMs
-            val path = ex.requestURI.path
-            val rawQuery = ex.requestURI.rawQuery
-            val method = ex.requestMethod
-            val reqBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
+            val path = req.path
+            val rawQuery = req.rawQuery
 
             when {
-                path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) -> {
-                    respondJson(ex, 200, """{"status":1,"result":{"v":1092}}""", nowServer)
-                }
+                path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":{"v":1092}}""", nowServer)
 
                 path.endsWith(TimeMoviesApi.PATH_EMAIL_SIGN_UP) -> {
-                    val bodyObj = JSONObject(reqBody)
+                    val bodyObj = JSONObject(req.body)
                     capturedSignUpName = bodyObj.optString("name")
                     val devObj = bodyObj.getJSONObject("device")
                     capturedSignUpRasplabId = devObj.optString("rasplab_install_id")
                     val pendingJwt = makeTestJwt("usr_mehdi_1", bodyObj.getString("email"), devObj.getString("device_id"))
-                    respondJson(ex, 200, JSONObject().put("status", 1).put("result", pendingJwt).toString(), nowServer)
+                    jsonResp(
+                        200,
+                        JSONObject().put("success", true).put("status", 200).put("result", pendingJwt).toString(),
+                        nowServer,
+                    )
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) -> {
-                    // Unactivated OTP token must NOT carry stale `x-p`
-                    if (!ex.requestHeaders.getFirst("x-p").isNullOrEmpty() && TimeMoviesPrefs.authToken == null) {
-                        respondJson(ex, 401, """{"status":0,"message":"Request verification failed."}""", nowServer)
-                        return@createContext
+                    if (!req.header("x-p").isNullOrEmpty() && TimeMoviesPrefs.authToken == null) {
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
-                    respondJson(
-                        ex,
+                    jsonResp(
                         200,
-                        """{"status":1,"result":{"cid":"cid_900","ch":"challenge_nonce_xyz","exp":9999999999}}""",
+                        """{"success":true,"status":200,"result":{"cid":"cid_900","ch":"challenge_nonce_xyz","exp":9999999999}}""",
                         nowServer,
                     )
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) -> {
-                    val bodyObj = JSONObject(reqBody)
+                    val bodyObj = JSONObject(req.body)
                     val cid = bodyObj.getString("cid")
                     val pk = bodyObj.getString("pk")
                     val sig = bodyObj.getString("sig")
                     val msgBytes = TimeMoviesCrypto.buildEnrollmentChallengePayload(cid, "challenge_nonce_xyz", pk)
-                    val valid = TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(pk, msgBytes, sig)
-                    if (!valid) {
-                        respondJson(ex, 401, """{"status":0,"message":"Invalid enrollment signature"}""", nowServer)
-                        return@createContext
+                    if (!TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(pk, msgBytes, sig)) {
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Invalid enrollment signature"}""", nowServer)
                     }
                     val newDk = "dk_${enrolledKeys.size + 1}"
                     enrolledKeys[newDk] = pk
-                    respondJson(ex, 200, """{"status":1,"result":{"dk":"$newDk","alg":"ECDSA_SHA256_DER","st":1}}""", nowServer)
+                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"$newDk","alg":"ECDSA_SHA256_DER","st":1}}""", nowServer)
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_EMAIL_ACTIVATE_OTP) -> {
                     val attempt = otpAttempts.incrementAndGet()
-                    // Verify no stale `x-p` or `m-a` header was attached to pending OTP request!
-                    val xp = ex.requestHeaders.getFirst("x-p").orEmpty()
-                    val ma = ex.requestHeaders.getFirst("m-a").orEmpty()
+                    val xp = req.header("x-p").orEmpty()
+                    val ma = req.header("m-a").orEmpty()
                     if (xp.isNotEmpty() || ma.isNotEmpty()) {
-                        respondJson(ex, 401, """{"status":0,"message":"Request verification failed."}""", nowServer)
-                        return@createContext
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
 
-                    // Verify server-synced timestamp `t` (must match skewed server clock within 15s!)
-                    val tStr = ex.requestHeaders.getFirst("t").orEmpty()
+                    val tStr = req.header("t").orEmpty()
                     val tVal = tStr.toLongOrNull() ?: 0L
                     if (abs(tVal - nowServer) > 15_000L) {
-                        respondJson(ex, 401, """{"status":0,"message":"Request verification failed."}""", nowServer)
-                        return@createContext
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
 
-                    // Verify 13-line ECDSA P-256 request signature
-                    val dk = ex.requestHeaders.getFirst("dk").orEmpty()
-                    val ds = ex.requestHeaders.getFirst("ds").orEmpty()
-                    val xt = ex.requestHeaders.getFirst("x-t").orEmpty()
-                    val n = ex.requestHeaders.getFirst("n").orEmpty()
+                    val dk = req.header("dk").orEmpty()
+                    val ds = req.header("ds").orEmpty()
+                    val xt = req.header("x-t").orEmpty()
+                    val n = req.header("n").orEmpty()
                     val pk = enrolledKeys[dk]
                     val fullUrl = "$baseOrigin$path${if (rawQuery != null) "?$rawQuery" else ""}".toHttpUrl()
                     val canonical = TimeMoviesCrypto.buildCanonicalV47SigningPayload(
-                        method = method,
+                        method = req.method,
                         url = fullUrl,
                         timestamp = tStr,
                         nonce = n,
-                        rawBody = reqBody,
+                        rawBody = req.body,
                         authToken = xt,
                         profileId = xp,
                         maturity = ma,
                         deviceKeyId = dk,
                     )
                     if (pk == null || !TimeMoviesCrypto.verifyEcdsaSha256DerB64Url(pk, canonical.toByteArray(), ds)) {
-                        respondJson(ex, 401, """{"status":0,"message":"Request verification failed."}""", nowServer)
-                        return@createContext
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
 
-                    // Simulate transient verification rejection on attempt 1 to verify automatic re-enroll & retry!
+                    // Inject stale-dk verification failure on attempt 1 to prove automatic recovery!
                     if (attempt == 1) {
                         enrolledKeys.remove(dk)
-                        respondJson(ex, 401, """{"status":0,"message":"Request verification failed."}""", nowServer)
-                        return@createContext
+                        return@MiniHttpServer jsonResp(401, """{"success":false,"message":"Request verification failed."}""", nowServer)
                     }
 
-                    val otpObj = JSONObject(reqBody)
+                    val otpObj = JSONObject(req.body)
                     assertEquals("654321", otpObj.getString("otp"))
-                    // Return non-JWT `"OK"` string in `result` to verify `pendingToken` is preserved!
-                    respondJson(ex, 200, """{"status":1,"message":"Activated","result":"OK"}""", nowServer)
+                    jsonResp(200, """{"success":true,"status":200,"message":"Activated","result":"OK"}""", nowServer)
                 }
 
                 path.endsWith(TimeMoviesApi.PATH_APP_DATA) -> {
                     val activatedJwt = makeTestJwt("usr_mehdi_1", "mehdi@gmail.com", TimeMoviesPrefs.deviceId, "sid_live")
                     val resp = JSONObject().apply {
-                        put("status", 1)
+                        put("success", true)
+                        put("status", 200)
                         put(
                             "result",
                             JSONObject().apply {
@@ -277,22 +373,25 @@ class TimeMoviesUnitTest {
                             },
                         )
                     }.toString()
-                    respondJson(ex, 200, resp, nowServer)
+                    jsonResp(200, resp, nowServer)
                 }
 
-                else -> respondJson(ex, 404, """{"status":0}""", nowServer)
+                else -> jsonResp(404, """{"success":false}""", nowServer)
             }
-        }
-        server.start()
+        }.use { server ->
+            baseOrigin = server.baseOrigin
+            TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
+            TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
+            TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
+            TimeMoviesPrefs.profileId = "stale_profile_from_old_account"
+            TimeMoviesPrefs.profileMaturity = 3
 
-        try {
             val signUpRes = TimeMoviesApi.signUpWithEmail("", "mehdi@gmail.com", "StrongPass123")
             assertTrue("Sign-up must succeed", signUpRes.success)
             assertEquals("Default/example name must be Mehdi", "Mehdi", capturedSignUpName)
             assertTrue(Regex("^[0-9a-f]{32}$").matches(capturedSignUpRasplabId.orEmpty()))
             assertNotNull(TimeMoviesPrefs.pendingOtpToken)
 
-            // Activate using Arabic-Indic digits `"٦٥٤٣٢١"` while server is skewed +300s & forces retry!
             val otpRes = TimeMoviesApi.activateEmailOtp("٦٥٤-٣٢١")
             assertTrue("OTP activation failed: ${otpRes.message}", otpRes.success)
             assertEquals(2, otpAttempts.get())
@@ -300,46 +399,26 @@ class TimeMoviesUnitTest {
             assertTrue(TimeMoviesApi.looksLikeJwt(TimeMoviesPrefs.authToken))
             assertEquals("prof_mehdi_main", TimeMoviesPrefs.profileId)
             assertEquals("Mehdi", TimeMoviesPrefs.profileName)
-        } finally {
-            server.stop(0)
         }
     }
 
     @Test
     fun testEndToEndInternalOriginWatchAndDownloadLinksAndSubtitles() = runBlocking {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        val port = server.address.port
-        val baseOrigin = "http://127.0.0.1:$port"
-        TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
-        TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
-        TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
-
-        val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
-        TimeMoviesPrefs.authToken = makeTestJwt("usr_1", "mehdi@gmail.com", dev.deviceId)
-        TimeMoviesPrefs.profileId = "prof_1"
-        TimeMoviesPrefs.profileMaturity = 5
-
         val postToMediaV2Detected = AtomicInteger(0)
+        lateinit var baseOrigin: String
 
-        server.createContext("/") { ex ->
-            val path = ex.requestURI.path
-            val method = ex.requestMethod
-            val reqBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
-
+        MiniHttpServer { req ->
             when {
-                path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) -> {
-                    respondJson(ex, 200, """{"status":1,"result":{"v":1092}}""")
-                }
+                req.path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":{"v":1092}}""")
 
-                path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) -> {
-                    respondJson(ex, 200, """{"status":1,"result":{"cid":"cid_1","ch":"ch_1","exp":9999999999}}""")
-                }
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":{"cid":"cid_1","ch":"ch_1","exp":9999999999}}""")
 
-                path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) -> {
-                    respondJson(ex, 200, """{"status":1,"result":{"dk":"dk_live_1","alg":"ECDSA_SHA256_DER","st":1}}""")
-                }
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
+                    jsonResp(200, """{"success":true,"status":200,"result":{"dk":"dk_live_1","alg":"ECDSA_SHA256_DER","st":1}}""")
 
-                path.endsWith(TimeMoviesApi.PATH_WORK_DETAILS) -> {
+                req.path.endsWith(TimeMoviesApi.PATH_WORK_DETAILS) -> {
                     val wk = JSONObject().apply {
                         put("_id", "wk_movie_99")
                         put("ism", true)
@@ -347,21 +426,19 @@ class TimeMoviesUnitTest {
                         put("tlr", "بين النجوم")
                         put("fc", "fc_interstellar_2014")
                     }
-                    respondJson(ex, 200, JSONObject().put("status", 1).put("result", wk).toString())
+                    jsonResp(200, JSONObject().put("success", true).put("result", wk).toString())
                 }
 
-                path.endsWith("/media/grant") -> {
-                    // Must carry ECDSA headers + active profile headers
-                    assertNotNull(ex.requestHeaders.getFirst("dk"))
-                    assertNotNull(ex.requestHeaders.getFirst("ds"))
-                    assertEquals("prof_1", ex.requestHeaders.getFirst("x-p"))
-                    val body = JSONObject(reqBody)
+                req.path.endsWith("/media/grant") -> {
+                    assertNotNull(req.header("dk"))
+                    assertNotNull(req.header("ds"))
+                    assertEquals("prof_1", req.header("x-p"))
+                    val body = JSONObject(req.body)
                     assertEquals("com.extremeqr.proapps", body.getString("package"))
                     assertEquals("fc_interstellar_2014", body.getString("file_code"))
                     val action = body.getString("action")
                     val grantTok = if (action == "watch") "grant_watch_tok" else "grant_dl_tok"
-                    respondJson(
-                        ex,
+                    jsonResp(
                         200,
                         JSONObject().apply {
                             put("ok", true)
@@ -372,17 +449,15 @@ class TimeMoviesUnitTest {
                     )
                 }
 
-                path == "/v2/media/manifest" -> {
-                    if (method != "GET") {
+                req.path == "/v2/media/manifest" -> {
+                    if (req.method != "GET") {
                         postToMediaV2Detected.incrementAndGet()
-                        respondJson(ex, 404, """{"error":"Cannot POST /v2/media/manifest"}""")
-                        return@createContext
+                        return@MiniHttpServer jsonResp(404, """{"error":"Cannot POST /v2/media/manifest"}""")
                     }
-                    assertEquals("grant_watch_tok", ex.requestHeaders.getFirst("X-Media-Grant"))
-                    assertEquals("1092", ex.requestHeaders.getFirst("x-b"))
-                    assertEquals("prof_1", ex.requestHeaders.getFirst("x-p"))
-                    respondJson(
-                        ex,
+                    assertEquals("grant_watch_tok", req.header("X-Media-Grant"))
+                    assertEquals("1092", req.header("x-b"))
+                    assertEquals("prof_1", req.header("x-p"))
+                    jsonResp(
                         200,
                         JSONObject().apply {
                             put("ok", true)
@@ -392,13 +467,12 @@ class TimeMoviesUnitTest {
                     )
                 }
 
-                path == "/v2/media/download" -> {
-                    if (method != "GET") {
+                req.path == "/v2/media/download" -> {
+                    if (req.method != "GET") {
                         postToMediaV2Detected.incrementAndGet()
-                        respondJson(ex, 404, """{"error":"Cannot POST /v2/media/download"}""")
-                        return@createContext
+                        return@MiniHttpServer jsonResp(404, """{"error":"Cannot POST /v2/media/download"}""")
                     }
-                    assertEquals("grant_dl_tok", ex.requestHeaders.getFirst("X-Media-Grant"))
+                    assertEquals("grant_dl_tok", req.header("X-Media-Grant"))
                     val sources = JSONArray().apply {
                         put(
                             JSONObject().apply {
@@ -417,14 +491,10 @@ class TimeMoviesUnitTest {
                             },
                         )
                     }
-                    respondJson(
-                        ex,
-                        200,
-                        JSONObject().put("ok", true).put("sources", sources).toString(),
-                    )
+                    jsonResp(200, JSONObject().put("ok", true).put("sources", sources).toString())
                 }
 
-                path == "/cdn/hls/interstellar/master.m3u8" -> {
+                req.path == "/cdn/hls/interstellar/master.m3u8" -> {
                     val m3u8 = """
                         #EXTM3U
                         #EXT-X-VERSION:3
@@ -435,19 +505,24 @@ class TimeMoviesUnitTest {
                         #EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720,SUBTITLES="subs"
                         720p/index.m3u8
                     """.trimIndent()
-                    respondText(ex, 200, "application/vnd.apple.mpegurl", m3u8)
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
                 }
 
-                else -> respondJson(ex, 404, """{"ok":false}""")
+                else -> jsonResp(404, """{"ok":false}""")
             }
-        }
-        server.start()
+        }.use { server ->
+            baseOrigin = server.baseOrigin
+            TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
+            TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
+            TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
 
-        try {
+            val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+            TimeMoviesPrefs.authToken = makeTestJwt("usr_1", "mehdi@gmail.com", dev.deviceId)
+            TimeMoviesPrefs.profileId = "prof_1"
+            TimeMoviesPrefs.profileMaturity = 5
+
             val links = ArrayList<ExtractorLink>()
             val subs = ArrayList<SubtitleFile>()
-
-            // Pass blank `fileCode` initially to verify `loadLinks` recovers `fc` via `getWorkDetails`!
             val linkData = TimeMoviesModels.LinkPayload(
                 workId = "wk_movie_99",
                 fileCode = "",
@@ -478,65 +553,47 @@ class TimeMoviesUnitTest {
             assertTrue(mp4Links.any { it.quality == 720 && it.url.endsWith("interstellar_720p.mp4") })
             assertEquals("Expected Arabic + English HLS subtitle tracks", 2, subs.size)
             assertTrue(subs.any { it.lang.contains("العربية") && it.url.contains("subs/ar.vtt?sig=tok123") })
-        } finally {
-            server.stop(0)
         }
     }
 
     @Test
     fun testEndToEndExternalDoomPlayerFallbackWithExtensionlessHlsAndExecutionRetry() = runBlocking {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        val port = server.address.port
-        val baseOrigin = "http://127.0.0.1:$port"
-        TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
-        TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
-        TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
-
-        val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
-        TimeMoviesPrefs.authToken = makeTestJwt("usr_2", "mehdi2@gmail.com", dev.deviceId)
-        TimeMoviesPrefs.profileId = "prof_2"
-        TimeMoviesPrefs.profileMaturity = 5
-
         val externalWatchAttempts = AtomicInteger(0)
+        lateinit var baseOrigin: String
 
-        server.createContext("/") { ex ->
-            val path = ex.requestURI.path
-            val reqBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
-
+        MiniHttpServer { req ->
             when {
-                path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
-                    respondJson(ex, 200, """{"status":1,"result":{"v":1092}}""")
+                req.path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"result":{"v":1092}}""")
 
-                path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) ->
-                    respondJson(ex, 200, """{"status":1,"result":{"cid":"c2","ch":"h2","exp":9999999999}}""")
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_CHALLENGE) ->
+                    jsonResp(200, """{"success":true,"result":{"cid":"c2","ch":"h2","exp":9999999999}}""")
 
-                path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
-                    respondJson(ex, 200, """{"status":1,"result":{"dk":"dk_2","alg":"ECDSA_SHA256_DER","st":1}}""")
+                req.path.endsWith(TimeMoviesApi.PATH_DEVICE_REGISTER) ->
+                    jsonResp(200, """{"success":true,"result":{"dk":"dk_2","alg":"ECDSA_SHA256_DER","st":1}}""")
 
-                path.endsWith("/media/grant") -> {
-                    val body = JSONObject(reqBody)
+                req.path.endsWith("/media/grant") -> {
+                    val body = JSONObject(req.body)
                     val action = body.getString("action")
                     val playerInstalled = body.optBoolean("player_installed", false)
                     val executorTarget = body.optString("executor_target", "")
 
-                    // Internal mode refused -> forces fallback to External DoomVideoPlayer mode!
                     if (!playerInstalled || executorTarget != "external") {
-                        respondJson(ex, 200, """{"ok":false,"reason":"player_not_installed","charged":false}""")
-                        return@createContext
+                        return@MiniHttpServer jsonResp(200, """{"ok":false,"reason":"player_not_installed","charged":false}""")
                     }
 
                     if (action == "watch") {
                         val att = externalWatchAttempts.incrementAndGet()
                         if (att == 1) {
-                            // Simulate ExecutionFailed with `operation_id` to verify idempotent retry!
-                            respondJson(ex, 200, """{"ok":false,"reason":"origin_unreachable","operation_id":"op_retry_1","charged":true}""")
-                            return@createContext
+                            return@MiniHttpServer jsonResp(
+                                200,
+                                """{"ok":false,"reason":"origin_unreachable","operation_id":"op_retry_1","charged":true}""",
+                            )
                         }
                         assertEquals("op_retry_1", body.optString("operation_id"))
                         val inner = "${URLEncoder.encode("enc_watch_ticket_99", "UTF-8")}/${URLEncoder.encode("Dune Part Two", "UTF-8")}/prof_2/wk_55/@/0"
                         val b64 = TimeMoviesCrypto.base64UrlEncodeNoPad(inner.toByteArray())
-                        respondJson(
-                            ex,
+                        jsonResp(
                             200,
                             JSONObject().apply {
                                 put("ok", true)
@@ -554,8 +611,7 @@ class TimeMoviesUnitTest {
                     } else {
                         val dlInner = "${URLEncoder.encode("enc_dl_ticket_1080", "UTF-8")}/${URLEncoder.encode("Dune 1080p", "UTF-8")}/prof_2/wk_55/@/0"
                         val dlB64 = TimeMoviesCrypto.base64UrlEncodeNoPad(dlInner.toByteArray())
-                        respondJson(
-                            ex,
+                        jsonResp(
                             200,
                             JSONObject().apply {
                                 put("ok", true)
@@ -573,30 +629,21 @@ class TimeMoviesUnitTest {
                     }
                 }
 
-                path == "/api/player/v1.6/app/resolve-play" -> {
-                    assertEquals("1065", ex.requestHeaders.getFirst("x-b"))
-                    assertEquals("6a5216d91e12eeadc194ab91", ex.requestHeaders.getFirst("ai"))
-                    val src = JSONObject(reqBody).getString("src")
+                req.path == "/api/player/v1.6/app/resolve-play" -> {
+                    assertEquals("1065", req.header("x-b"))
+                    assertEquals("6a5216d91e12eeadc194ab91", req.header("ai"))
+                    val src = JSONObject(req.body).getString("src")
                     assertEquals("enc_watch_ticket_99", src)
-                    // Extensionless HLS URL (no `.m3u8` in URL path, matching `PlayerScreenKt`!)
-                    respondJson(
-                        ex,
-                        200,
-                        """{"status":1,"result":{"url":"$baseOrigin/cdn/live/dune_stream_token_xyz"}}""",
-                    )
+                    jsonResp(200, """{"success":true,"status":200,"result":{"url":"$baseOrigin/cdn/live/dune_stream_token_xyz"}}""")
                 }
 
-                path == "/api/player/v1.6/app/resolve-download" -> {
-                    val src = JSONObject(reqBody).getString("src")
+                req.path == "/api/player/v1.6/app/resolve-download" -> {
+                    val src = JSONObject(req.body).getString("src")
                     assertEquals("enc_dl_ticket_1080", src)
-                    respondJson(
-                        ex,
-                        200,
-                        """{"status":1,"result":{"url":"$baseOrigin/cdn/dl/dune_1080p.mp4"}}""",
-                    )
+                    jsonResp(200, """{"success":true,"status":200,"result":{"url":"$baseOrigin/cdn/dl/dune_1080p.mp4"}}""")
                 }
 
-                path == "/cdn/live/dune_stream_token_xyz" -> {
+                req.path == "/cdn/live/dune_stream_token_xyz" -> {
                     val m3u8 = """
                         #EXTM3U
                         #EXT-X-VERSION:3
@@ -604,15 +651,22 @@ class TimeMoviesUnitTest {
                         #EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,SUBTITLES="subs"
                         v1080/prog.m3u8
                     """.trimIndent()
-                    respondText(ex, 200, "application/x-mpegURL", m3u8)
+                    MiniResponse(200, "application/x-mpegURL", m3u8)
                 }
 
-                else -> respondJson(ex, 404, """{"status":0}""")
+                else -> jsonResp(404, """{"success":false}""")
             }
-        }
-        server.start()
+        }.use { server ->
+            baseOrigin = server.baseOrigin
+            TimeMoviesPrefs.apiBaseUrlOverride = "$baseOrigin/api/v4.7/app/"
+            TimeMoviesPrefs.mediaV2BaseUrlOverride = "$baseOrigin/v2/media/"
+            TimeMoviesPrefs.doomBaseUrlOverride = "$baseOrigin/api/player/v1.6/app/"
 
-        try {
+            val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+            TimeMoviesPrefs.authToken = makeTestJwt("usr_2", "mehdi2@gmail.com", dev.deviceId)
+            TimeMoviesPrefs.profileId = "prof_2"
+            TimeMoviesPrefs.profileMaturity = 5
+
             val links = ArrayList<ExtractorLink>()
             val subs = ArrayList<SubtitleFile>()
             val payload = TimeMoviesModels.LinkPayload(
@@ -640,8 +694,6 @@ class TimeMoviesUnitTest {
             assertEquals("Expected resolved DoomPlayer MP4 download link", 1, videoLinks.size)
             assertEquals("$baseOrigin/cdn/dl/dune_1080p.mp4", videoLinks[0].url)
             assertEquals(1, subs.size)
-        } finally {
-            server.stop(0)
         }
     }
 
@@ -680,10 +732,7 @@ class TimeMoviesUnitTest {
         assertTrue(ast.has("v") || ast.has("m") || ast.length() >= 0)
         assertTrue("Clock offset must be persisted after live response", TimeMoviesPrefs.hasPersistedClockOffset)
 
-        // 1. Live VirtualDeviceProfile + "Mehdi" Sign-Up validation against production `api.apks.lol`:
-        //    Reaching email-domain check (HTTP 200, status=0, code=502) proves live acceptance of:
-        //    - `q52` headers + synced server timestamp `t` (no HTTP 401 "Request verification failed.")
-        //    - 32-field synthetic `UserDevice` + `rasplab_install_id` (no HTTP 400 schema error & no device ban!)
+        // 1. Live VirtualDeviceProfile + "Mehdi" Sign-Up validation against production `api.apks.lol`
         val signUpProbe = TimeMoviesApi.signUpWithEmail("Mehdi", "mehdi.v2.check@mailinator.com", "MehdiPass2026!")
         assertNotNull(signUpProbe.message)
         assertFalse(
@@ -691,8 +740,7 @@ class TimeMoviesUnitTest {
             signUpProbe.message.orEmpty().contains("Request verification failed", ignoreCase = true),
         )
 
-        // 2. Live `GET /v2/media/manifest` & `GET /v2/media/download` route verification on `api.apks.lol`:
-        //    Proves `GET` hits the real MediaV2 JSON controller (unlike v1's `POST` which hit Express 404 `Cannot POST`)!
+        // 2. Live `GET /v2/media/manifest` & `GET /v2/media/download` route verification on `api.apks.lol`
         for (mediaPath in listOf("manifest", "download")) {
             val mediaReq = okhttp3.Request.Builder()
                 .url("${TimeMoviesCrypto.MEDIA_V2_BASE_URL}$mediaPath")
@@ -713,7 +761,7 @@ class TimeMoviesUnitTest {
             }
         }
 
-        // 3. Live `DoomVideoPlayer` v1.6 `resolve-play` & `resolve-download` route verification (`1065` / `6a5216d91e12eeadc194ab91`)
+        // 3. Live `DoomVideoPlayer` v1.6 `resolve-play` & `resolve-download` route verification
         for (doomEndpoint in listOf("resolve-play", "resolve-download")) {
             val reqBody = okhttp3.RequestBody.create(
                 null,
