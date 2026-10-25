@@ -233,8 +233,11 @@ object CimaNowGatewaySolver {
                 var lastTsTapMs = 0L
                 var lastBtnTapMs = 0L
 
+                // Let initial gateway redirects + Turnstile bootstrap run undisturbed first
+                delay(2_500L)
+
                 while (!deferred.isCompleted) {
-                    delay(450L)
+                    delay(500L)
                     if (deferred.isCompleted) break
 
                     val elapsedMs = SystemClock.uptimeMillis() - startedMs
@@ -246,7 +249,7 @@ object CimaNowGatewaySolver {
                                 return@withContext "DONE"
                             }
                         }
-                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(elapsedMs >= 10_500L, elapsedMs >= 4_500L))
+                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(elapsedMs >= 11_000L, elapsedMs >= 6_500L))
                     }
 
                     if (deferred.isCompleted || probeResult == "DONE") break
@@ -319,15 +322,13 @@ object CimaNowGatewaySolver {
                 try {
                     var loc = String(location.href || '');
                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
-                    var tsInput = document.querySelector('input[name="cf-turnstile-response"]');
-                    var tsSolved = !!(tsInput && tsInput.value && tsInput.value.length > 20);
                     var btn = document.getElementById('downloadbtn');
+                    var h = btn ? String(btn.getAttribute('href') || '') : '';
                     if (btn) {
-                        var h = String(btn.getAttribute('href') || '');
                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) {
                             return 'URL:' + h;
                         }
-                        if (h === '#watch-ready' || ($forceFlag && tsSolved && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
+                        if (h === '#watch-ready' || ($forceFlag && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
                             if (btn.hidden || getComputedStyle(btn).display === 'none') {
                                 btn.removeAttribute('hidden');
                                 btn.style.setProperty('display', 'inline-block', 'important');
@@ -339,7 +340,7 @@ object CimaNowGatewaySolver {
                             }
                         }
                     }
-                    if ($tsTapFlag && !tsSolved) {
+                    if ($tsTapFlag && h !== '#watch-ready') {
                         var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
                         if (ts) {
                             var tr = ts.getBoundingClientRect();
@@ -476,14 +477,22 @@ object CimaNowGatewaySolver {
                     let id = 1;
                     const pending = new Map();
                     let getLinkReqId = '';
+                    let getLinkDone = false;
                     let minted = '';
+                    const diag = [];
                     ws.onmessage = ev => {
                         const m = JSON.parse(ev.data);
                         if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
                         if (m.method === 'Network.requestWillBeSent') {
                             const u = m.params.request.url || '';
-                            if (u.includes('get-link.php')) getLinkReqId = m.params.requestId;
+                            if (u.includes('get-link.php')) {
+                                getLinkReqId = m.params.requestId;
+                                diag.push('req:get-link');
+                            }
                             if (u.includes('/watching/') && u.includes('token=')) minted = u;
+                        }
+                        if (m.method === 'Network.loadingFinished' && getLinkReqId && m.params.requestId === getLinkReqId) {
+                            getLinkDone = true;
                         }
                     };
                     const send = (method, params = {}) => new Promise(r => { const cid = id++; pending.set(cid, r); ws.send(JSON.stringify({ id: cid, method, params })); });
@@ -492,7 +501,6 @@ object CimaNowGatewaySolver {
                     await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
                     let lastTsClick = 0, lastBtnClick = 0;
-                    const diag = [];
                     const tap = async (x, y) => {
                         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
                         await new Promise(r => setTimeout(r, 60));
@@ -500,7 +508,7 @@ object CimaNowGatewaySolver {
                     };
                     for (let ms = 0; ms < 28000; ms += 500) {
                         await new Promise(r => setTimeout(r, 500));
-                        if (getLinkReqId && !minted) {
+                        if (getLinkReqId && (getLinkDone || ms >= 9000) && !minted) {
                             const rb = await send('Network.getResponseBody', { requestId: getLinkReqId });
                             if (rb && rb.result && rb.result.body) {
                                 const txt = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
@@ -508,21 +516,22 @@ object CimaNowGatewaySolver {
                                 try { const j = JSON.parse(txt); if (j && j.url) minted = j.url; } catch(e) { if (txt.trim().startsWith('http')) minted = txt.trim(); }
                             }
                         }
-                        if (minted) return cleanup({ url: minted, diag });
-                        const allowTs = ms >= 4500 ? 'true' : 'false';
-                        const forceBtn = ms >= 11500 ? 'true' : 'false';
+                        if (minted) {
+                            try { await send('Browser.close'); } catch(e) {}
+                            return cleanup({ url: minted, diag });
+                        }
+                        // Avoid any CDP Runtime.evaluate during the first 11.5s so Turnstile solves undisturbed!
+                        if (ms < 11500) continue;
                         const probe = await send('Runtime.evaluate', {
                             expression: `(function(){
                                 try {
                                     var loc = String(location.href || '');
                                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
-                                    var tsInput = document.querySelector('input[name="cf-turnstile-response"]');
-                                    var tsSolved = !!(tsInput && tsInput.value && tsInput.value.length > 20);
                                     var btn = document.getElementById('downloadbtn');
+                                    var h = btn ? String(btn.getAttribute('href') || '') : '';
                                     if (btn) {
-                                        var h = String(btn.getAttribute('href') || '');
                                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
-                                        if (h === '#watch-ready' || (` + forceBtn + ` && tsSolved && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
+                                        if (h === '#watch-ready' || (h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
                                             if (btn.hidden || getComputedStyle(btn).display === 'none') {
                                                 btn.removeAttribute('hidden');
                                                 btn.style.setProperty('display', 'inline-block', 'important');
@@ -532,7 +541,7 @@ object CimaNowGatewaySolver {
                                             if (br.width > 4 && br.height > 4) return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2);
                                         }
                                     }
-                                    if (` + allowTs + ` && !tsSolved) {
+                                    if (h !== '#watch-ready') {
                                         var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
                                         if (ts) {
                                             ts.scrollIntoView({block:'center', inline:'center'});
@@ -542,7 +551,7 @@ object CimaNowGatewaySolver {
                                             }
                                         }
                                     }
-                                    return 'WAIT:solved=' + tsSolved + ',loc=' + loc.slice(0, 45);
+                                    return 'WAIT:h=' + h + ',loc=' + loc.slice(0, 45);
                                 } catch(e) { return 'ERR:' + e.message; }
                             })()`,
                             returnByValue: true
@@ -550,6 +559,7 @@ object CimaNowGatewaySolver {
                         const pv = (probe && probe.result && probe.result.result && probe.result.result.value) ? String(probe.result.result.value) : '';
                         if (ms % 3000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
+                            try { await send('Browser.close'); } catch(e) {}
                             return cleanup({ url: pv.slice(4), diag });
                         } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 2000) {
                             lastBtnClick = ms;
@@ -561,6 +571,7 @@ object CimaNowGatewaySolver {
                             if (tx > 0 && ty > 0) await tap(tx, ty);
                         }
                     }
+                    try { await send('Browser.close'); } catch(e) {}
                     cleanup({ url: minted, diag });
                 })().catch(e => cleanup({ url: '', diag: ['catch:' + (e && e.message)] }));
             """.trimIndent()
@@ -579,7 +590,7 @@ object CimaNowGatewaySolver {
                 val obj = CimaNowCrypto.safeJsonObject(jsonText)
                 val minted = obj?.optString("url")?.trim()?.takeIf { isMintedWatchingUrl(it) }
                 if (minted == null) {
-                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(260)}")
+                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(1200)}")
                 }
                 minted
             } catch (_: Throwable) {
