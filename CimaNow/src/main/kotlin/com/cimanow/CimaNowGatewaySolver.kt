@@ -521,6 +521,7 @@ object CimaNowGatewaySolver {
                     const pending = new Map();
                     let getLinkReqId = '';
                     let getLinkDone = false;
+                    let blogReqId = '';
                     let minted = '';
                     const diag = [];
                     ws.onmessage = ev => {
@@ -531,6 +532,9 @@ object CimaNowGatewaySolver {
                             if (u.includes('get-link.php')) {
                                 getLinkReqId = m.params.requestId;
                                 diag.push('req:get-link');
+                            }
+                            if (u.includes('blog-post.html') && !u.includes('get-link')) {
+                                blogReqId = m.params.requestId;
                             }
                             if (u.includes('/watching/') && u.includes('token=')) minted = u;
                         }
@@ -547,7 +551,6 @@ object CimaNowGatewaySolver {
                     const send = (method, params = {}) => new Promise(r => { const cid = id++; pending.set(cid, r); ws.send(JSON.stringify({ id: cid, method, params })); });
                     await send('Page.enable');
                     await send('Network.enable');
-                    await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
                     let lastTsClick = 0, lastBtnClick = 0, firstBtnMs = 0;
                     const tap = async (x, y) => {
@@ -660,6 +663,25 @@ object CimaNowGatewaySolver {
                             }
                         }
                     }
+                    if (!minted && blogReqId) {
+                        try {
+                            const brb = await send('Network.getResponseBody', { requestId: blogReqId });
+                            if (brb && brb.result && typeof brb.result.body === 'string') {
+                                const btxt = brb.result.base64Encoded ? Buffer.from(brb.result.body, 'base64').toString('utf8') : brb.result.body;
+                                diag.push('blogRawLen=' + btxt.length + ',head=' + btxt.slice(0, 220));
+                                const em = btxt.match(/var e=\[([0-9,\s]+)\],k=(\d+),d='';for\(var i=0;i<e\.length;i\+\+\)\{d\+=String\.fromCharCode\(e\[i\]\^\(\(k\+\(i\*(\d+)\)\)&255\)\)/);
+                                if (em) {
+                                    const arr = em[1].split(',').map(Number);
+                                    const k = Number(em[2]), st = Number(em[3]);
+                                    let dec = '';
+                                    for (let i = 0; i < arr.length; i++) dec += String.fromCharCode(arr[i] ^ ((k + i * st) & 255));
+                                    diag.push('decStageA=' + dec.slice(0, 700) + ' || TAIL=' + dec.slice(-700));
+                                }
+                            } else {
+                                diag.push('blogRawErr=' + JSON.stringify(brb).slice(0, 180));
+                            }
+                        } catch(e) { diag.push('blogEx=' + e.message); }
+                    }
                     cleanup({ url: minted, diag });
                 })().catch(e => cleanup({ url: '', diag: ['catch:' + (e && e.message)] }));
             """.trimIndent()
@@ -678,7 +700,7 @@ object CimaNowGatewaySolver {
                 val obj = CimaNowCrypto.safeJsonObject(jsonText)
                 val minted = obj?.optString("url")?.trim()?.takeIf { isMintedWatchingUrl(it) }
                 if (minted == null) {
-                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(1200)}")
+                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(3500)}")
                 }
                 minted
             } catch (_: Throwable) {
