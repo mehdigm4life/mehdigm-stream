@@ -535,7 +535,7 @@ object CimaNowGatewaySolver {
                 tmpJs.writeText(script, Charsets.UTF_8)
                 val p = ProcessBuilder(nodeBin, tmpJs.absolutePath)
                     .redirectErrorStream(true)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectOutput(File("/dev/null"))
                     .start()
                 val finished = p.waitFor(42L, TimeUnit.SECONDS)
                 if (!finished) {
