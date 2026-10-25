@@ -102,7 +102,6 @@ class CimaNowLiveE2ETest {
         val firstCard = fm.items.firstOrNull()?.list?.firstOrNull() ?: return@runBlocking
         val detailPage = CimaNowNetwork.getPage(firstCard.url, "${CimaNowNetwork.mainUrl}/home/") ?: return@runBlocking
         val shine = CimaNowExtractors.extractShineUrlFromDetailHtml(detailPage.html) ?: return@runBlocking
-        println("[DIAG] card=${firstCard.name} shine=$shine")
 
         CimaNowNetwork.withStickySession { session ->
             val pTag = session.proxySpec ?: "direct"
@@ -111,85 +110,35 @@ class CimaNowLiveE2ETest {
 
             val hop1 = session.getNoRedirect(shine, detailPage.finalUrl)
             if (hop1 == null || hop1.code !in 200..399) return@withStickySession null
-            println("[DIAG][$pTag] HOP1_BODY:\n${hop1.body}")
-
-            val hop2Url = "$gwOrigin/redirectingfree/"
-            val hop2 = session.getNoRedirect(hop2Url, shine)
+            val hop2 = session.getNoRedirect("$gwOrigin/redirectingfree/", shine)
             if (hop2 == null || hop2.code !in 200..399) return@withStickySession null
-            println("[DIAG][$pTag] HOP2_BODY:\n${hop2.body}")
 
             val vaultUrl = "$gwOrigin/2020/02/blog-post.html/"
-            val hop3 = session.getText(vaultUrl, hop2Url)
+            val hop3 = session.getText(vaultUrl, "$gwOrigin/redirectingfree/")
             val vaultHtml = hop3?.second.orEmpty()
             if (vaultHtml.length < 200) return@withStickySession null
 
-            println("[DIAG][$pTag] VAULT_HEAD_1200:\n${vaultHtml.take(1200)}")
-            println("[DIAG][$pTag] VAULT_TAIL_5000:\n${vaultHtml.takeLast(5000)}")
+            // Inspect structure of vaultHtml outside huge literals
+            val compactedHtml = vaultHtml
+                .replace(Regex("""\[[0-9,\s]{2000,}\]""")) { "<INT_ARRAY chars=${it.value.length}>" }
+                .replace(Regex("""\[(?:\s*"[A-Za-z0-9+/=]+"\s*,?)+\]""")) { "<B64_ARRAY chars=${it.value.length}>" }
+            println("[DIAG][$pTag] COMPACTED_VAULT_HTML (len=${compactedHtml.length}):\n${compactedHtml.take(12000)}")
 
-            // Extract ch, ri, ke, se directly from vaultHtml (supporting unquoted or quoted keys!)
-            val mapBlock = Regex("""window\.map_[A-Za-z0-9_]+\s*=\s*\{([^}]+)\}""").find(vaultHtml)?.groupValues?.get(1)
-            println("[DIAG][$pTag] direct mapBlock=$mapBlock")
-            var postBody: String? = null
-            if (mapBlock != null) {
-                fun prop(k: String) = Regex("""['"]?""" + Regex.escape(k) + """['"]?\s*:\s*['"]([^'"]+)['"]""").find(mapBlock)?.groupValues?.get(1)
-                fun lookup(v: String) = Regex("""['"]?""" + Regex.escape(v) + """['"]?\s*:\s*['"]([^'"]+)['"]""").find(vaultHtml)?.groupValues?.get(1)
-                val ch = prop("ch")?.let(::lookup)
-                val ri = prop("ri")?.let(::lookup)
-                val ke = prop("ke")?.let(::lookup)
-                val se = prop("se")?.let(::lookup)
-                println("[DIAG][$pTag] extracted ch=$ch ri=$ri ke=$ke se=$se")
-                if (ch != null && ri != null && ke != null && se != null) {
-                    val keBytes = CimaNowCrypto.b64Decode(ke)
-                    val seBytes = se.toByteArray(Charsets.UTF_8)
-                    val secretBytes = ByteArray(keBytes.size) { idx -> (keBytes[idx].toInt() xor seBytes[idx % seBytes.size].toInt()).toByte() }
-                    val fp = "TW96aWxsYS81LjQ4"
-                    val mac = javax.crypto.Mac.getInstance("HmacSHA256")
-                    mac.init(javax.crypto.spec.SecretKeySpec(secretBytes, "HmacSHA256"))
-                    val hmacB64 = CimaNowCrypto.b64EncodeNoWrap(mac.doFinal((ri + ch + fp).toByteArray(Charsets.UTF_8)))
-                    fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
-                    postBody = "request_id=${enc(ri)}&hmac_token=${enc(hmacB64)}&ch=${enc(ch)}&fp=${enc(fp)}"
+            // Decode ALL `e=[...],k=...,d=''` blocks in vaultHtml!
+            val eRegex = Regex("""e\s*=\s*\[([0-9,\s]+)\]\s*,\s*k\s*=\s*(\d+)\s*,\s*d\s*=\s*['"]{2};\s*for\s*\([^)]*\)\s*\{\s*d\s*\+=\s*String\.fromCharCode\(e\[i\]\s*\^\s*\(\(k\s*\+\s*\(i\s*\*\s*(\d+)\)\)\s*&\s*255\)\)""")
+            val matches = eRegex.findAll(vaultHtml).toList()
+            println("[DIAG][$pTag] Found ${matches.size} rolling-XOR e[] blocks")
+            matches.forEachIndexed { idx, m ->
+                val nums = m.groupValues[1].split(',').mapNotNull { it.trim().toIntOrNull() }
+                val k = m.groupValues[2].toInt()
+                val step = m.groupValues[3].toInt()
+                val sb = StringBuilder(nums.size)
+                for (ii in nums.indices) {
+                    sb.append((nums[ii] xor ((k + ii * step) and 255)).toChar())
                 }
-            }
-
-            if (postBody != null) {
-                println("[DIAG][$pTag] Waiting 10.4s then POSTing get-link.php with body=$postBody")
-                kotlinx.coroutines.delay(10_400L)
-                val mRes = session.postForm(
-                    url = "${vaultUrl.trimEnd('/')}/get-link.php",
-                    rawFormBody = postBody,
-                    referer = vaultUrl,
-                    origin = gwOrigin,
-                    extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-                )
-                println("[DIAG][$pTag] get-link.php -> code=${mRes?.first} body='${mRes?.second?.take(400)}'")
-                val mintedUrl = mRes?.second?.trim().orEmpty()
-                if (mintedUrl.startsWith("http")) {
-                    val wRes = session.getText(mintedUrl, vaultUrl)
-                    val wCode = wRes?.first ?: 0
-                    val watchHtml = wRes?.second.orEmpty()
-                    println("[DIAG][$pTag] watching -> code=$wCode len=${watchHtml.length} blocked=${CimaNowNetwork.isCimaBlocked(wCode, watchHtml)}")
-                    val outerDoc = org.jsoup.Jsoup.parse(watchHtml)
-                    outerDoc.select("script").forEachIndexed { idx, s ->
-                        val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
-                        println("[DIAG][$pTag] WATCH_SCRIPT[$idx] id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} head='${s.data().take(200).replace("\n", " ")}'")
-                    }
-                    val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml)
-                    println("[DIAG][$pTag] decodeWatchingVault -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(30)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads}")
-
-                    val gEl = outerDoc.select("script").firstOrNull { s ->
-                        s.data().isNotBlank() && s.attributes().any { a -> a.value.length > 200 }
-                    }
-                    if (gEl != null) {
-                        val rawG = gEl.attributes().first { it.value.length > 200 }.value
-                        val gBootJs = gEl.data()
-                        println("[DIAG][$pTag] gBootJs:\n$gBootJs")
-                        val modG = Regex("""%\s*(\d+)""").find(gBootJs)?.groupValues?.get(1)?.toIntOrNull() ?: 6
-                        val s2 = runCatching { String(CimaNowCrypto.b64Decode(CimaNowCrypto.uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
-                        println("[DIAG][$pTag] UNPACKED_S2 (len=${s2?.length}):\n$s2")
-                    } else {
-                        println("[DIAG][$pTag] WATCH_HTML_SAMPLE:\n${watchHtml.take(5000)}")
-                    }
-                }
+                val d = sb.toString()
+                val dDump = if (d.length <= 42000) d else "${d.take(21000)}\n...<MID_ELIDED len=${d.length}>...\n${d.takeLast(21000)}"
+                println("[DIAG][$pTag] DECODED_D[$idx] (len=${d.length}, k=$k, step=$step):\n$dDump")
             }
             "done"
         }
