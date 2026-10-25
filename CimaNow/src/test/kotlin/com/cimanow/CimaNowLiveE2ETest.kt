@@ -310,110 +310,89 @@ class CimaNowLiveE2ETest {
             val mintedUrl = cdpJson.optString("mintedUrl")
             val renderedDomLen = cdpJson.optInt("renderedDomLen")
             println("[DIAG] CDP mintedUrl=$mintedUrl renderedDomLen=$renderedDomLen cookies=${cdpJson.optJSONArray("cookies")}")
-            println("[DIAG] CDP renderedDomSample:\n${cdpJson.optString("renderedDomSample").take(2500)}")
-
             val rawFileHtml = java.io.File("/tmp/raw_watch.html").takeIf { it.exists() }?.readText().orEmpty()
             val domFileHtml = java.io.File("/tmp/dom_watch.html").takeIf { it.exists() }?.readText().orEmpty()
             println("[DIAG] Saved raw_watch.html len=${rawFileHtml.length}, dom_watch.html len=${domFileHtml.length}")
+
             if (rawFileHtml.length > 500) {
-                val decoded = CimaNowCrypto.decodeWatchingVault(rawFileHtml)
-                println("[DIAG] decodeWatchingVault(raw_watch.html) -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(30)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads?.size}")
                 val rawDoc = org.jsoup.Jsoup.parse(rawFileHtml)
                 rawDoc.select("script").forEachIndexed { idx, s ->
                     val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
-                    println("[DIAG] RAW_WATCH_SCRIPT[$idx] id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} head='${s.data().take(180).replace("\n", " ")}'")
+                    println("[DIAG] RAW_WATCH_SCRIPT[$idx] id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} FULL_DATA='${s.data().replace('\n', ' ')}'")
                 }
-                val gEl = rawDoc.select("script").firstOrNull { s -> s.data().isNotBlank() && s.attributes().any { a -> a.value.length > 200 } }
-                if (gEl != null && decoded == null) {
-                    val rawG = gEl.attributes().first { it.value.length > 200 }.value
-                    val modG = Regex("""%\s*(\d+)""").find(gEl.data())?.groupValues?.get(1)?.toIntOrNull() ?: 6
-                    val s2 = runCatching { String(CimaNowCrypto.b64Decode(CimaNowCrypto.uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
-                    println("[DIAG] UNPACKED_S2 (len=${s2?.length}):\n${s2?.take(12000)}")
+                // Run the bootstrap script (RAW_WATCH_SCRIPT[1]) in Rhino to capture unpacked s2 cleanly!
+                val bootScriptEl = rawDoc.select("script").firstOrNull { s -> s.data().length in 100..5000 && s.attributes().any { a -> a.value.length > 1000 } }
+                if (bootScriptEl != null) {
+                    val bootId = bootScriptEl.id()
+                    val attrEntry = bootScriptEl.attributes().first { it.value.length > 1000 }
+                    val capturedScripts = mutableListOf<String>()
+                    val cx = org.mozilla.javascript.Context.enter()
+                    try {
+                        cx.languageVersion = org.mozilla.javascript.Context.VERSION_ECMASCRIPT
+                        cx.isInterpretedMode = true
+                        val scope = cx.initStandardObjects()
+                        val bridge = object {
+                            fun getAttr(id: String, name: String): String =
+                                if (id == bootId && name.equals(attrEntry.key, ignoreCase = true)) attrEntry.value else ""
+                            fun b64(s: String): String = String(CimaNowCrypto.b64Decode(s), Charsets.UTF_8)
+                            fun capture(code: String) { capturedScripts.add(code) }
+                        }
+                        org.mozilla.javascript.ScriptableObject.putProperty(scope, "__b", org.mozilla.javascript.Context.javaToJS(bridge, scope))
+                        val shim = """
+                            var window = this, self = this;
+                            function atob(s) { return String(__b.b64(String(s))); }
+                            var document = {
+                                getElementById: function(id) {
+                                    return {
+                                        getAttribute: function(n) { return String(__b.getAttr(String(id), String(n))); },
+                                        remove: function() {},
+                                        parentNode: { removeChild: function() {} }
+                                    };
+                                },
+                                createElement: function(tag) {
+                                    return { _t: '', set text(v) { this._t = String(v); __b.capture(this._t); }, set textContent(v) { this._t = String(v); __b.capture(this._t); }, set innerHTML(v) { this._t = String(v); __b.capture(this._t); } };
+                                },
+                                head: { appendChild: function(el) { if (el && el._t) __b.capture(el._t); } },
+                                body: { appendChild: function(el) { if (el && el._t) __b.capture(el._t); } },
+                                documentElement: { appendChild: function(el) { if (el && el._t) __b.capture(el._t); } }
+                            };
+                            var FunctionOrig = Function;
+                            Function = function() {
+                                var body = arguments[arguments.length - 1];
+                                __b.capture(String(body));
+                                return function() {};
+                            };
+                            var evalOrig = eval;
+                        """.trimIndent()
+                        cx.evaluateString(scope, shim, "shim.js", 1, null)
+                        runCatching { cx.evaluateString(scope, bootScriptEl.data(), "boot.js", 1, null) }
+                            .onFailure { println("[DIAG] Rhino boot err: ${it.message}") }
+                    } finally {
+                        org.mozilla.javascript.Context.exit()
+                    }
+                    println("[DIAG] Rhino boot captured count=${capturedScripts.size}")
+                    capturedScripts.distinct().forEachIndexed { ci, cs ->
+                        println("[DIAG] UNPACKED_S2[$ci] len=${cs.length}:\n${cs.take(15000)}")
+                    }
                 }
             }
+
             if (domFileHtml.length > 500) {
                 val domDoc = org.jsoup.Jsoup.parse(domFileHtml)
-                val iframes = domDoc.select("iframe").map { "id=${it.id()} src=${it.attr("src")} cnk=${it.attr("data-cnk").take(16)}" }
-                val tabs = domDoc.select("#watch li, li[data-id], ul.tabs li").map { "txt='${it.text()}' id='${it.attr("data-id")}' idx='${it.attr("data-index")}' attrs=${it.attributes().map { a -> a.key }}" }
-                val dls = domDoc.select("#download a[href], a[href*=.mp4], a[href*=down]").take(15).map { "txt='${it.text().take(30)}' href='${it.attr("href").take(90)}'" }
-                println("[DIAG] DOM_WATCH iframes=$iframes")
-                println("[DIAG] DOM_WATCH tabs=$tabs")
-                println("[DIAG] DOM_WATCH dls=$dls")
-            }
-
-            // Sync Chrome cookies into StickyHttpSession and test core.php + extractors if decoded != null!
-            val cookiesArr = cdpJson.optJSONArray("cookies")
-            if (cookiesArr != null) {
-                for (ci in 0 until cookiesArr.length()) {
-                    val co = cookiesArr.getJSONObject(ci)
-                    val dom = co.optString("domain").trimStart('.')
-                    val cName = co.optString("name")
-                    val cVal = co.optString("value")
-                    val hUrl = okhttp3.HttpUrl.Builder().scheme("https").host(dom.ifBlank { "cimanow.cc" }).build()
-                    if (dom.isNotBlank() && cName.isNotBlank()) {
-                        val ck = okhttp3.Cookie.Builder().name(cName).value(cVal).domain(dom).path("/").build()
-                        session.cookieStore.saveFromResponse(hUrl, listOf(ck))
-                    }
-                }
-            }
-            if (rawFileHtml.length > 500) {
-                val decoded = CimaNowCrypto.decodeWatchingVault(rawFileHtml)
-                if (decoded != null && mintedUrl.startsWith("http")) {
-                    val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
-                    for (tab in decoded.serverTabs.take(6)) {
-                        val sig = CimaNowCrypto.calcCoreSig(decoded.coreToken, tab.dataId, tab.dataIndex, decoded.sigSalt)
-                        val coreUrl = "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
-                            "?token=${java.net.URLEncoder.encode(decoded.coreToken, "UTF-8")}" +
-                            "&action=switch&index=${java.net.URLEncoder.encode(tab.dataIndex, "UTF-8")}" +
-                            "&id=${java.net.URLEncoder.encode(tab.dataId, "UTF-8")}" +
-                            "&_s=${java.net.URLEncoder.encode(sig, "UTF-8")}"
-                        val resp = session.getText(coreUrl, mintedUrl, mapOf("X-Requested-With" to "XMLHttpRequest"))
-                        val emb = resp?.second?.let { CimaNowCrypto.decodeCnBootFrame(it) }
-                        val rawSample = resp?.second?.take(140)?.replace('\n', ' ')
-                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} len=${resp?.second?.length} embed=$emb raw='$rawSample'")
-                    }
+                val iframes = domDoc.select("iframe").map { "id='${it.id()}' src='${it.attr("src")}' cnk='${it.attr("data-cnk").take(24)}' cna='${it.attr("data-cna").take(40)}' html='${it.outerHtml().take(220)}'" }
+                val tabs = domDoc.select("li[data-id], #watch li, ul.tabs li").map { "txt='${it.text()}' id='${it.attr("data-id")}' idx='${it.attr("data-index")}' cls='${it.className()}'" }
+                val dls = domDoc.select("#download a[href], a[href*=.mp4], a[href*=down]").take(20).map { "txt='${it.text().take(40)}' href='${it.attr("href").take(140)}'" }
+                val scriptsInDom = domDoc.select("script").mapIndexed { idx, s -> "[$idx] id='${s.id()}' len=${s.data().length} head='${s.data().take(220).replace('\n', ' ')}'" }
+                println("[DIAG] DOM_WATCH iframes (${iframes.size}):\n" + iframes.joinToString("\n"))
+                println("[DIAG] DOM_WATCH tabs (${tabs.size}):\n" + tabs.joinToString("\n"))
+                println("[DIAG] DOM_WATCH dls (${dls.size}):\n" + dls.joinToString("\n"))
+                println("[DIAG] DOM_WATCH scripts (${scriptsInDom.size}):\n" + scriptsInDom.joinToString("\n"))
+                val vaultScript = domDoc.getElementById("vault_script")?.data().orEmpty()
+                if (vaultScript.isNotEmpty()) {
+                    println("[DIAG] DOM_WATCH #vault_script (len=${vaultScript.length}):\n${vaultScript.take(8000)}")
                 }
             }
 
-            // Also test fetching mintedUrl via StickyHttpSession if mintedUrl was captured!
-            if (mintedUrl.startsWith("http")) {
-                val wRes = session.getText(mintedUrl, "https://rm.freex2line.online/2020/02/blog-post.html/")
-                println("[DIAG] OkHttp GET mintedUrl -> code=${wRes?.first} len=${wRes?.second?.length} blocked=${CimaNowNetwork.isCimaBlocked(wRes?.first ?: 0, wRes?.second.orEmpty())}")
-                val rawWatchHtml = wRes?.second.orEmpty()
-                if (rawWatchHtml.length > 500 && !CimaNowNetwork.isCimaBlocked(wRes?.first ?: 0, rawWatchHtml)) {
-                    val decoded = CimaNowCrypto.decodeWatchingVault(rawWatchHtml)
-                    println("[DIAG] decodeWatchingVault(rawWatchHtml) -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(24)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads}")
-                    if (decoded == null) {
-                        val rawDoc = org.jsoup.Jsoup.parse(rawWatchHtml)
-                        val gEl = rawDoc.select("script").firstOrNull { s -> s.data().isNotBlank() && s.attributes().any { a -> a.value.length > 200 } }
-                        if (gEl != null) {
-                            val rawG = gEl.attributes().first { it.value.length > 200 }.value
-                            val modG = Regex("""%\s*(\d+)""").find(gEl.data())?.groupValues?.get(1)?.toIntOrNull() ?: 6
-                            val s2 = runCatching { String(CimaNowCrypto.b64Decode(CimaNowCrypto.uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
-                            println("[DIAG] OKHTTP UNPACKED_S2 (len=${s2?.length}):\n${s2?.take(12000)}")
-                        }
-                    } else {
-                        val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
-                        for (tab in decoded.serverTabs.take(8)) {
-                            val sig = CimaNowCrypto.calcCoreSig(decoded.coreToken, tab.dataId, tab.dataIndex, decoded.sigSalt)
-                            val coreUrl = "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
-                                "?token=${java.net.URLEncoder.encode(decoded.coreToken, "UTF-8")}" +
-                                "&action=switch&index=${java.net.URLEncoder.encode(tab.dataIndex, "UTF-8")}" +
-                                "&id=${java.net.URLEncoder.encode(tab.dataId, "UTF-8")}" +
-                                "&_s=${java.net.URLEncoder.encode(sig, "UTF-8")}"
-                            val resp = session.getText(coreUrl, mintedUrl, mapOf("X-Requested-With" to "XMLHttpRequest"))
-                            val emb = resp?.second?.let { CimaNowCrypto.decodeCnBootFrame(it) }
-                            val rawSample = resp?.second?.take(140)?.replace('\n', ' ')
-                            println("[DIAG] OKHTTP core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} embed=$emb raw='$rawSample'")
-                        }
-                    }
-                    val outerDoc = org.jsoup.Jsoup.parse(rawWatchHtml)
-                    outerDoc.select("script").forEachIndexed { idx, s ->
-                        val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
-                        println("[DIAG] RAW_WATCH_SCRIPT[$idx] id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} head='${s.data().take(180).replace("\n", " ")}'")
-                    }
-                }
-            }
             if (mintedUrl.startsWith("http")) "done" else null
         }
         Unit
