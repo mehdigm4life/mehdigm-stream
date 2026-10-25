@@ -158,8 +158,69 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
+    fun testDiagnoseAndroidGatewayAndBeekeeper(): Unit = runBlocking {
+        assumeTrue("Set CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        val api = CimaNow()
+        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
+        assertNotNull("Expected MovieLoadResponse for Beekeeper 2024", bkLoad)
+        println("[DIAG][Beekeeper] title='${bkLoad!!.name}' year=${bkLoad.year} dataUrl=${bkLoad.dataUrl}")
+        val dataObj = CimaNowCrypto.safeJsonObject(bkLoad.dataUrl)
+        val itemUrl = dataObj?.optString("itemUrl") ?: beekeeperUrl
+        val shineUrl = dataObj?.optString("shineUrl").orEmpty()
+        println("[DIAG][Beekeeper] itemUrl=$itemUrl shineUrl=$shineUrl")
+        assertTrue("Expected non-blank shineUrl on Beekeeper 2024", shineUrl.isNotBlank())
+
+        val scriptText = javaClass.classLoader!!.getResourceAsStream("diag_android_gw.js")!!
+            .bufferedReader(Charsets.UTF_8).readText()
+        val tmpScript = java.io.File.createTempFile("diag_gw_", ".js")
+        val tmpOut = java.io.File.createTempFile("diag_gw_out_", ".json")
+        try {
+            tmpScript.writeText(scriptText, Charsets.UTF_8)
+            val proc = ProcessBuilder("node", tmpScript.absolutePath, shineUrl, itemUrl, tmpOut.absolutePath)
+                .redirectErrorStream(true)
+                .redirectOutput(java.io.File("/dev/null"))
+                .start()
+            proc.waitFor(60L, java.util.concurrent.TimeUnit.SECONDS)
+            val repStr = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
+            val rep = org.json.JSONObject(repStr)
+            println("[DIAG][Gateway] blogHtmlLen=${rep.optInt("blogHtmlLen")} allJsLen=${rep.optInt("allJsLen")} htmlDir='${rep.optString("htmlDir")}' bodyDir='${rep.optString("bodyDir")}'")
+            println("[DIAG][Gateway] btnHtmlInitial=${rep.optString("btnHtmlInitial")}")
+            println("[DIAG][Gateway] phase1Err=${rep.optString("phase1Err")} phase2Err=${rep.optString("phase2Err")}")
+            val snippets = rep.optJSONArray("stageSnippets")
+            if (snippets != null) {
+                println("[DIAG][StageSnippets] count=${snippets.length()}")
+                for (i in 0 until snippets.length()) {
+                    println("  SNIP[$i]: ${snippets.optString(i)}")
+                }
+            }
+            val simLogs = rep.optJSONArray("simLogs")
+            if (simLogs != null) {
+                println("[DIAG][SimLogs] count=${simLogs.length()}")
+                for (i in 0 until simLogs.length()) {
+                    println("  SIM[$i]: ${simLogs.optString(i)}")
+                }
+            }
+            println("[DIAG][FinalMinted] ${rep.optString("finalMinted")}")
+        } finally {
+            tmpScript.delete()
+            tmpOut.delete()
+        }
+
+        CimaNowExtractors.debugLogger = { println("  [DIAG][Extractor] $it") }
+        val bkLinks = CopyOnWriteArrayList<ExtractorLink>()
+        val okBk = api.loadLinks(bkLoad.dataUrl, false, {}, { bkLinks.add(it) })
+        println("[DIAG][BeekeeperLinks] ok=$okBk count=${bkLinks.size} providers=${bkLinks.map { it.source }.distinct()}")
+        for (l in bkLinks.take(15)) {
+            println("  -> [${l.source}] ${l.name} q=${l.quality} url=${l.url.take(100)}")
+        }
+        assertTrue("Expected Beekeeper loadLinks=true", okBk && bkLinks.isNotEmpty())
+        Unit
+    }
+
+    @Test
     fun testFullLiveEndToEndSuite(): Unit = runBlocking {
-        assumeTrue("Set CIMANOW_LIVE_E2E=1 to run live network E2E verification", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        assumeTrue("Skipped during diag", System.getenv("CIMANOW_FULL_E2E") == "1")
 
         val api = CimaNow()
 
