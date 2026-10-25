@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -29,9 +30,36 @@ jobs:
 
       - name: Configure Android SDK, test, and build TimeMovies plugin
         run: |
+          set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace
+          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace 2>&1 | tee gradle.log
+
+      - name: Report Gradle Build Log on Failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, glob
+          txt = open("gradle.log", encoding="utf-8", errors="replace").read()[-45000:] if os.path.exists("gradle.log") else "no log"
+          xmls = []
+          for p in glob.glob("TimeMovies/build/test-results/**/*.xml", recursive=True):
+              xmls.append(f"\n--- {p} ---\n" + open(p, encoding="utf-8", errors="replace").read()[:8000])
+          full = (txt + "\n" + "".join(xmls))[-55000:]
+          payload = {
+              "name": "TimeMovies Build Log",
+              "head_sha": os.environ["SHA"],
+              "status": "completed",
+              "conclusion": "failure",
+              "output": {"title": "Gradle Build & Test Log", "summary": "Failure details", "text": f"```\n{full}\n```"}
+          }
+          with open("cp.json", "w") as f:
+              json.dump(payload, f)
+          subprocess.run(["gh", "api", "--method", "POST", f"repos/{os.environ['REPO']}/check-runs", "--input", "cp.json"], check=False)
+          PY
 
       - name: Upload TimeMovies.cs3 artifact
         uses: actions/upload-artifact@v4
