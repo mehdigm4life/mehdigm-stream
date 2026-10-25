@@ -748,7 +748,7 @@ class TimeMoviesUnitTest {
             .toByteArray(Charsets.UTF_8)
             .toRequestBody(null)
         val grantReq = okhttp3.Request.Builder()
-            .url("${TimeMoviesCrypto.APP_BASE_URL}media/grant")
+            .url("${TimeMoviesCrypto.API_BASE_URL}media/grant")
             .post(grantBody)
             .header("User-Agent", "okhttp/4.12.0")
             .header("Accept", "application/json")
