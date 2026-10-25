@@ -95,7 +95,7 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
-    fun testLiveDiagnosticDump() = runBlocking {
+    fun testLiveDiagnosticDump(): Unit = runBlocking {
         System.setProperty("kotlinx.coroutines.debug", "off")
         val api = CimaNow()
         val fm = api.getMainPage(1, MainPageRequest("أفلام أجنبية", "category/افلام-اجنبية", false))
@@ -193,6 +193,7 @@ class CimaNowLiveE2ETest {
             }
             "done"
         }
+        Unit
     }
 
     @Test
