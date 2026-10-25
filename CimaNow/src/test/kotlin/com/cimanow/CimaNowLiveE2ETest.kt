@@ -603,8 +603,8 @@ class CimaNowLiveE2ETest {
                         } else {
                             // Extract inner Function("arg", "BODY") string and compile directly to get exact column!
                             val fnBody = runCatching {
-                                val q1 = code.indexOf(","")
-                                val q2 = code.lastIndexOf("")")
+                                val q1 = code.indexOf(",\"")
+                                val q2 = code.lastIndexOf("\")")
                                 if (q1 > 0 && q2 > q1) org.json.JSONTokener(code.substring(q1 + 1, q2 + 1)).nextValue() as String else ""
                             }.getOrDefault("")
                             var subAround = ""
