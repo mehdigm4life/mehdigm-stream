@@ -13,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -1669,7 +1670,7 @@ class TimeMoviesUnitTest {
                 // Universal ~50-host `mawdhou3.com/scrapefinal/vidtube_new.php` POST scraper resolves VidTube embed -> 720p MP4!
                 req.path == "/scraper/scrapefinal/vidtube_new.php" -> {
                     assertEquals("POST", req.method)
-                    assertTrue(req.bodyText.contains("obfuscated_vidtube_payload_999"))
+                    assertTrue(req.body.contains("obfuscated_vidtube_payload_999"))
                     MiniResponse(200, "application/json", """{"url":"$hostOrigin/cdn/vidtube_oppenheimer_720p.mp4"}""")
                 }
 
