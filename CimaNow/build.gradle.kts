@@ -31,7 +31,7 @@ android {
 }
 
 dependencies {
-    implementation("org.mozilla:rhino:1.7.15")
+    implementation("org.mozilla:rhino:1.8.1")
     val testImplementation by configurations
     val compileOnly by configurations
     compileOnly.dependencies.withType<FileCollectionDependency>().all {
