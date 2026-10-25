@@ -134,7 +134,7 @@ class CimaNowLiveE2ETest {
                     '--user-data-dir=/tmp/chrome_prof_' + process.pid,
                     '--disable-blink-features=AutomationControlled',
                     '--window-size=412,915',
-                    '--proxy-server=' + proxyArg,
+                    // direct 10Gbps first!
                     '--remote-debugging-port=9229',
                     'about:blank'
                 ];
@@ -234,12 +234,7 @@ class CimaNowLiveE2ETest {
                                     rawWatchNetworkBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
                                 }
                             }
-                            const idlDump = await evalJs(`JSON.stringify({
-                                tk: window.tk || '',
-                                iframes: Array.from(document.querySelectorAll('iframe')).map(f => ({ srcProp: f.src, cnb: f.getAttribute('data-cnb'), cni: f.getAttribute('data-cni') })),
-                                tabs: Array.from(document.querySelectorAll('li[data-id]')).map(li => ({ name: (li.textContent || '').trim(), id: li.getAttribute('data-id'), idx: li.getAttribute('data-index') })),
-                                dls: Array.from(document.querySelectorAll('#download a, li a')).map(a => ({ txt: (a.textContent || '').trim().slice(0, 40), hrefProp: a.href })).filter(x => x.hrefProp && x.hrefProp.startsWith('http') && !x.hrefProp.includes('cimanow.cc/category') && !x.hrefProp.includes('facebook') && !x.hrefProp.includes('twitter') && !x.hrefProp.includes('telegram'))
-                            })`);
+                            const idlDump = await evalJs('JSON.stringify({ tk: window.tk || "", iframes: Array.from(document.querySelectorAll("iframe")).map(function(f){ return { srcProp: f.src, cnb: f.getAttribute("data-cnb") }; }), dls: Array.from(document.querySelectorAll("a")).map(function(a){ return { txt: (a.textContent || "").trim().slice(0, 40), hrefProp: a.href }; }).filter(function(x){ return x.hrefProp && x.hrefProp.indexOf("http") === 0 && x.hrefProp.indexOf("cimanow.cc") === -1 && x.hrefProp.indexOf("facebook") === -1 && x.hrefProp.indexOf("twitter") === -1 && x.hrefProp.indexOf("telegram") === -1; }).slice(0, 25) })');
                             logs.push('IDL_DUMP=' + (idlDump || '').slice(0, 4000));
                             const domHtml = await evalJs('document.documentElement.outerHTML');
                             watchHtml = domHtml || '';
