@@ -395,8 +395,6 @@ class CimaNowLiveE2ETest {
                 await send('Network.enable');
                 await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
                 await send('Emulation.setDeviceMetricsOverride', { width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true });
-                await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-                await send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
                 await send('Page.addScriptToEvaluateOnNewDocument', {
                     source: "try { Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.63 Mobile Safari/537.36', configurable: true }); Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true }); } catch(e) {}"
                 });
@@ -447,7 +445,8 @@ class CimaNowLiveE2ETest {
                 .redirectErrorStream(true)
                 .redirectOutput(java.io.File("/dev/null"))
                 .start()
-            proc.waitFor(48L, java.util.concurrent.TimeUnit.SECONDS)
+            val finished = proc.waitFor(55L, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) proc.destroyForcibly()
             val raw = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
             println("  [AndroidWebViewSimRaw] $raw")
             CimaNowGatewaySolver.normalizeMintedWatchingUrl(CimaNowCrypto.safeJsonObject(raw)?.optString("url"))
