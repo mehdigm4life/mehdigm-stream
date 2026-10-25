@@ -153,7 +153,8 @@ object CimaNowGatewaySolver {
                 wv.settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
-                    databaseEnabled = true
+                    @Suppress("DEPRECATION")
+                databaseEnabled = true
                     loadsImagesAutomatically = false
                     blockNetworkImage = true
                     mediaPlaybackRequiresUserGesture = true

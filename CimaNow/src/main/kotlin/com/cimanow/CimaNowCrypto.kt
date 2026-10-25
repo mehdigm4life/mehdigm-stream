@@ -563,7 +563,25 @@ object CimaNowCrypto {
     }
 
     @Suppress("unused")
-    private class RhinoWatchingBridge(private val outerDoc: Document) {
+    class RhinoBootBridge(
+        private val outerDoc: Document,
+        private val bootEl: Element,
+        private val captured: MutableList<String>,
+    ) {
+        fun getAttr(id: String, name: String): String {
+            val target = if (id.isNotBlank()) outerDoc.getElementById(id) ?: bootEl else bootEl
+            return target.attributes().firstOrNull { it.key.equals(name, ignoreCase = true) }?.value.orEmpty()
+        }
+
+        fun b64(s: String): String = String(b64Decode(s), Charsets.UTF_8)
+
+        fun capture(code: String) {
+            if (code.length > 200) captured.add(code)
+        }
+    }
+
+    @Suppress("unused")
+    class RhinoWatchingBridge(private val outerDoc: Document) {
         var decryptedHtml: String = ""
         var decryptedDoc: Document? = null
 
@@ -621,21 +639,7 @@ object CimaNowCrypto {
             cx.languageVersion = Context.VERSION_ECMASCRIPT
             cx.isInterpretedMode = true
             val scope = cx.initStandardObjects()
-            val bootBridge = object {
-                @Suppress("unused")
-                fun getAttr(id: String, name: String): String {
-                    val target = if (id.isNotBlank()) outerDoc.getElementById(id) ?: bootEl else bootEl
-                    return target.attributes().firstOrNull { it.key.equals(name, ignoreCase = true) }?.value.orEmpty()
-                }
-
-                @Suppress("unused")
-                fun b64(s: String): String = String(b64Decode(s), Charsets.UTF_8)
-
-                @Suppress("unused")
-                fun capture(code: String) {
-                    if (code.length > 200) captured.add(code)
-                }
-            }
+            val bootBridge = RhinoBootBridge(outerDoc, bootEl, captured)
             ScriptableObject.putProperty(scope, "__bb", Context.javaToJS(bootBridge, scope))
             val bootShim = """
                 var window = this, self = this, globalThis = this;
@@ -826,7 +830,7 @@ object CimaNowCrypto {
 
             // Snapshot window keys before running inline #vault_script so any newly registered
             // zero-arg token getter (e.g. _getCoreToken or any future renamed getter) is found automatically!
-            cx.evaluateString(scope, "var __preKeys = Object.keys(window);", "pre_keys.js", 1, null)
+            cx.evaluateString(scope, "var __preKeys = {}; for (var __pk in window) { __preKeys[__pk] = true; }", "pre_keys.js", 1, null)
             for (sc in dDoc.select("script")) {
                 val code = sc.data()
                 if (sc.id() == "vault_script" || (code.length in 10..2500 && code.contains("window["))) {
@@ -840,13 +844,11 @@ object CimaNowCrypto {
                         if (t) { window.tk = t; return String(t); }
                     }
                     if (window.tk) return String(window.tk);
-                    var curKeys = Object.keys(window);
-                    for (var i = 0; i < curKeys.length; i++) {
-                        var k = curKeys[i];
-                        if (__preKeys.indexOf(k) === -1 && typeof window[k] === 'function' && window[k].length === 0) {
+                    for (var k in window) {
+                        if (!__preKeys[k] && typeof window[k] === 'function' && window[k].length === 0) {
                             try {
                                 var r = window[k]();
-                                if (typeof r === 'string' && r.length >= 16) { window.tk = r; return r; }
+                                if (typeof r === 'string' && r.length >= 6) { window.tk = r; return r; }
                             } catch(e) {}
                         }
                     }

@@ -305,37 +305,41 @@ object CimaNowExtractors {
             }
         }
 
-        // 2. Legacy static HMAC fallback (in case gateway temporarily disables Turnstile)
-        val legacyMinted = CimaNowNetwork.withStickySession { session ->
-            val hop1 = session.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withStickySession null
-            if (hop1.code !in 200..399) return@withStickySession null
-            val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
-                ?.takeIf { originOf(it) == gwOrigin }
-                ?: "$gwOrigin/redirectingfree/"
-            val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: return@withStickySession null
-            if (hop2.code !in 200..399) return@withStickySession null
-            val vUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
-                ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
-                ?: vaultReferer
-            val (vCode, vaultHtml) = session.getText(vUrl, hop2Url) ?: return@withStickySession null
-            if (vCode !in 200..299 || vaultHtml.length < 512) return@withStickySession null
-            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withStickySession null
-            delay(10_400L)
-            val (mCode, mintedBody) = session.postForm(
-                url = "${vUrl.trimEnd('/')}/get-link.php",
-                rawFormBody = postBody,
-                referer = vUrl,
-                origin = gwOrigin,
-                extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-            ) ?: return@withStickySession null
-            if (mCode !in 200..299) return@withStickySession null
-            val trimmed = mintedBody.trim()
-            val parsedUrl = if (trimmed.startsWith("{")) {
-                runCatching { JSONObject(trimmed).optString("url").trim() }.getOrDefault("")
-            } else {
-                trimmed
+        // 2. Legacy static HMAC fallback (only when Turnstile minter returned null)
+        val legacyMinted = if (mintedUrl.isNullOrBlank()) {
+            CimaNowNetwork.withStickySession { session ->
+                val hop1 = session.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withStickySession null
+                if (hop1.code !in 200..399) return@withStickySession null
+                val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
+                    ?.takeIf { originOf(it) == gwOrigin }
+                    ?: "$gwOrigin/redirectingfree/"
+                val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: return@withStickySession null
+                if (hop2.code !in 200..399) return@withStickySession null
+                val vUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
+                    ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
+                    ?: vaultReferer
+                val (vCode, vaultHtml) = session.getText(vUrl, hop2Url) ?: return@withStickySession null
+                if (vCode !in 200..299 || vaultHtml.length < 512) return@withStickySession null
+                val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withStickySession null
+                delay(10_400L)
+                val (mCode, mintedBody) = session.postForm(
+                    url = "${vUrl.trimEnd('/')}/get-link.php",
+                    rawFormBody = postBody,
+                    referer = vUrl,
+                    origin = gwOrigin,
+                    extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
+                ) ?: return@withStickySession null
+                if (mCode !in 200..299) return@withStickySession null
+                val trimmed = mintedBody.trim()
+                val parsedUrl = if (trimmed.startsWith("{")) {
+                    runCatching { JSONObject(trimmed).optString("url").trim() }.getOrDefault("")
+                } else {
+                    trimmed
+                }
+                parsedUrl.takeIf { it.startsWith("http") && it.contains("token=") }
             }
-            parsedUrl.takeIf { it.startsWith("http") && it.contains("token=") }
+        } else {
+            null
         }
 
         if (!legacyMinted.isNullOrBlank()) {
