@@ -231,372 +231,297 @@ class CimaNowLiveE2ETest {
                 println("[DIAG][$pTag] INNER_SCRIPT_META[$idx] id='${sc.id()}' src='${sc.attr("src")}' len=${d.length} head='${d.take(260).replace("\n", " ")}'")
             }
 
-            // Stage B: Execute ALL inline scripts of innerHtml inside Rhino 1.8.1 with full DOM + XHR/fetch/crypto capture!
-            data class CapturedHttp(val kind: String, val method: String, val url: String, val headersJson: String, val body: String)
-            val capturedRequests = mutableListOf<CapturedHttp>()
-            val jsLogs = mutableListOf<String>()
-
-            // Build initial DOM element descriptors from Jsoup
-            val domSpecsJson = org.json.JSONArray()
-            innerDoc.body().select("*").forEach { el ->
-                val obj = org.json.JSONObject()
-                obj.put("tag", el.tagName().uppercase())
-                obj.put("id", el.id())
-                obj.put("cls", el.className())
-                obj.put("style", el.attr("style"))
-                obj.put("href", el.attr("href"))
-                obj.put("val", el.attr("value"))
-                obj.put("txt", el.ownText().take(120))
-                val attrsObj = org.json.JSONObject()
-                el.attributes().forEach { a -> if (a.value.length < 4000) attrsObj.put(a.key, a.value) }
-                obj.put("attrs", attrsObj)
-                domSpecsJson.put(obj)
+            // Print inner_0, inner_6, inner_9 in full (they are tiny: 1254B, 287B, 5613B!)
+            for (idx in listOf(0, 6, 9)) {
+                val sc = innerDoc.select("script").getOrNull(idx)
+                if (sc != null) println("[DIAG][$pTag] FULL_INNER_SCRIPT[$idx]:\n${sc.data()}")
             }
 
-            val cx2 = safeFactory.enterContext()
+            // Also check Rhino VERSION_ECMASCRIPT (250) syntax error details
+            val cxCheck = safeFactory.enterContext()
             try {
-                cx2.putThreadLocal("deadline", System.currentTimeMillis() + 18_000L)
-                cx2.setInterpretedMode(true)
-                cx2.languageVersion = org.mozilla.javascript.Context.VERSION_ES6
-                val scope2 = cx2.initSafeStandardObjects()
-
-                val bridge2 = object {
-                    fun log(msg: String) { if (jsLogs.size < 80) jsLogs.add(msg) }
-                    fun atob(b64: String): String = String(CimaNowCrypto.b64Decode(b64), Charsets.ISO_8859_1)
-                    fun btoa(str: String): String = CimaNowCrypto.b64EncodeNoWrap(str.toByteArray(Charsets.ISO_8859_1))
-                    fun hmacSha256B64(keyIso: String, msgUtf8: String): String {
-                        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
-                        mac.init(javax.crypto.spec.SecretKeySpec(keyIso.toByteArray(Charsets.ISO_8859_1), "HmacSHA256"))
-                        return CimaNowCrypto.b64EncodeNoWrap(mac.doFinal(msgUtf8.toByteArray(Charsets.UTF_8)))
-                    }
-                    fun sha256Hex(msgUtf8: String): String {
-                        val md = java.security.MessageDigest.getInstance("SHA-256")
-                        return md.digest(msgUtf8.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-                    }
-                    fun onHttp(kind: String, method: String, url: String, headersJson: String, body: String): String {
-                        val h = CapturedHttp(kind, method, url, headersJson, body)
-                        capturedRequests.add(h)
-                        jsLogs.add("HTTP[$kind] $method $url hdr=$headersJson body=${body.take(300)}")
-                        return "https://cimanow.cc/watching/?token=dummy"
-                    }
+                cxCheck.setInterpretedMode(true)
+                cxCheck.languageVersion = org.mozilla.javascript.Context.VERSION_ECMASCRIPT
+                val scCheck = cxCheck.initSafeStandardObjects()
+                for (idx in 7 until innerDoc.select("script").size) {
+                    val code = innerDoc.select("script")[idx].data()
+                    runCatching { cxCheck.compileString(code, "s_$idx.js", 1, null) }
+                        .onSuccess { println("[DIAG] Rhino VERSION_ECMASCRIPT compiled s_$idx.js OK!") }
+                        .onFailure { println("[DIAG] Rhino VERSION_ECMASCRIPT compile err s_$idx.js: $it") }
                 }
-                org.mozilla.javascript.ScriptableObject.putProperty(scope2, "__b2", org.mozilla.javascript.Context.javaToJS(bridge2, scope2))
-
-                val shim2 = """
-                    var window = this, self = this, top = this, parent = this, globalThis = this;
-                    var __virtNow = ${System.currentTimeMillis()};
-                    var __origDateNow = Date.now;
-                    Date.now = function() { return __virtNow; };
-                    var performance = { now: function() { return __virtNow % 1000000; } };
-                    var location = { href: '$vaultUrl', origin: '$gwOrigin', protocol: 'https:', host: '${u.host}', hostname: '${u.host}', pathname: '/2020/02/blog-post.html/', search: '', hash: '' };
-                    var navigator = {
-                        userAgent: '${CimaNowNetwork.MOBILE_UA}',
-                        platform: 'Linux armv81',
-                        language: 'ar',
-                        languages: ['ar', 'en-US'],
-                        webdriver: false,
-                        hardwareConcurrency: 8,
-                        deviceMemory: 8,
-                        maxTouchPoints: 5
-                    };
-                    var screen = { width: 412, height: 915, availWidth: 412, availHeight: 915, colorDepth: 24, pixelDepth: 24 };
-                    var devicePixelRatio = 2.625;
-                    var innerWidth = 412, innerHeight = 815, outerWidth = 412, outerHeight = 915;
-                    var console = { log: function(a){ __b2.log('console.log:' + a); }, warn: function(){}, error: function(a){ __b2.log('console.err:' + a); } };
-                    function atob(s) { return String(__b2.atob(String(s))); }
-                    function btoa(s) { return String(__b2.btoa(String(s))); }
-                    function TextEncoder() {}
-                    TextEncoder.prototype.encode = function(s) {
-                        s = unescape(encodeURIComponent(String(s)));
-                        var a = new Uint8Array(s.length);
-                        for (var i=0;i<s.length;i++) a[i] = s.charCodeAt(i);
-                        return a;
-                    };
-                    function TextDecoder() {}
-                    TextDecoder.prototype.decode = function(u8) {
-                        var s = '';
-                        for (var i=0;i<u8.length;i++) s += String.fromCharCode(u8[i]);
-                        try { return decodeURIComponent(escape(s)); } catch(e) { return s; }
-                    };
-                    var crypto = {
-                        getRandomValues: function(arr) { for (var i=0;i<arr.length;i++) arr[i] = (Math.random()*256)|0; return arr; },
-                        subtle: {
-                            importKey: function(fmt, keyData, algo, ext, usages) {
-                                var ks = '';
-                                var u8 = keyData instanceof Uint8Array ? keyData : new Uint8Array(keyData);
-                                for (var i=0;i<u8.length;i++) ks += String.fromCharCode(u8[i]);
-                                return Promise.resolve({ __k: ks });
-                            },
-                            sign: function(algo, key, data) {
-                                var ds = '';
-                                var u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
-                                for (var i=0;i<u8.length;i++) ds += String.fromCharCode(u8[i]);
-                                var b64 = String(__b2.hmacSha256B64(key.__k, ds));
-                                var raw = atob(b64);
-                                var out = new Uint8Array(raw.length);
-                                for (var j=0;j<raw.length;j++) out[j] = raw.charCodeAt(j);
-                                return Promise.resolve(out.buffer);
-                            },
-                            digest: function(algo, data) {
-                                var ds = '';
-                                var u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
-                                for (var i=0;i<u8.length;i++) ds += String.fromCharCode(u8[i]);
-                                var hex = String(__b2.sha256Hex(ds));
-                                var out = new Uint8Array(32);
-                                for (var j=0;j<32;j++) out[j] = parseInt(hex.substr(j*2, 2), 16);
-                                return Promise.resolve(out.buffer);
-                            }
-                        }
-                    };
-
-                    var __timers = [];
-                    var __nextTid = 1;
-                    function setTimeout(fn, ms) {
-                        var id = __nextTid++;
-                        __timers.push({ id: id, fn: fn, due: __virtNow + (ms || 0), iv: 0, active: true });
-                        return id;
-                    }
-                    function setInterval(fn, ms) {
-                        var id = __nextTid++;
-                        var step = Math.max(50, ms || 50);
-                        __timers.push({ id: id, fn: fn, due: __virtNow + step, iv: step, active: true });
-                        return id;
-                    }
-                    function clearTimeout(id) { for (var i=0;i<__timers.length;i++) if (__timers[i].id===id) __timers[i].active=false; }
-                    function clearInterval(id) { clearTimeout(id); }
-                    function requestAnimationFrame(fn) { return setTimeout(fn, 16); }
-
-                    function XMLHttpRequest() { this._h = {}; this._m = 'GET'; this._u = ''; this.readyState = 0; this.status = 200; this.responseText = ''; }
-                    XMLHttpRequest.prototype.open = function(m, u) { this._m = String(m); this._u = String(u); this.readyState = 1; };
-                    XMLHttpRequest.prototype.setRequestHeader = function(k, v) { this._h[String(k)] = String(v); };
-                    XMLHttpRequest.prototype.addEventListener = function(ev, fn) { this['on' + ev] = fn; };
-                    XMLHttpRequest.prototype.send = function(body) {
-                        var resp = String(__b2.onHttp('xhr', this._m, this._u, JSON.stringify(this._h), body == null ? '' : String(body)));
-                        this.status = 200; this.readyState = 4; this.responseText = resp; this.response = resp;
-                        if (typeof this.onload === 'function') this.onload();
-                        if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
-                    };
-                    XMLHttpRequest.prototype.send.toString = function() { return 'function send() { [native code] }'; };
-
-                    function fetch(url, opts) {
-                        opts = opts || {};
-                        var m = opts.method || 'GET';
-                        var h = opts.headers || {};
-                        var b = opts.body == null ? '' : String(opts.body);
-                        var resp = String(__b2.onHttp('fetch', String(m), String(url), JSON.stringify(h), b));
-                        return Promise.resolve({
-                            ok: true, status: 200,
-                            text: function() { return Promise.resolve(resp); },
-                            json: function() { try { return Promise.resolve(JSON.parse(resp)); } catch(e) { return Promise.resolve({ url: resp, link: resp, ok: true }); } }
-                        });
-                    }
-                    fetch.toString = function() { return 'function fetch() { [native code] }'; };
-
-                    function URLSearchParams(init) {
-                        this._p = [];
-                        if (init && typeof init === 'object') {
-                            var ks = Object.keys(init);
-                            for (var i=0;i<ks.length;i++) this._p.push([ks[i], String(init[ks[i]])]);
-                        }
-                    }
-                    URLSearchParams.prototype.append = function(k, v) { this._p.push([String(k), String(v)]); };
-                    URLSearchParams.prototype.set = function(k, v) { this._p.push([String(k), String(v)]); };
-                    URLSearchParams.prototype.toString = function() {
-                        return this._p.map(function(x){ return encodeURIComponent(x[0]) + '=' + encodeURIComponent(x[1]); }).join('&');
-                    };
-
-                    var __allEls = [];
-                    var __elsById = {};
-                    var __docListeners = {};
-                    function __makeEl(tag) {
-                        var el = {
-                            tagName: String(tag || 'DIV').toUpperCase(), nodeType: 1, id: '', className: '',
-                            style: { cssText: '', display: 'block', visibility: 'visible', opacity: '1', setProperty: function(k,v){ this[k]=v; }, getPropertyValue: function(k){ return this[k]||''; } },
-                            dataset: {}, attributes: [], childNodes: [], children: [], parentNode: null, firstChild: null,
-                            textContent: '', innerText: '', _innerHTML: '', value: '', disabled: false, href: '',
-                            _listeners: {},
-                            classList: { add: function(){}, remove: function(){}, contains: function(){ return false; }, toggle: function(){} },
-                            setAttribute: function(k, v) {
-                                k = String(k); v = String(v);
-                                for (var i=0;i<this.attributes.length;i++) if (this.attributes[i].name===k) { this.attributes[i].value=v; break; }
-                                this.attributes.push({ name: k, value: v });
-                                if (k === 'id') { this.id = v; __elsById[v] = this; }
-                                if (k === 'class') this.className = v;
-                                if (k === 'href') { this.href = v; __b2.log('setAttr href on #' + this.id + ' -> ' + v); }
-                                if (k.indexOf('data-') === 0) this.dataset[k.slice(5)] = v;
-                            },
-                            getAttribute: function(k) { for (var i=0;i<this.attributes.length;i++) if (this.attributes[i].name===k) return this.attributes[i].value; return null; },
-                            hasAttribute: function(k) { return this.getAttribute(k) !== null; },
-                            removeAttribute: function(k) {},
-                            appendChild: function(c) { if (c) { c.parentNode = this; this.childNodes.push(c); this.children.push(c); this.firstChild = this.childNodes[0] || null; if (c.id) __elsById[c.id] = c; __allEls.push(c); } return c; },
-                            removeChild: function(c) { var idx = this.childNodes.indexOf(c); if (idx >= 0) this.childNodes.splice(idx, 1); return c; },
-                            insertBefore: function(n) { return this.appendChild(n); },
-                            replaceChild: function(n) { return this.appendChild(n); },
-                            contains: function() { return true; },
-                            closest: function() { return this; },
-                            getElementsByTagName: function(t) { t = String(t).toUpperCase(); return __allEls.filter(function(x){ return t==='*' || x.tagName===t; }); },
-                            querySelector: function(sel) { return document.querySelector(sel); },
-                            querySelectorAll: function(sel) { return document.querySelectorAll(sel); },
-                            addEventListener: function(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
-                            removeEventListener: function() {},
-                            click: function() {
-                                var ls = this._listeners['click'] || [];
-                                for (var i=0;i<ls.length;i++) ls[i].call(this, { isTrusted: true, target: this, currentTarget: this, preventDefault: function(){}, stopPropagation: function(){} });
-                                if (typeof this.onclick === 'function') this.onclick({ isTrusted: true, target: this, preventDefault: function(){}, stopPropagation: function(){} });
-                            },
-                            getBoundingClientRect: function() { return { width: 200, height: 48, top: 100, left: 50, right: 250, bottom: 148 }; }
-                        };
-                        Object.defineProperty(el, 'offsetWidth', { get: function() { return 200; } });
-                        Object.defineProperty(el, 'offsetHeight', { get: function() { return 48; } });
-                        Object.defineProperty(el, 'clientWidth', { get: function() { return 200; } });
-                        Object.defineProperty(el, 'clientHeight', { get: function() { return 48; } });
-                        Object.defineProperty(el, 'offsetParent', { get: function() { return document.body; } });
-                        Object.defineProperty(el, 'innerHTML', { get: function() { return this._innerHTML; }, set: function(v) { this._innerHTML = String(v); } });
-                        return el;
-                    }
-                    function getComputedStyle(el) {
-                        return { display: (el && el.style && el.style.display) || 'block', visibility: 'visible', opacity: '1', getPropertyValue: function(p){ return p==='display'?'block':'visible'; } };
-                    }
-                    function MutationObserver() {}
-                    MutationObserver.prototype.observe = function() {};
-                    MutationObserver.prototype.disconnect = function() {};
-
-                    var document = {
-                        nodeType: 9, readyState: 'complete', hidden: false, visibilityState: 'visible',
-                        cookie: '', referrer: '$gwOrigin/redirectingfree/', domain: '${u.host}',
-                        documentElement: __makeEl('HTML'), head: __makeEl('HEAD'), body: __makeEl('BODY'),
-                        createElement: function(t) { return __makeEl(t); },
-                        createTextNode: function(t) { var n = __makeEl('TEXT'); n.nodeType = 3; n.textContent = String(t); return n; },
-                        createDocumentFragment: function() { return __makeEl('FRAG'); },
-                        getElementById: function(id) { return __elsById[String(id)] || null; },
-                        getElementsByTagName: function(t) { t = String(t).toUpperCase(); return __allEls.filter(function(x){ return t==='*' || x.tagName===t; }); },
-                        getElementsByClassName: function(c) { return __allEls.filter(function(x){ return (' '+x.className+' ').indexOf(' '+c+' ')>=0; }); },
-                        querySelectorAll: function(sel) {
-                            sel = String(sel).trim();
-                            if (sel.charAt(0) === '#' && sel.indexOf(' ') === -1 && sel.indexOf(',') === -1) {
-                                var e = __elsById[sel.slice(1)]; return e ? [e] : [];
-                            }
-                            if (sel.charAt(0) === '.' && sel.indexOf(' ') === -1) {
-                                return document.getElementsByClassName(sel.slice(1));
-                            }
-                            return document.getElementsByTagName(sel);
-                        },
-                        querySelector: function(sel) { var a = this.querySelectorAll(sel); return a.length ? a[0] : null; },
-                        addEventListener: function(ev, fn) { (__docListeners[ev] = __docListeners[ev] || []).push(fn); },
-                        removeEventListener: function() {}
-                    };
-                    window.document = document;
-                    window.addEventListener = function(ev, fn) { (__docListeners['win_'+ev] = __docListeners['win_'+ev] || []).push(fn); };
-                    window.removeEventListener = function() {};
-
-                    var __specs = ${domSpecsJson.toString()};
-                    for (var si=0; si<__specs.length; si++) {
-                        var sp = __specs[si];
-                        var node = __makeEl(sp.tag);
-                        node.textContent = sp.txt || '';
-                        node.innerText = sp.txt || '';
-                        node.value = sp.val || '';
-                        if (sp.style) node.style.cssText = sp.style;
-                        var ak = Object.keys(sp.attrs || {});
-                        for (var ai=0; ai<ak.length; ai++) node.setAttribute(ak[ai], sp.attrs[ak[ai]]);
-                        document.body.appendChild(node);
-                    }
-
-                    function __stepVirtualTime(totalMs, stepMs) {
-                        var end = __virtNow + totalMs;
-                        while (__virtNow < end) {
-                            __virtNow += stepMs;
-                            var snap = __timers.slice();
-                            for (var ti=0; ti<snap.length; ti++) {
-                                var tm = snap[ti];
-                                if (tm.active && tm.due <= __virtNow) {
-                                    if (tm.iv > 0) tm.due = __virtNow + tm.iv; else tm.active = false;
-                                    try { if (typeof tm.fn === 'function') tm.fn(); } catch (err) { __b2.log('timerErr:' + err); }
-                                }
-                            }
-                        }
-                    }
-                """.trimIndent()
-
-                cx2.evaluateString(scope2, shim2, "shim2.js", 1, null)
-
-                innerDoc.select("script").forEachIndexed { idx, sc ->
-                    val code = sc.data()
-                    if (code.isNotBlank()) {
-                        runCatching {
-                            cx2.evaluateString(scope2, code, "inner_$idx.js", 1, null)
-                        }.onFailure { e ->
-                            println("[DIAG][$pTag] inner_$idx.js threw: $e")
-                        }
-                    }
-                }
-
-                // Trigger DOMContentLoaded & load, then advance virtual clock 13s and click buttons!
-                val driveJs = """
-                    var dls = __docListeners['DOMContentLoaded'] || [];
-                    for (var i=0;i<dls.length;i++) try { dls[i]({ type: 'DOMContentLoaded' }); } catch(e) { __b2.log('dclErr:'+e); }
-                    var wls = __docListeners['win_load'] || [];
-                    for (var i=0;i<wls.length;i++) try { wls[i]({ type: 'load' }); } catch(e) { __b2.log('loadErr:'+e); }
-                    __stepVirtualTime(12500, 250);
-                    for (var bi=0; bi<__allEls.length; bi++) {
-                        var bel = __allEls[bi];
-                        if (bel.tagName === 'BUTTON' || bel.tagName === 'A' || bel.id.toLowerCase().indexOf('btn') >= 0 || bel.id.toLowerCase().indexOf('link') >= 0 || bel.id.toLowerCase().indexOf('down') >= 0) {
-                            try { bel.click(); } catch(e) { __b2.log('clickErr:' + e); }
-                        }
-                    }
-                    __stepVirtualTime(2000, 250);
-                """.trimIndent()
-                cx2.evaluateString(scope2, driveJs, "drive.js", 1, null)
             } finally {
                 org.mozilla.javascript.Context.exit()
             }
 
-            println("[DIAG][$pTag] JS_LOGS (${jsLogs.size}):\n${jsLogs.joinToString("\n")}")
-            println("[DIAG][$pTag] CAPTURED_HTTP (${capturedRequests.size}): $capturedRequests")
+            // Stage B via Node.js (real V8) on CI to capture exact XHR/fetch/crypto/Turnstile behavior of inner_0..14!
+            java.io.File("/tmp/inner_gw.html").writeText(innerHtml, Charsets.UTF_8)
+            val nodeDriver = """
+                const fs = require('fs');
+                const vm = require('vm');
+                const cryptoNode = require('crypto');
+                const html = fs.readFileSync('/tmp/inner_gw.html', 'utf8');
 
-            // If we captured a POST to get-link.php, wait remaining wall-clock time since hop3 so server 10s check passes, and fire it LIVE!
-            val glReq = capturedRequests.firstOrNull { it.url.contains("get-link") || it.method.equals("POST", true) }
-            if (glReq != null) {
-                val elapsedSinceHop3 = System.currentTimeMillis() - tFetchDone
-                if (elapsedSinceHop3 < 10_500L) {
-                    kotlinx.coroutines.delay(10_500L - elapsedSinceHop3)
+                // Extract scripts & DOM elements simply
+                const scripts = [];
+                const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+                let m;
+                while ((m = scriptRe.exec(html)) !== null) {
+                    scripts.push({ attrs: m[1], code: m[2] });
                 }
-                val targetUrl = when {
-                    glReq.url.startsWith("http") -> glReq.url
-                    glReq.url.startsWith("/") -> "$gwOrigin${glReq.url}"
-                    else -> "${vaultUrl.trimEnd('/')}/${glReq.url.trimStart('/')}"
+
+                const capturedHttp = [];
+                const logs = [];
+                let virtNow = Date.now();
+
+                const elsById = {};
+                const allEls = [];
+                const docListeners = {};
+
+                function makeEl(tag) {
+                    const el = {
+                        tagName: String(tag || 'DIV').toUpperCase(), nodeType: 1, id: '', className: '',
+                        style: { cssText: '', display: 'block', visibility: 'visible', opacity: '1', setProperty(k,v){this[k]=v;}, getPropertyValue(k){return this[k]||'';} },
+                        dataset: {}, attributes: [], childNodes: [], children: [], parentNode: null, firstChild: null,
+                        textContent: '', innerText: '', _innerHTML: '', value: '', disabled: false, hidden: false, href: '',
+                        _listeners: {},
+                        classList: { add(){}, remove(){}, contains(){return false;}, toggle(){} },
+                        setAttribute(k, v) {
+                            k = String(k); v = String(v);
+                            const ex = this.attributes.find(a => a.name === k);
+                            if (ex) ex.value = v; else this.attributes.push({ name: k, value: v });
+                            if (k === 'id') { this.id = v; elsById[v] = this; }
+                            if (k === 'class') this.className = v;
+                            if (k === 'href') { this.href = v; logs.push('setAttr href #' + this.id + '=' + v); }
+                            if (k.startsWith('data-')) {
+                                const camel = k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+                                this.dataset[camel] = v;
+                            }
+                        },
+                        getAttribute(k) { const ex = this.attributes.find(a => a.name === k); return ex ? ex.value : null; },
+                        hasAttribute(k) { return this.getAttribute(k) !== null; },
+                        removeAttribute(k) { this.attributes = this.attributes.filter(a => a.name !== k); if (k==='hidden') this.hidden=false; },
+                        appendChild(c) {
+                            if (c) {
+                                c.parentNode = this; this.childNodes.push(c); this.children.push(c); this.firstChild = this.childNodes[0] || null;
+                                if (c.id) elsById[c.id] = c;
+                                if (c.src) logs.push('appendChild script/iframe src=' + c.src + ' id=' + c.id);
+                                allEls.push(c);
+                            }
+                            return c;
+                        },
+                        removeChild(c) { const i = this.childNodes.indexOf(c); if (i>=0) this.childNodes.splice(i,1); return c; },
+                        insertBefore(n) { return this.appendChild(n); },
+                        replaceChild(n) { return this.appendChild(n); },
+                        contains() { return true; },
+                        closest() { return this; },
+                        getElementsByTagName(t) { t = String(t).toUpperCase(); return allEls.filter(x => t==='*' || x.tagName===t); },
+                        querySelector(s) { return document.querySelector(s); },
+                        querySelectorAll(s) { return document.querySelectorAll(s); },
+                        addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
+                        removeEventListener() {},
+                        click() {
+                            const evObj = { isTrusted: true, target: this, currentTarget: this, preventDefault(){}, stopPropagation(){}, stopImmediatePropagation(){} };
+                            for (const fn of (this._listeners['click'] || [])) { try { fn.call(this, evObj); } catch(e) { logs.push('clickFnErr:'+e.message); } }
+                            if (typeof this.onclick === 'function') { try { this.onclick(evObj); } catch(e) { logs.push('onclickErr:'+e.message); } }
+                        },
+                        getBoundingClientRect() { return { width: 220, height: 48, top: 100, left: 50, right: 270, bottom: 148 }; }
+                    };
+                    Object.defineProperty(el, 'offsetWidth', { get: () => 220 });
+                    Object.defineProperty(el, 'offsetHeight', { get: () => 48 });
+                    Object.defineProperty(el, 'clientWidth', { get: () => 220 });
+                    Object.defineProperty(el, 'clientHeight', { get: () => 48 });
+                    Object.defineProperty(el, 'offsetParent', { get: () => document.body });
+                    Object.defineProperty(el, 'innerHTML', { get() { return this._innerHTML; }, set(v) { this._innerHTML = String(v); } });
+                    return el;
                 }
-                val hdrMap = mutableMapOf("X-Requested-With" to "XMLHttpRequest")
-                runCatching {
-                    val jo = org.json.JSONObject(glReq.headersJson)
-                    jo.keys().forEach { k -> hdrMap[k] = jo.optString(k) }
+
+                const document = {
+                    nodeType: 9, readyState: 'complete', hidden: false, visibilityState: 'visible',
+                    cookie: '', referrer: '${gwOrigin}/redirectingfree/', domain: '${u.host}',
+                    documentElement: makeEl('HTML'), head: makeEl('HEAD'), body: makeEl('BODY'),
+                    createElement: t => makeEl(t),
+                    createTextNode: t => { const n = makeEl('TEXT'); n.nodeType = 3; n.textContent = String(t); return n; },
+                    createDocumentFragment: () => makeEl('FRAG'),
+                    getElementById: id => elsById[String(id)] || null,
+                    getElementsByTagName: t => { t = String(t).toUpperCase(); return allEls.filter(x => t==='*' || x.tagName===t); },
+                    getElementsByClassName: c => allEls.filter(x => (' '+x.className+' ').includes(' '+c+' ')),
+                    querySelectorAll(sel) {
+                        sel = String(sel).trim();
+                        if (sel.startsWith('#') && !sel.includes(' ') && !sel.includes(',')) { const e = elsById[sel.slice(1)]; return e ? [e] : []; }
+                        if (sel.startsWith('.') && !sel.includes(' ')) return document.getElementsByClassName(sel.slice(1));
+                        return document.getElementsByTagName(sel);
+                    },
+                    querySelector(sel) { const a = this.querySelectorAll(sel); return a.length ? a[0] : null; },
+                    addEventListener(ev, fn) { (docListeners[ev] = docListeners[ev] || []).push(fn); },
+                    removeEventListener() {}
+                };
+
+                // Populate key elements from innerHtml
+                const dlMatch = html.match(/<a\s+id="downloadbtn"[^>]*>/i);
+                const dlBtn = makeEl('A');
+                dlBtn.setAttribute('id', 'downloadbtn');
+                dlBtn.setAttribute('class', 'downloadbtn');
+                dlBtn.setAttribute('href', 'javascript:void(0);');
+                if (dlMatch) {
+                    const attrRe = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
+                    let am;
+                    while ((am = attrRe.exec(dlMatch[0])) !== null) dlBtn.setAttribute(am[1], am[2]);
                 }
-                val mRes = session.postForm(
-                    url = targetUrl,
-                    rawFormBody = glReq.body,
-                    referer = vaultUrl,
-                    origin = gwOrigin,
-                    extraHeaders = hdrMap,
-                )
-                println("[DIAG][$pTag] LIVE get-link response -> code=${mRes?.first} body='${mRes?.second?.take(500)}'")
-                val mBody = mRes?.second?.trim().orEmpty()
-                val mintedUrl = runCatching {
-                    if (mBody.startsWith("{")) {
-                        val jo = org.json.JSONObject(mBody)
-                        listOf("url", "link", "redirect", "target", "data").firstNotNullOfOrNull { k -> jo.optString(k).takeIf { it.startsWith("http") } } ?: ""
-                    } else mBody
-                }.getOrDefault(mBody)
-                println("[DIAG][$pTag] Resolved mintedUrl=$mintedUrl")
-                if (mintedUrl.startsWith("http")) {
-                    val wRes = session.getText(mintedUrl, vaultUrl)
-                    val watchHtml = wRes?.second.orEmpty()
-                    println("[DIAG][$pTag] watching -> code=${wRes?.first} len=${watchHtml.length} blocked=${CimaNowNetwork.isCimaBlocked(wRes?.first ?: 0, watchHtml)}")
-                    val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml)
-                    println("[DIAG][$pTag] decodeWatchingVault -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(24)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads?.size}")
-                    val outerDoc = org.jsoup.Jsoup.parse(watchHtml)
-                    outerDoc.select("script").forEachIndexed { idx, s ->
-                        val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
-                        println("[DIAG][$pTag] WATCH_SCRIPT[$idx] id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} head='${s.data().take(160).replace("\n", " ")}'")
+                document.body.appendChild(dlBtn);
+                const cdDiv = makeEl('DIV'); cdDiv.setAttribute('id', 'countdown'); document.body.appendChild(cdDiv);
+                const h3 = makeEl('H3'); h3.setAttribute('class', 'text_sco'); document.body.appendChild(h3);
+                const ad1 = makeEl('A'); ad1.setAttribute('id', 'xqeqjp'); document.body.appendChild(ad1);
+                const ad2 = makeEl('A'); ad2.setAttribute('id', 'xqeqjp1'); document.body.appendChild(ad2);
+
+                const timers = [];
+                let nextTid = 1;
+                function jq(sel) {
+                    const els = typeof sel === 'string' ? document.querySelectorAll(sel) : [sel];
+                    return {
+                        ready(fn) { setTimeout(fn, 0); return this; },
+                        click(fn) { if (fn) els.forEach(e => e && e.addEventListener && e.addEventListener('click', fn)); else els.forEach(e => e && e.click && e.click()); return this; },
+                        hide() { return this; }, show() { return this; }, fadeIn() { return this; }, fadeOut() { return this; },
+                        attr(k, v) { if (v === undefined) return els[0] ? els[0].getAttribute(k) : null; els.forEach(e => e && e.setAttribute(k, v)); return this; },
+                        removeAttr(k) { els.forEach(e => e && e.removeAttribute(k)); return this; },
+                        text() { return this; }, html() { return this; }, css() { return this; }, on(ev, fn) { els.forEach(e => e && e.addEventListener && e.addEventListener(ev, fn)); return this; },
+                        countdown360(opts) { if (opts && typeof opts.onComplete === 'function') setTimeout(opts.onComplete, (opts.seconds || 10) * 1000); return { start(){} }; }
+                    };
+                }
+                jq.ajax = function(opts) {
+                    logs.push('jq.ajax url=' + opts.url + ' type=' + opts.type + ' data=' + JSON.stringify(opts.data));
+                    capturedHttp.push({ kind: 'ajax', method: opts.type || 'POST', url: opts.url || '', headers: opts.headers || {}, body: typeof opts.data === 'string' ? opts.data : new URLSearchParams(opts.data || {}).toString() });
+                };
+                jq.post = function(url, data) { jq.ajax({ url, type: 'POST', data }); };
+
+                function XHR() { this._h = {}; this._m = 'GET'; this._u = ''; this.readyState = 0; this.status = 200; this.responseText = '{"ok":true,"url":"https://cimanow.cc/watching/?token=test"}'; }
+                XHR.prototype.open = function(m, u) { this._m = String(m); this._u = String(u); this.readyState = 1; };
+                XHR.prototype.setRequestHeader = function(k, v) { this._h[String(k)] = String(v); };
+                XHR.prototype.addEventListener = function(ev, fn) { this['on' + ev] = fn; };
+                XHR.prototype.send = function(body) {
+                    const bStr = body == null ? '' : (body instanceof URLSearchParams ? body.toString() : String(body));
+                    logs.push('XHR ' + this._m + ' ' + this._u + ' hdr=' + JSON.stringify(this._h) + ' body=' + bStr);
+                    capturedHttp.push({ kind: 'xhr', method: this._m, url: this._u, headers: this._h, body: bStr });
+                    this.readyState = 4;
+                    if (typeof this.onload === 'function') this.onload();
+                    if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+                };
+                XHR.prototype.send.toString = () => 'function send() { [native code] }';
+
+                function fakeFetch(url, opts) {
+                    opts = opts || {};
+                    const bStr = opts.body == null ? '' : (opts.body instanceof URLSearchParams ? opts.body.toString() : String(opts.body));
+                    logs.push('FETCH ' + (opts.method||'GET') + ' ' + url + ' hdr=' + JSON.stringify(opts.headers||{}) + ' body=' + bStr);
+                    capturedHttp.push({ kind: 'fetch', method: opts.method || 'GET', url: String(url), headers: opts.headers || {}, body: bStr });
+                    const rTxt = '{"ok":true,"url":"https://cimanow.cc/watching/?token=test"}';
+                    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(rTxt), json: () => Promise.resolve(JSON.parse(rTxt)) });
+                }
+                fakeFetch.toString = () => 'function fetch() { [native code] }';
+
+                const ctxObj = {
+                    console: { log: (...a) => logs.push('log:' + a.join(' ')), warn: (...a) => logs.push('warn:' + a.join(' ')), error: (...a) => logs.push('err:' + a.join(' ')) },
+                    Date: new Proxy(Date, {
+                        apply: () => new Date(virtNow).toString(),
+                        construct: (t, args) => args.length ? new t(...args) : new t(virtNow),
+                        get: (t, p) => p === 'now' ? () => virtNow : Reflect.get(t, p)
+                    }),
+                    performance: { now: () => virtNow % 1000000, timing: { navigationStart: virtNow - 500 } },
+                    location: { href: '${vaultUrl}', origin: '${gwOrigin}', protocol: 'https:', host: '${u.host}', hostname: '${u.host}', pathname: '/2020/02/blog-post.html/', search: '', hash: '', assign(v){logs.push('loc.assign:'+v);}, replace(v){logs.push('loc.replace:'+v);} },
+                    navigator: { userAgent: '${CimaNowNetwork.MOBILE_UA}', platform: 'Linux armv81', language: 'ar', languages: ['ar', 'en-US'], webdriver: false, hardwareConcurrency: 8, deviceMemory: 8, maxTouchPoints: 5 },
+                    screen: { width: 412, height: 915, availWidth: 412, availHeight: 915, colorDepth: 24, pixelDepth: 24 },
+                    devicePixelRatio: 2.625, innerWidth: 412, innerHeight: 815, outerWidth: 412, outerHeight: 915,
+                    document,
+                    $: jq, jQuery: jq,
+                    XMLHttpRequest: XHR,
+                    fetch: fakeFetch,
+                    URLSearchParams,
+                    TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, DataView, Promise, Map, Set, WeakMap, WeakSet, Symbol, Proxy, Reflect, JSON, Math, RegExp, Error, TypeError, Number, String, Boolean, Object, Array, Function, parseInt, parseFloat, isNaN, isFinite, encodeURIComponent, decodeURIComponent, encodeURI, decodeURI, escape, unescape,
+                    atob: s => Buffer.from(String(s), 'base64').toString('binary'),
+                    btoa: s => Buffer.from(String(s), 'binary').toString('base64'),
+                    crypto: cryptoNode.webcrypto,
+                    MutationObserver: class { observe(){} disconnect(){} },
+                    getComputedStyle: el => ({ display: (el&&el.style&&el.style.display)||'block', visibility: 'visible', opacity: '1', getPropertyValue: p => p==='display'?'block':'visible' }),
+                    setTimeout(fn, ms) { const id = nextTid++; timers.push({ id, fn, due: virtNow + (ms||0), iv: 0, active: true }); return id; },
+                    setInterval(fn, ms) { const id = nextTid++; const st = Math.max(50, ms||50); timers.push({ id, fn, due: virtNow + st, iv: st, active: true }); return id; },
+                    clearTimeout(id) { const t = timers.find(x => x.id === id); if (t) t.active = false; },
+                    clearInterval(id) { const t = timers.find(x => x.id === id); if (t) t.active = false; },
+                    requestAnimationFrame(fn) { const id = nextTid++; timers.push({ id, fn, due: virtNow + 16, iv: 0, active: true }); return id; }
+                };
+                ctxObj.window = ctxObj;
+                ctxObj.self = ctxObj;
+                ctxObj.top = ctxObj;
+                ctxObj.parent = ctxObj;
+                ctxObj.globalThis = ctxObj;
+
+                const context = vm.createContext(ctxObj);
+                scripts.forEach((s, idx) => {
+                    if (!s.code.trim()) return;
+                    try {
+                        vm.runInContext(s.code, context, { filename: 'inner_' + idx + '.js', timeout: 4000 });
+                        logs.push('ran inner_' + idx + ' OK');
+                    } catch (e) {
+                        logs.push('err inner_' + idx + ': ' + e.stack.split('\n').slice(0, 2).join(' | '));
+                    }
+                });
+
+                (async () => {
+                    for (const fn of (docListeners['DOMContentLoaded'] || [])) { try { fn({ type: 'DOMContentLoaded' }); } catch(e){} }
+                    const end = virtNow + 13000;
+                    while (virtNow < end) {
+                        virtNow += 250;
+                        for (const tm of timers.slice()) {
+                            if (tm.active && tm.due <= virtNow) {
+                                if (tm.iv > 0) tm.due = virtNow + tm.iv; else tm.active = false;
+                                try { if (typeof tm.fn === 'function') tm.fn(); } catch(e) { logs.push('tmErr:' + e.message); }
+                            }
+                        }
+                        await new Promise(r => setImmediate(r));
+                    }
+                    logs.push('before click dlBtn href=' + dlBtn.href + ' attrs=' + JSON.stringify(dlBtn.attributes));
+                    dlBtn.click();
+                    await new Promise(r => setTimeout(r, 150));
+                    for (let k=0; k<8; k++) {
+                        virtNow += 250;
+                        for (const tm of timers.slice()) {
+                            if (tm.active && tm.due <= virtNow) {
+                                if (tm.iv > 0) tm.due = virtNow + tm.iv; else tm.active = false;
+                                try { if (typeof tm.fn === 'function') tm.fn(); } catch(e) {}
+                            }
+                        }
+                        await new Promise(r => setImmediate(r));
+                    }
+                    logs.push('after click dlBtn href=' + dlBtn.href + ' windowKeys=' + Object.keys(ctxObj).filter(k => !['console','Date','performance','location','navigator','screen','document','$','jQuery','XMLHttpRequest','fetch','window','self','top','parent','globalThis'].includes(k)).join(','));
+                    console.log(JSON.stringify({ logs, capturedHttp, dlHref: dlBtn.href }));
+                    process.exit(0);
+                })();
+            """.trimIndent()
+            java.io.File("/tmp/run_gw.js").writeText(nodeDriver, Charsets.UTF_8)
+            val proc = ProcessBuilder("node", "/tmp/run_gw.js").redirectErrorStream(true).start()
+            val nodeOut = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            println("[DIAG][$pTag] NODE_V8_OUT:\n${nodeOut.take(15000)}")
+
+            val nodeJson = runCatching { org.json.JSONObject(nodeOut.trim().lines().last()) }.getOrNull()
+            val httpArr = nodeJson?.optJSONArray("capturedHttp")
+            if (httpArr != null && httpArr.length() > 0) {
+                for (hi in 0 until httpArr.length()) {
+                    val hObj = httpArr.getJSONObject(hi)
+                    val hUrl = hObj.optString("url")
+                    val hMethod = hObj.optString("method")
+                    val hBody = hObj.optString("body")
+                    val hHdr = hObj.optJSONObject("headers")
+                    println("[DIAG][$pTag] V8_CAPTURED[$hi]: $hMethod $hUrl hdr=$hHdr body=$hBody")
+                    if (hMethod.equals("POST", true) || hUrl.contains("get-link")) {
+                        val elapsed = System.currentTimeMillis() - tFetchDone
+                        if (elapsed < 10_500L) kotlinx.coroutines.delay(10_500L - elapsed)
+                        val fullUrl = when {
+                            hUrl.startsWith("http") -> hUrl
+                            hUrl.startsWith("/") -> "$gwOrigin$hUrl"
+                            else -> "${vaultUrl.trimEnd('/')}/${hUrl.trimStart('/')}"
+                        }
+                        val extraH = mutableMapOf("X-Requested-With" to "XMLHttpRequest")
+                        hHdr?.keys()?.forEach { k -> extraH[k] = hHdr.optString(k) }
+                        val mRes = session.postForm(fullUrl, hBody, vaultUrl, gwOrigin, extraH)
+                        println("[DIAG][$pTag] LIVE POST -> code=${mRes?.first} body='${mRes?.second?.take(500)}'")
                     }
                 }
             }
