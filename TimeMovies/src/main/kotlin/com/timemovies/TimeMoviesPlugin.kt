@@ -130,7 +130,7 @@ class TimeMoviesPlugin : Plugin() {
         }
 
         val headerTitle = TextView(ctx).apply {
-            text = "🎬 إعدادات TimeMovies (v5 — Unlimited)"
+            text = "🎬 إعدادات TimeMovies (v6 — Unlimited)"
             setTextColor(Color.WHITE)
             textSize = 18.5f
             typeface = Typeface.DEFAULT_BOLD

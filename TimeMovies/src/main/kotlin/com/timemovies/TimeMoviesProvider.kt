@@ -330,7 +330,7 @@ class TimeMovies : MainAPI() {
             .map { "https://www.youtube.com/watch?v=${it.key}" }
 
         val tvType = classifyTvType(details.isMovie, details.genresEn, details.genresAr)
-        val isAnimeWork = tvType == TvType.Anime || tvType == TvType.AnimeMovie
+        val isAnimeWork = tvType == TvType.Anime || tvType == TvType.AnimeMovie || tvType == TvType.Cartoon
 
         if (details.isMovie) {
             val linkData = LinkPayload(
@@ -341,6 +341,7 @@ class TimeMovies : MainAPI() {
                 titleAr = details.titleAr?.takeIf { it.isNotBlank() },
                 year = details.releaseYear,
                 isAnime = isAnimeWork,
+                originalTitle = details.originalTitle?.takeIf { it.isNotBlank() },
             ).toJson()
 
             newMovieLoadResponse(
@@ -378,6 +379,7 @@ class TimeMovies : MainAPI() {
                             titleAr = details.titleAr?.takeIf { it.isNotBlank() },
                             year = details.releaseYear,
                             isAnime = isAnimeWork,
+                            originalTitle = details.originalTitle?.takeIf { it.isNotBlank() },
                         ).toJson()
 
                         val epTitle = when {
@@ -442,7 +444,12 @@ class TimeMovies : MainAPI() {
         }
 
         val needsMetadataEnrichment = initialPayload.fileCode.isBlank() ||
-            (unlimitedActive && (initialPayload.titleAr.isNullOrBlank() || initialPayload.year == null))
+            (unlimitedActive && (
+                initialPayload.title.isBlank() ||
+                    initialPayload.title.equals("TimeMovies", ignoreCase = true) ||
+                    initialPayload.titleAr.isNullOrBlank() ||
+                    initialPayload.year == null
+                ))
 
         val resolvedPayload = if (!needsMetadataEnrichment) {
             initialPayload
@@ -466,7 +473,8 @@ class TimeMovies : MainAPI() {
                 val detectedTvType = classifyTvType(fresh.isMovie, fresh.genresEn, fresh.genresAr)
                 val freshIsAnime = initialPayload.isAnime ||
                     detectedTvType == TvType.Anime ||
-                    detectedTvType == TvType.AnimeMovie
+                    detectedTvType == TvType.AnimeMovie ||
+                    detectedTvType == TvType.Cartoon
 
                 initialPayload.copy(
                     fileCode = freshCode,
@@ -474,6 +482,7 @@ class TimeMovies : MainAPI() {
                     titleAr = initialPayload.titleAr ?: fresh.titleAr?.takeIf { it.isNotBlank() },
                     year = initialPayload.year ?: fresh.releaseYear,
                     isAnime = freshIsAnime,
+                    originalTitle = initialPayload.originalTitle ?: fresh.originalTitle?.takeIf { it.isNotBlank() },
                 )
             }
         }

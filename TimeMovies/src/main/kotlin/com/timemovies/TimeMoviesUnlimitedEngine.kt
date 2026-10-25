@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -33,9 +34,12 @@ import java.security.SecureRandom
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import java.text.Normalizer
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
@@ -59,7 +63,7 @@ import javax.crypto.spec.SecretKeySpec
 object TimeMoviesUnlimitedEngine {
 
     private const val BROWSER_UA =
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     private const val CLOUDDAY_APP_UA = "okhttp/4.10.0"
 
     // Shared pure-Kotlin Cloud-Day JNI cryptographic constants (verified identical on CimaCloud v1.3 & AnimeDay v3.8)
@@ -88,7 +92,39 @@ object TimeMoviesUnlimitedEngine {
     private const val ANIMEDAY_API_PATH = "/v3.8/api"
     private const val ANIMEDAY_APK_PATH = "/data/app/com.anime.day/base.apk"
 
+    // Engine 3: Egywatch EasyPlex JSON API (Movies + Series + Anime, zero-quota)
+    private const val EGYWATCH_CODE = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
+    private const val EGYWATCH_APP_UA = "EasyPlex (Android 14; M2006C3MG; Redmi angelica; en)"
+    private const val EGYWATCH_PACKAGE = "com.linkletter.app"
+    private val EGYWATCH_BASES = listOf(
+        "https://gateway.egywatch.live/egywatchapp/public/api/",
+        "https://rn62mwg.com/egywatchapp/public/api/",
+    )
+
+    // Engine 4: DramaWorld ArabyPros JSON API (Movies + Series + Arabic Subtitles, zero-quota)
+    private const val DRAMAWORLD_KEY = "4F5A9C3D9A86FA54EACEDDD635185"
+    private const val DRAMAWORLD_UUID = "d506abfd-9fe2-4b71-b979-feff21bcad13"
+    private const val DRAMAWORLD_UA = "okhttp/4.12.0"
+    private val DRAMAWORLD_BASES = listOf(
+        "https://dwapp.arabypros.com/api",
+        "https://test.arabypros.com/api",
+    )
+
+    // Engine 5: StarDima JSON API (Animated / Cartoon / Disney / Pixar / Anime Movies, zero-quota)
+    private const val STARDIMA_API_KEY = "vGIu8q9aap55zyANSD3jvmbttClhuRmykbQjzsIQxoWloFmp29W2qqdTSrwR"
+    private const val STARDIMA_UA = "jcartoonApp/1.0.8 (Android)"
+    private const val STARDIMA_SECURE_TOKEN = "HACKER_DETECTED_TAMPERED_APK"
+    private val STARDIMA_BASES = listOf(
+        "https://f5f-efgeg59852-zfz2d-mmltizwwcvb5567r2r63e-zd46.stardima.app",
+        "https://app.stardima.com",
+        "https://jcartoonapp.wiib.top",
+    )
+
+    // Engine 6: Web Multi-Mirror Movie Harvesters + Universal 50-Host Server Scraper
     private const val DEFAULT_REMOTE_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/extractor.php"
+    private const val MAWDHOU3_SCRAPER_BASE = "https://mawdhou3.com/"
+    private const val CIMAWBAS_BASE_URL = "https://vid.mycima.cc"
+    private const val TOPCINEMA_BASE_URL = "https://topcinema.film"
     private const val CIMANOW_BASE_URL = "https://cimanow.cc"
 
     private const val CONFIG_TTL_MS = 20L * 60L * 1000L
@@ -153,6 +189,9 @@ object TimeMoviesUnlimitedEngine {
         val name: String,
         val url: String,
         val sourceBackend: String,
+        val referer: String? = null,
+        val origin: String? = null,
+        val userAgent: String? = null,
     )
 
     private data class CachedServerList(
@@ -164,23 +203,41 @@ object TimeMoviesUnlimitedEngine {
     private val embedListCache = ConcurrentHashMap<String, CachedServerList>()
 
     @Volatile
+    private var resolvedDramaWorldBase: String? = null
+
+    @Volatile
+    private var resolvedStarDimaBase: String? = null
+
+    @Volatile
     private var cimaNowDatacenterBlockedUntilMs: Long = 0L
+
+    @Volatile
+    private var cimawbasBlockedUntilMs: Long = 0L
+
+    @Volatile
+    private var topCinemaBlockedUntilMs: Long = 0L
 
     internal fun clearCachesForTests() {
         resolvedBackendCache.clear()
         embedListCache.clear()
+        resolvedDramaWorldBase = null
+        resolvedStarDimaBase = null
         cimaNowDatacenterBlockedUntilMs = 0L
+        cimawbasBlockedUntilMs = 0L
+        topCinemaBlockedUntilMs = 0L
     }
 
     /**
      * Returns `true` when `TimeMoviesUnlimitedEngine` is permitted to run in the current runtime.
      * In mock-HTTP unit tests (`apiBaseUrlOverride != null`), external internet probing is skipped
-     * unless `unlimitedCloudApiOverride` or `forceUnlimitedInMockTests` is explicitly set.
+     * unless an unlimited backend override or `forceUnlimitedInMockTests` is explicitly set.
      */
     fun isRuntimeActive(): Boolean {
         if (!TimeMoviesPrefs.unlimitedBypassEnabled) return false
         if (TimeMoviesPrefs.apiBaseUrlOverride != null) {
             return TimeMoviesPrefs.unlimitedCloudApiOverride != null ||
+                TimeMoviesPrefs.unlimitedEgywatchApiOverride != null ||
+                TimeMoviesPrefs.unlimitedDramaWorldApiOverride != null ||
                 TimeMoviesPrefs.forceUnlimitedInMockTests
         }
         return true
@@ -431,26 +488,67 @@ object TimeMoviesUnlimitedEngine {
         }.getOrNull()
 
     // =========================================================================
-    // 2. Precision Title / Year / Season / Episode Catalog Matching
+    // 2. Precision Bilingual Movie & Series Title / Year / Sequel / Season Matching
     // =========================================================================
 
     private val ARABIC_DIACRITICS_REGEX = Regex("[\\u064B-\\u065F\\u0670\\u0640]")
-    private val STRIP_NOISE_WORDS_REGEX = Regex(
-        "\\b(?:فيلم|مسلسل|انمي|أنمي|كرتون|مترجم|مترجمة|مدبلج|مدبلجة|اون\\s*لاين|كامل|جودة\\s*عالية|hd|bluray|web-dl)\\b",
-        RegexOption.IGNORE_CASE,
-    )
-    private val TRAILING_YEAR_PARENS_REGEX = Regex("\\s*\\((?:19|20)\\d{2}\\)\\s*$")
+    private val COMBINING_MARKS_REGEX = Regex("\\p{InCombiningDiacriticalMarks}+")
+    private val TRAILING_YEAR_PARENS_REGEX = Regex("\\s*[\\(\\[]\\s*(?:19|20)\\d{2}\\s*[\\)\\]]\\s*$")
+    private val HYPHENATED_WORDS_REGEX = Regex("([A-Za-z\\u0621-\\u064A])[\\-\u2010-\u2015]([A-Za-z\\u0621-\\u064A])")
     private val SEASON_SUFFIX_REGEX = Regex(
-        "(?:\\s*[-:]?\\s*(?:الموسم|موسم|season|part|الجزء)\\s*(?:الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|\\d+))+$",
+        "(?:\\s*[-:]?\\s*(?:الموسم|موسم|season|الجزء)\\s*(?:الاول|الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|\\d+))+$",
         RegexOption.IGNORE_CASE,
     )
     private val NON_ALNUM_ARABIC_REGEX = Regex("[^a-z0-9\\u0621-\\u064A]+")
+    private val LATIN_HAS_CHAR_REGEX = Regex("[a-z]")
+    private val ARABIC_HAS_CHAR_REGEX = Regex("[\\u0621-\\u064A]")
     private val YEAR_EXTRACT_REGEX = Regex("((?:19|20)\\d{2})")
 
-    internal fun normalizeCompareTitle(raw: String?, stripSeasonSuffix: Boolean = false): String {
+    // Token-level noise set (avoids Java ASCII `\b` bug on Arabic script)
+    private val NOISE_TOKENS = setOf(
+        "فيلم", "افلام", "مسلسل", "انمي", "كرتون", "مترجم", "مترجمه", "مدبلج", "مدبلجه",
+        "اون", "لاين", "اونلاين", "كامل", "كامله", "حصري", "حصريا", "مشاهده", "تحميل",
+        "بجوده", "جوده", "عاليه", "نسخه", "اصليه", "عربي", "بالعربي", "اجنبي", "اسيوي",
+        "hd", "fhd", "uhd", "4k", "2160p", "1080p", "720p", "480p", "360p",
+        "bluray", "webdl", "webrip", "brrip", "bdrip", "dvdrip", "hdrip", "hdtv",
+        "hdcam", "cam", "ts", "hc", "subbed", "dubbed", "online",
+    )
+
+    private fun mapSequelToken(token: String, index: Int): String = when (token) {
+        "ii", "two", "الثاني", "ثاني" -> "2"
+        "iii", "three", "الثالث", "ثالث" -> "3"
+        "iv", "four", "الرابع", "رابع" -> "4"
+        "five", "الخامس", "خامس" -> "5"
+        "vi", "six", "السادس", "سادس" -> "6"
+        "vii", "seven", "السابع", "سابع" -> "7"
+        "viii", "eight", "الثامن", "ثامن" -> "8"
+        "ix", "nine", "التاسع", "تاسع" -> "9"
+        "ten", "العاشر", "عاشر" -> "10"
+        // Map single-letter Roman numerals V and X only after the first word (preserves "X" and "V for Vendetta")
+        "v" -> if (index > 0) "5" else token
+        "x" -> if (index > 0) "10" else token
+        else -> token
+    }
+
+    private fun isReleaseYearToken(token: String): Boolean {
+        if (token.length != 4) return false
+        val y = token.toIntOrNull() ?: return false
+        return y in 1925..2035
+    }
+
+    internal fun normalizeCompareTitle(
+        raw: String?,
+        stripSeasonSuffix: Boolean = false,
+        stripTrailingYearToken: Boolean = true,
+    ): String {
         if (raw.isNullOrBlank()) return ""
-        var s = raw.trim().lowercase()
+        var s = raw.trim()
         s = s.replace(TRAILING_YEAR_PARENS_REGEX, " ")
+        // Strip Latin accents ("Pokémon" -> "Pokemon", "Folie à Deux" -> "Folie a Deux")
+        s = Normalizer.normalize(s, Normalizer.Form.NFD)
+        s = COMBINING_MARKS_REGEX.replace(s, "")
+        s = s.lowercase()
+            .replace("&", " and ")
         s = ARABIC_DIACRITICS_REGEX.replace(s, "")
         s = s
             .replace('أ', 'ا')
@@ -461,26 +559,138 @@ object TimeMoviesUnlimitedEngine {
             .replace('ى', 'ي')
             .replace('ؤ', 'و')
             .replace('ئ', 'ي')
-        s = STRIP_NOISE_WORDS_REGEX.replace(s, " ")
         if (stripSeasonSuffix) {
             s = SEASON_SUFFIX_REGEX.replace(s, " ")
         }
-        // Normalize standalone Roman numerals II..VIII for sequel accuracy
-        s = s
-            .replace(Regex("\\bviii\\b"), "8")
-            .replace(Regex("\\bvii\\b"), "7")
-            .replace(Regex("\\bvi\\b"), "6")
-            .replace(Regex("\\biv\\b"), "4")
-            .replace(Regex("\\biii\\b"), "3")
-            .replace(Regex("\\bii\\b"), "2")
-        s = NON_ALNUM_ARABIC_REGEX.replace(s, " ").trim()
-        return s.replace(Regex("\\s+"), " ")
+        val rawTokens = NON_ALNUM_ARABIC_REGEX.split(s).filter { it.isNotEmpty() }
+        if (rawTokens.isEmpty()) return ""
+
+        val cleaned = ArrayList<String>(rawTokens.size)
+        for (tok in rawTokens) {
+            if (tok in NOISE_TOKENS) continue
+            cleaned.add(tok)
+        }
+        if (cleaned.isEmpty()) return ""
+
+        val mapped = cleaned.mapIndexed { idx, tok -> mapSequelToken(tok, idx) }.toMutableList()
+        if (stripTrailingYearToken && mapped.size >= 2 && isReleaseYearToken(mapped.last())) {
+            mapped.removeAt(mapped.lastIndex)
+        }
+        return mapped.joinToString(" ")
+    }
+
+    private fun stripEmbeddedReleaseYears(norm: String): String {
+        val tokens = norm.split(' ').filter { it.isNotEmpty() }
+        if (tokens.size < 2) return norm
+        val nonYears = tokens.filterNot { isReleaseYearToken(it) }
+        return if (nonYears.isNotEmpty()) nonYears.joinToString(" ") else tokens.first()
+    }
+
+    /**
+     * Produces normalized views of a title across Full, Year-Free, Latin-only, Arabic-only, and
+     * joined-hyphen forms so bilingual catalog entries like `"فيلم Oppenheimer 2023 اوبنهايمر مترجم"`
+     * or `"Spider-Man"` vs `"Spiderman"` achieve 1.00 exact similarity.
+     */
+    internal fun extractTitleNormViews(raw: String?, stripSeasonSuffix: Boolean): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val variants = LinkedHashSet<String>()
+        val inputs = buildList {
+            add(raw)
+            if (HYPHENATED_WORDS_REGEX.containsMatchIn(raw)) {
+                add(HYPHENATED_WORDS_REGEX.replace(raw, "$1$2"))
+            }
+        }
+        for (inp in inputs) {
+            val full = normalizeCompareTitle(inp, stripSeasonSuffix = stripSeasonSuffix, stripTrailingYearToken = true)
+            val fullWithYear = normalizeCompareTitle(inp, stripSeasonSuffix = stripSeasonSuffix, stripTrailingYearToken = false)
+            val yearFree = stripEmbeddedReleaseYears(full)
+            for (norm in linkedSetOf(full, yearFree, fullWithYear)) {
+                if (norm.isEmpty()) continue
+                variants.add(norm)
+                val tokens = norm.split(' ').filter { it.isNotEmpty() }
+                val hasLatin = tokens.any { LATIN_HAS_CHAR_REGEX.containsMatchIn(it) }
+                val hasArabic = tokens.any { ARABIC_HAS_CHAR_REGEX.containsMatchIn(it) }
+                if (hasLatin && hasArabic) {
+                    val latinTokens = tokens.filter {
+                        (LATIN_HAS_CHAR_REGEX.containsMatchIn(it) || it.all(Char::isDigit)) && !isReleaseYearToken(it)
+                    }
+                    if (latinTokens.isNotEmpty() && latinTokens.any { LATIN_HAS_CHAR_REGEX.containsMatchIn(it) }) {
+                        variants.add(latinTokens.joinToString(" "))
+                    }
+
+                    val arabicTokens = tokens.filter {
+                        (ARABIC_HAS_CHAR_REGEX.containsMatchIn(it) || it.all(Char::isDigit)) && !isReleaseYearToken(it)
+                    }
+                    if (arabicTokens.isNotEmpty() && arabicTokens.any { ARABIC_HAS_CHAR_REGEX.containsMatchIn(it) }) {
+                        variants.add(arabicTokens.joinToString(" "))
+                    }
+                }
+            }
+        }
+        return variants.toList()
+    }
+
+    internal fun extractSequelNumber(norm: String): Int? {
+        if (norm.isBlank()) return null
+        val tokens = norm.split(' ').filter { it.isNotEmpty() && it != "part" && it != "الجزء" && it != "جزء" }
+        if (tokens.size < 2) return null
+        // Inspect from the end for sequel numbers 1..15 (ignoring years or titles like "District 9" only if identical on both sides)
+        val lastNum = tokens.last().toIntOrNull()
+        if (lastNum != null && lastNum in 1..15) return lastNum
+        for (i in tokens.lastIndex downTo 1) {
+            val n = tokens[i].toIntOrNull()
+            if (n != null && n in 2..15) return n
+        }
+        return null
+    }
+
+    private fun extractColonOrDashPrefixes(raw: String?, stripSeasonSuffix: Boolean): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val clean = raw.replace(TRAILING_YEAR_PARENS_REGEX, "").trim()
+        val prefixes = LinkedHashSet<String>()
+        if (clean.contains(':')) {
+            val p = clean.substringBefore(':').trim()
+            if (p.length >= 4 && p.length < clean.length) prefixes.add(p)
+        }
+        for (sep in listOf(" - ", " – ", " — ")) {
+            if (clean.contains(sep)) {
+                val p = clean.substringBefore(sep).trim()
+                if (p.length >= 4 && p.length < clean.length) prefixes.add(p)
+            }
+        }
+        return prefixes.flatMap { extractTitleNormViews(it, stripSeasonSuffix) }
+            .filter { norm ->
+                val tokCount = norm.split(' ').count { it.isNotEmpty() }
+                tokCount >= 2 || norm.length >= 6
+            }
+            .distinct()
+    }
+
+    internal fun buildPrimaryTargetNorms(payload: TimeMoviesModels.LinkPayload): List<String> {
+        val stripSeason = !payload.isMovie
+        return buildList {
+            addAll(extractTitleNormViews(payload.title, stripSeasonSuffix = stripSeason))
+            if (stripSeason) addAll(extractTitleNormViews(payload.title, stripSeasonSuffix = false))
+            addAll(extractTitleNormViews(payload.titleAr, stripSeasonSuffix = stripSeason))
+            if (stripSeason) addAll(extractTitleNormViews(payload.titleAr, stripSeasonSuffix = false))
+            addAll(extractTitleNormViews(payload.originalTitle, stripSeasonSuffix = stripSeason))
+        }.distinct()
+    }
+
+    private fun buildPrefixTargetNorms(payload: TimeMoviesModels.LinkPayload, primaryNorms: List<String>): List<String> {
+        val stripSeason = !payload.isMovie
+        val primarySet = primaryNorms.toSet()
+        return buildList {
+            addAll(extractColonOrDashPrefixes(payload.title, stripSeason))
+            addAll(extractColonOrDashPrefixes(payload.titleAr, stripSeason))
+            addAll(extractColonOrDashPrefixes(payload.originalTitle, stripSeason))
+        }.filter { it !in primarySet }.distinct()
     }
 
     private fun extractSeasonHintFromTitle(raw: String?): Int? {
         if (raw.isNullOrBlank()) return null
         val lower = ARABIC_DIACRITICS_REGEX.replace(raw.lowercase(), "")
-        Regex("(?:season|الموسم|موسم|الجزء|part)\\s*(\\d{1,2})").find(lower)
+        Regex("(?:season|الموسم|موسم|الجزء)\\s*(\\d{1,2})").find(lower)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
         return when {
             lower.contains("الموسم الاول") || lower.contains("الموسم الأول") -> 1
@@ -516,6 +726,21 @@ object TimeMoviesUnlimitedEngine {
         return maxOf(jaccard, containment * 0.86)
     }
 
+    private fun areSequelNumbersIncompatible(targetNorms: List<String>, candidateViews: List<String>): Boolean {
+        val targetSeqs = targetNorms.mapNotNull { extractSequelNumber(it) }.toSet()
+        val candSeqs = candidateViews.mapNotNull { extractSequelNumber(it) }.toSet()
+        if (targetSeqs.isEmpty() && candSeqs.isEmpty()) return false
+        if (targetSeqs.isEmpty()) {
+            // Target is Part 1 (unnumbered): reject candidate if it explicitly carries sequel >= 2
+            return candSeqs.any { it >= 2 }
+        }
+        if (candSeqs.isEmpty()) {
+            // Target explicitly asks for sequel >= 2, candidate has no sequel number -> incompatible unless prefix matched
+            return targetSeqs.any { it >= 2 }
+        }
+        return targetSeqs.intersect(candSeqs).isEmpty()
+    }
+
     internal data class ScoredCatalogCandidate(
         val id: Int,
         val isMovieItem: Boolean,
@@ -527,8 +752,9 @@ object TimeMoviesUnlimitedEngine {
     internal fun scoreCatalogItem(
         item: JSONObject,
         payload: TimeMoviesModels.LinkPayload,
-        targetNorms: List<String>,
+        targetNorms: List<String> = buildPrimaryTargetNorms(payload),
     ): ScoredCatalogCandidate? {
+        if (targetNorms.isEmpty()) return null
         val rawType = item.optString("type", "").lowercase().trim()
         val isEpisodeCard = rawType == "episode"
 
@@ -547,7 +773,7 @@ object TimeMoviesUnlimitedEngine {
             isEpisodeCard -> false
             rawType.contains("serie") || rawType == "tv" || rawType.contains("anime_series") -> false
             rawType.contains("movie") || rawType == "film" -> true
-            item.has("seasons_count") || item.has("episodes_count") -> false
+            item.has("seasons_count") || item.has("episodes_count") || item.has("seasons") -> false
             else -> payload.isMovie
         }
         if (isMovieItem != payload.isMovie) return null
@@ -566,41 +792,75 @@ object TimeMoviesUnlimitedEngine {
         }
         if (rawNames.isEmpty()) return null
 
-        val stripSeason = !payload.isMovie
-        var bestSim = 0.0
-        for (candRaw in rawNames) {
-            val candFull = normalizeCompareTitle(candRaw, stripSeasonSuffix = false)
-            val candStripped = normalizeCompareTitle(candRaw, stripSeasonSuffix = stripSeason)
-            for (tNorm in targetNorms) {
-                bestSim = maxOf(
-                    bestSim,
-                    computeTitleSimilarity(tNorm, candFull),
-                    computeTitleSimilarity(tNorm, candStripped),
-                )
-            }
-        }
-        if (bestSim < 0.52) return null
-
-        var score = when {
-            bestSim >= 0.999 -> 100
-            bestSim >= 0.85 -> 82
-            bestSim >= 0.72 -> 68
-            else -> 50
-        }
-
         val itemYear = YEAR_EXTRACT_REGEX.find(
             item.optString("year", "").ifBlank {
                 item.optString("release_date", "").ifBlank { item.optString("first_air_date", "") }
             }
-        )?.groupValues?.getOrNull(1)?.toIntOrNull()
+        )?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1920..2035 }
+            ?: rawNames.firstNotNullOfOrNull { rn ->
+                TRAILING_YEAR_PARENS_REGEX.find(rn)?.let { m ->
+                    YEAR_EXTRACT_REGEX.find(m.value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                }
+            }
+
+        val stripSeason = !payload.isMovie
+        val allCandViews = rawNames.flatMap { candRaw ->
+            buildList {
+                addAll(extractTitleNormViews(candRaw, stripSeasonSuffix = stripSeason))
+                if (stripSeason) addAll(extractTitleNormViews(candRaw, stripSeasonSuffix = false))
+            }
+        }.distinct()
+        if (allCandViews.isEmpty()) return null
+
+        var bestSim = 0.0
+        for (cView in allCandViews) {
+            for (tNorm in targetNorms) {
+                bestSim = maxOf(bestSim, computeTitleSimilarity(tNorm, cView))
+            }
+        }
+
+        // Prefix fallback (e.g., "Furiosa: A Mad Max Saga" -> "Furiosa" or "ولاد رزق 3: القاضية" -> "ولاد رزق 3")
+        // strictly gated by release year agreement (±1 year) when both years are known.
+        var usedPrefixMatch = false
+        if (bestSim < 0.72 && payload.isMovie) {
+            val yearAllowsPrefix = payload.year == null || itemYear == null ||
+                kotlin.math.abs(payload.year - itemYear) <= 1
+            if (yearAllowsPrefix) {
+                val prefixTargets = buildPrefixTargetNorms(payload, targetNorms)
+                var prefixSim = 0.0
+                for (cView in allCandViews) {
+                    for (pNorm in prefixTargets) {
+                        prefixSim = maxOf(prefixSim, computeTitleSimilarity(pNorm, cView))
+                    }
+                }
+                if (prefixSim >= 0.92 && prefixSim > bestSim) {
+                    bestSim = prefixSim * 0.88
+                    usedPrefixMatch = true
+                }
+            }
+        }
+
+        if (bestSim < 0.52) return null
+
+        var score = when {
+            bestSim >= 0.999 -> 100
+            bestSim >= 0.85 -> 84
+            bestSim >= 0.72 -> 68
+            else -> 50
+        }
+
+        if (!usedPrefixMatch && areSequelNumbersIncompatible(targetNorms, allCandViews)) {
+            score -= 55
+        }
 
         if (payload.year != null && itemYear != null) {
             val diff = kotlin.math.abs(payload.year - itemYear)
             when {
                 diff == 0 -> score += 35
-                diff == 1 -> score += 20
-                diff == 2 -> score += 5
-                payload.isMovie -> score -= 65
+                diff == 1 -> score += 22
+                diff == 2 -> score += 10
+                diff == 3 -> score -= 8
+                payload.isMovie -> score -= 38
                 else -> score -= 15
             }
         }
@@ -624,22 +884,73 @@ object TimeMoviesUnlimitedEngine {
         )
     }
 
-    private fun buildSearchQueries(payload: TimeMoviesModels.LinkPayload): List<String> {
+    internal fun buildSearchQueries(payload: TimeMoviesModels.LinkPayload): List<String> {
         val queries = LinkedHashSet<String>()
+
+        fun addIfValid(q: String?) {
+            val trimmed = q?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+            if (trimmed.isNotEmpty() && !trimmed.equals("TimeMovies", ignoreCase = true)) {
+                // Allow 1-char movie titles like "X" as well as numeric titles like "1917"
+                if (trimmed.length >= 2 || trimmed.any { it.isLetterOrDigit() }) {
+                    queries.add(trimmed)
+                }
+            }
+        }
+
         val cleanEn = payload.title.replace(TRAILING_YEAR_PARENS_REGEX, "").trim()
-        if (cleanEn.length >= 2 && !cleanEn.equals("TimeMovies", ignoreCase = true)) {
-            queries.add(cleanEn)
-        }
         val cleanAr = payload.titleAr?.replace(TRAILING_YEAR_PARENS_REGEX, "")?.trim().orEmpty()
-        if (cleanAr.length >= 2 && !cleanAr.equals(cleanEn, ignoreCase = true)) {
-            queries.add(cleanAr)
+        val cleanOrig = payload.originalTitle?.replace(TRAILING_YEAR_PARENS_REGEX, "")?.trim().orEmpty()
+
+        // 1. Primary English & Arabic titles
+        addIfValid(cleanEn)
+        if (!cleanAr.equals(cleanEn, ignoreCase = true)) {
+            addIfValid(cleanAr)
         }
-        // Fallback shortened main title before `:` or ` - ` (scored strictly with year check)
-        val baseBeforeColon = cleanEn.substringBefore(':').substringBefore(" - ").trim()
-        if (baseBeforeColon.length >= 4 && baseBeforeColon.length < cleanEn.length) {
-            queries.add(baseBeforeColon)
+        if (cleanOrig.isNotEmpty() && !cleanOrig.equals(cleanEn, ignoreCase = true) && !cleanOrig.equals(cleanAr, ignoreCase = true)) {
+            addIfValid(cleanOrig)
         }
-        return queries.take(3)
+
+        // 2. Punctuation-stripped & hamza-normalized Arabic query (critical for SQL LIKE search on "ولاد رزق 3: القاضية" / "أوبنهايمر")
+        if (cleanAr.isNotEmpty()) {
+            val bareAr = ARABIC_DIACRITICS_REGEX.replace(cleanAr, "")
+                .replace(Regex("[:\\-–—،,?!؟\"'()]"), " ")
+                .trim()
+            addIfValid(bareAr)
+            val hamzaFreeAr = bareAr
+                .replace('أ', 'ا')
+                .replace('إ', 'ا')
+                .replace('آ', 'ا')
+                .replace('ى', 'ي')
+            addIfValid(hamzaFreeAr)
+        }
+
+        // 3. Punctuation/hyphen-normalized English query ("Spider-Man: No Way Home" -> "Spider Man No Way Home" & "Spiderman")
+        if (cleanEn.isNotEmpty()) {
+            val noPunctEn = Normalizer.normalize(cleanEn, Normalizer.Form.NFD)
+                .let { COMBINING_MARKS_REGEX.replace(it, "") }
+                .replace("&", " and ")
+                .replace(Regex("[:\\-–—.,?!'\"()]"), " ")
+            addIfValid(noPunctEn)
+            if (HYPHENATED_WORDS_REGEX.containsMatchIn(cleanEn)) {
+                addIfValid(HYPHENATED_WORDS_REGEX.replace(cleanEn, "$1$2").substringBefore(':').trim())
+            }
+            // Roman <-> Digit sequel query variant ("Dune: Part Two" -> "Dune 2", "Gladiator II" -> "Gladiator 2")
+            val normEn = normalizeCompareTitle(cleanEn, stripSeasonSuffix = !payload.isMovie)
+            if (normEn.isNotEmpty() && !normEn.equals(cleanEn, ignoreCase = true)) {
+                addIfValid(normEn)
+            }
+        }
+
+        // 4. Shortened franchise prefix before `:` or ` - ` (both English & Arabic)
+        for (src in listOf(cleanEn, cleanAr)) {
+            if (src.isEmpty()) continue
+            val beforeColon = src.substringBefore(':').substringBefore(" - ").substringBefore(" – ").trim()
+            if (beforeColon.length >= 4 && beforeColon.length < src.length) {
+                addIfValid(beforeColon)
+            }
+        }
+
+        return queries.take(6)
     }
 
     private fun parseServerArray(json: JSONObject?, backendLabel: String): List<UnlimitedServerEmbed> {
@@ -648,6 +959,7 @@ object TimeMoviesUnlimitedEngine {
             ?: json.optJSONArray("items")
             ?: json.optJSONArray("data")
             ?: json.optJSONObject("data")?.optJSONArray("servers")
+            ?: json.optJSONObject("movie")?.optJSONArray("servers")
             ?: return emptyList()
 
         val out = ArrayList<UnlimitedServerEmbed>(arr.length())
@@ -659,9 +971,11 @@ object TimeMoviesUnlimitedEngine {
                 rawUrl = srv.optString("link", "")
                     .ifBlank { srv.optString("url", "") }
                     .ifBlank { srv.optString("embed_url", "") }
+                    .ifBlank { srv.optString("file", "") }
                     .trim()
                 srvName = srv.optString("name", "")
                     .ifBlank { srv.optString("server_name", "") }
+                    .ifBlank { srv.optString("title", "") }
                     .ifBlank { extractHostLabel(rawUrl, i + 1) }
                     .trim()
             } else {
@@ -742,42 +1056,38 @@ object TimeMoviesUnlimitedEngine {
         val queries = buildSearchQueries(payload)
         if (queries.isEmpty()) return emptyList()
 
-        val targetNorms = buildList {
-            normalizeCompareTitle(payload.title, stripSeasonSuffix = !payload.isMovie)
-                .takeIf { it.isNotEmpty() }?.let { add(it) }
-            normalizeCompareTitle(payload.title, stripSeasonSuffix = false)
-                .takeIf { it.isNotEmpty() }?.let { add(it) }
-            normalizeCompareTitle(payload.titleAr, stripSeasonSuffix = !payload.isMovie)
-                .takeIf { it.isNotEmpty() }?.let { add(it) }
-            normalizeCompareTitle(payload.titleAr, stripSeasonSuffix = false)
-                .takeIf { it.isNotEmpty() }?.let { add(it) }
-        }.distinct()
+        val targetNorms = buildPrimaryTargetNorms(payload)
         if (targetNorms.isEmpty()) return emptyList()
 
         val candidatesById = LinkedHashMap<Int, ScoredCatalogCandidate>()
         for (query in queries) {
-            val res = cloudDayPost(
-                backend = backend,
-                endpoint = "search",
-                formFields = mapOf(
-                    "title" to query,
-                    "type" to "0",
-                    "sort" to "1",
-                    "page" to "1",
-                ),
-            ) ?: continue
-            val items = res.optJSONArray("results")
-                ?: res.optJSONArray("items")
-                ?: res.optJSONArray("data")
-                ?: res.optJSONObject("data")?.optJSONArray("data")
-                ?: continue
+            var page1Count = 0
+            for (pageNum in listOf("1", "2")) {
+                if (pageNum == "2" && (page1Count < 15 || candidatesById.isNotEmpty())) break
+                val res = cloudDayPost(
+                    backend = backend,
+                    endpoint = "search",
+                    formFields = mapOf(
+                        "title" to query,
+                        "type" to "0",
+                        "sort" to "1",
+                        "page" to pageNum,
+                    ),
+                ) ?: break
+                val items = res.optJSONArray("results")
+                    ?: res.optJSONArray("items")
+                    ?: res.optJSONArray("data")
+                    ?: res.optJSONObject("data")?.optJSONArray("data")
+                    ?: break
+                if (pageNum == "1") page1Count = items.length()
 
-            for (i in 0 until items.length()) {
-                val obj = items.optJSONObject(i) ?: continue
-                val scored = scoreCatalogItem(obj, payload, targetNorms) ?: continue
-                val prev = candidatesById[scored.id]
-                if (prev == null || scored.score > prev.score) {
-                    candidatesById[scored.id] = scored
+                for (i in 0 until items.length()) {
+                    val obj = items.optJSONObject(i) ?: continue
+                    val scored = scoreCatalogItem(obj, payload, targetNorms) ?: continue
+                    val prev = candidatesById[scored.id]
+                    if (prev == null || scored.score > prev.score) {
+                        candidatesById[scored.id] = scored
+                    }
                 }
             }
             if (candidatesById.values.any { it.score >= 115 }) break
@@ -787,13 +1097,28 @@ object TimeMoviesUnlimitedEngine {
         val ranked = candidatesById.values.sortedByDescending { it.score }
 
         if (payload.isMovie) {
-            val best = ranked.first()
-            return parseServerArray(cloudDayGet(backend, "movie/${best.id}/servers"), backend.displayPrefix)
+            // Merge servers across top-ranked matching movie entries (e.g. Subbed + Dubbed + 4K/1080p copies,
+            // or fall back cleanly if the #1 duplicate row has empty servers)
+            val topScore = ranked.first().score
+            val movieMerged = LinkedHashMap<String, UnlimitedServerEmbed>()
+            for (cand in ranked.take(4)) {
+                if (movieMerged.isNotEmpty() && cand.score < topScore - 22) break
+                var servers = parseServerArray(cloudDayGet(backend, "movie/${cand.id}/servers"), backend.displayPrefix)
+                if (servers.isEmpty()) {
+                    // Fallback: inspect inline movie detail payload (`GET movie/{id}`)
+                    servers = parseServerArray(cloudDayGet(backend, "movie/${cand.id}"), backend.displayPrefix)
+                }
+                for (srv in servers) {
+                    movieMerged.putIfAbsent(srv.url, srv)
+                }
+                if (movieMerged.size >= 8) break
+            }
+            return movieMerged.values.toList()
         }
 
         val targetSeason = payload.seasonNum ?: 1
         val targetEpisode = payload.episodeNum ?: 1
-        for (cand in ranked.take(3)) {
+        for (cand in ranked.take(4)) {
             val epResp = cloudDayGet(backend, "series/${cand.id}/episodes") ?: continue
             val seasonsArr = epResp.optJSONArray("seasons")
                 ?: epResp.optJSONArray("items")
@@ -808,7 +1133,8 @@ object TimeMoviesUnlimitedEngine {
     }
 
     /**
-     * Resolves all zero-quota server embeds for `payload`, caching per `(workId, episodeId)` for 4 hours.
+     * Resolves primary Cloud-Day (`CimaCloud` + `AnimeDay`) zero-quota server embeds for `payload`,
+     * caching per `(workId, episodeId)` for 4 hours.
      */
     fun resolveUnlimitedEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
         val cacheKey = "${payload.workId}|${payload.episodeId.orEmpty()}|${payload.seasonNum ?: 0}|${payload.episodeNum ?: 0}"
@@ -831,8 +1157,9 @@ object TimeMoviesUnlimitedEngine {
             for (srv in found) {
                 collected.putIfAbsent(srv.url, srv)
             }
-            // If primary backend already yielded rich servers, skip secondary unless anime
-            if (collected.size >= 3 && !payload.isAnime) break
+            // For series, 3 servers on primary backend is plenty; for movies, prefer >= 4 or check secondary if anime
+            val enoughThreshold = if (payload.isMovie) 4 else 3
+            if (collected.size >= enoughThreshold && !payload.isAnime) break
         }
 
         val finalList = collected.values.toList()
@@ -1119,6 +1446,30 @@ object TimeMoviesUnlimitedEngine {
 
     // ---- Individual Pure-Kotlin Server Extractors ----
 
+    private fun probeDirectVideoAlive(url: String, headers: Map<String, String>): Boolean {
+        if (TimeMoviesPrefs.apiBaseUrlOverride != null) return true
+        return runCatching {
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .get()
+                .header("Range", "bytes=0-11")
+                .header("User-Agent", headers["User-Agent"] ?: BROWSER_UA)
+            for ((k, v) in headers) {
+                if (!k.equals("Range", ignoreCase = true)) {
+                    reqBuilder.header(k, v)
+                }
+            }
+            fastProbeClient.newCall(reqBuilder.build()).execute().use { resp ->
+                if (resp.code == 404 || resp.code == 410 || resp.code == 416 || resp.code >= 500) {
+                    return@use false
+                }
+                val ct = resp.header("Content-Type").orEmpty().lowercase()
+                if (ct.contains("text/html")) return@use false
+                resp.isSuccessful || resp.code == 206
+            }
+        }.getOrDefault(false)
+    }
+
     private suspend fun extractGooglePhotos(
         embedUrl: String,
         sourceName: String,
@@ -1133,9 +1484,31 @@ object TimeMoviesUnlimitedEngine {
             ?: return 0
 
         var count = 0
-        count += emitProgressiveDownloadVideo("$baseStreamUrl=m37", sourceName, "https://photos.google.com/", 1080, callback = callback)
-        count += emitProgressiveDownloadVideo("$baseStreamUrl=m22", sourceName, "https://photos.google.com/", 720, callback = callback)
-        count += emitProgressiveDownloadVideo("$baseStreamUrl=m18", sourceName, "https://photos.google.com/", 360, callback = callback)
+        for ((suffix, quality) in listOf("=m37" to 1080, "=m22" to 720, "=m18" to 360)) {
+            val streamUrl = "$baseStreamUrl$suffix"
+            val isValidMp4 = if (TimeMoviesPrefs.apiBaseUrlOverride != null) {
+                true
+            } else {
+                runCatching {
+                    val req = Request.Builder()
+                        .url(streamUrl)
+                        .get()
+                        .header("User-Agent", BROWSER_UA)
+                        .header("Referer", "https://photos.google.com/")
+                        .header("Range", "bytes=0-11")
+                        .build()
+                    fastProbeClient.newCall(req).execute().use { resp ->
+                        if (!(resp.isSuccessful || resp.code == 206)) return@use false
+                        val head = ByteArray(12)
+                        val n = resp.body?.byteStream()?.read(head) ?: 0
+                        n >= 8 && String(head, 4, 4, StandardCharsets.US_ASCII) == "ftyp"
+                    }
+                }.getOrDefault(false)
+            }
+            if (isValidMp4) {
+                count += emitProgressiveDownloadVideo(streamUrl, sourceName, "https://photos.google.com/", quality, callback = callback)
+            }
+        }
         return count
     }
 
@@ -1151,20 +1524,65 @@ object TimeMoviesUnlimitedEngine {
             return emitProgressiveDownloadVideo(fetched.finalUrl, sourceName, "${originOf(fetched.finalUrl)}/", q, callback = callback)
         }
         val html = (fetched as FetchOutcome.Text).body
-        val objText = Regex("""const\s+availableQualities\s*=\s*(\{[^;]+\})""").find(html)?.groupValues?.getOrNull(1)
-            ?: return 0
-        val obj = runCatching { JSONObject(objText) }.getOrNull() ?: return 0
         var count = 0
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val vUrl = obj.optString(k, "").trim()
-            if (!vUrl.startsWith("http")) continue
-            val q = parseQualityInt(k, vUrl)
-            count += if (vUrl.contains(".m3u8", ignoreCase = true)) {
-                emitHlsStreamAndVariants(vUrl, sourceName, embedUrl, forcedQuality = q, subtitleCallback = subtitleCallback, callback = callback)
+
+        // 1. `const availableQualities = {...}` worker format
+        Regex("""const\s+availableQualities\s*=\s*(\{[^;]+\})""").find(html)?.groupValues?.getOrNull(1)?.let { objText ->
+            val obj = runCatching { JSONObject(objText) }.getOrNull()
+            if (obj != null) {
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val vUrl = obj.optString(k, "").trim()
+                    if (!vUrl.startsWith("http")) continue
+                    val q = parseQualityInt(k, vUrl)
+                    count += if (vUrl.contains(".m3u8", ignoreCase = true)) {
+                        emitHlsStreamAndVariants(vUrl, sourceName, embedUrl, forcedQuality = q, subtitleCallback = subtitleCallback, callback = callback)
+                    } else {
+                        emitProgressiveDownloadVideo(vUrl, sourceName, embedUrl, q, callback = callback)
+                    }
+                }
+            }
+        }
+        if (count > 0) return count
+
+        // 2. `*.developer-pro.workers.dev` JSON / direct media worker format
+        if (html.trimStart().startsWith("{")) {
+            runCatching {
+                val json = JSONObject(html)
+                val single = json.optString("url", "").ifBlank { json.optString("file", "") }.ifBlank { json.optString("stream", "") }.trim()
+                if (single.startsWith("http")) {
+                    count += if (single.contains(".m3u8", true)) {
+                        emitHlsStreamAndVariants(single, sourceName, embedUrl, subtitleCallback = subtitleCallback, callback = callback)
+                    } else {
+                        emitProgressiveDownloadVideo(single, sourceName, embedUrl, parseQualityInt(sourceName, single), callback = callback)
+                    }
+                }
+                val arr = json.optJSONArray("sources") ?: json.optJSONArray("links") ?: json.optJSONArray("qualities")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val s = arr.optJSONObject(i) ?: continue
+                        val u = s.optString("url", "").ifBlank { s.optString("file", "") }.trim()
+                        if (!u.startsWith("http")) continue
+                        val q = parseQualityInt(s.optString("quality", s.optString("label", "")), u)
+                        count += if (u.contains(".m3u8", true)) {
+                            emitHlsStreamAndVariants(u, sourceName, embedUrl, forcedQuality = q, subtitleCallback = subtitleCallback, callback = callback)
+                        } else {
+                            emitProgressiveDownloadVideo(u, sourceName, embedUrl, q, callback = callback)
+                        }
+                    }
+                }
+            }
+        }
+        if (count > 0) return count
+
+        // 3. Embedded `<source>` / JWPlayer links inside HTML worker
+        for (m in Regex("""["'](https?://[^"'\\\s<>]+?\.(?:m3u8|mp4|mkv)(?:\?[^"'\\\s<>]*)?)["']""", RegexOption.IGNORE_CASE).findAll(html)) {
+            val u = m.groupValues[1].trim()
+            count += if (u.contains(".m3u8", true)) {
+                emitHlsStreamAndVariants(u, sourceName, embedUrl, subtitleCallback = subtitleCallback, callback = callback)
             } else {
-                emitProgressiveDownloadVideo(vUrl, sourceName, embedUrl, q, callback = callback)
+                emitProgressiveDownloadVideo(u, sourceName, embedUrl, parseQualityInt(sourceName, u), callback = callback)
             }
         }
         return count
@@ -1193,7 +1611,13 @@ object TimeMoviesUnlimitedEngine {
     ): Int {
         val html = httpGetText(embedUrl, referer = "https://www.mediafire.com/") ?: return 0
         val direct = Regex("""href=["'](https?://download\d*\.mediafire\.com/[^"']+)["']""")
-            .find(html)?.groupValues?.getOrNull(1) ?: return 0
+            .find(html)?.groupValues?.getOrNull(1)
+            ?: Regex("""data-scrambled-url=["']([A-Za-z0-9+/=]+)["']""")
+                .find(html)?.groupValues?.getOrNull(1)?.let { b64 ->
+                    runCatching { String(TimeMoviesCrypto.base64DecodeFlexible(b64), StandardCharsets.UTF_8) }
+                        .getOrNull()?.takeIf { it.startsWith("http") }
+                }
+            ?: return 0
         val q = parseQualityInt(null, direct).let { if (it > 0) it else Qualities.P720.value }
         return emitProgressiveDownloadVideo(direct, sourceName, "https://www.mediafire.com/", q, callback = callback)
     }
@@ -1747,7 +2171,7 @@ object TimeMoviesUnlimitedEngine {
                     m3u8Url = u,
                     sourceName = sourceName,
                     referer = embedOrigin,
-                    forcedQuality = if (q > 0 && !u.contains("master", ignoreCase = true)) q else Qualities.Unknown.value,
+                    forcedQuality = if (q > 0 && !u.contains("master", ignoreCase = true)) q else 0,
                     subtitleCallback = subtitleCallback,
                     callback = callback,
                 )
@@ -1770,7 +2194,226 @@ object TimeMoviesUnlimitedEngine {
                 }
             }
         }
+
+        // 3. Universal ~50-Host `mawdhou3.com/scrapefinal/*.php` Server Scraper Fallback
+        if (count == 0) {
+            count += extractViaMawdhou3Scraper(embedUrl, rawHtml, sourceName, embedOrigin, subtitleCallback, callback)
+        }
         return count
+    }
+
+    private suspend fun extractHyperWatching(
+        embedUrl: String,
+        sourceName: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Int {
+        val html = httpGetText(embedUrl, referer = "${originOf(embedUrl)}/") ?: return 0
+        val dataPageRaw = Regex("""data-page=["']([^"']+)["']""").find(html)?.groupValues?.getOrNull(1)
+            ?.replace("&quot;", "\"")
+            ?.replace("&amp;", "&")
+            ?.replace("&#039;", "'")
+            ?: return 0
+        val root = runCatching { JSONObject(dataPageRaw) }.getOrNull() ?: return 0
+        val props = root.optJSONObject("props") ?: root
+        var count = 0
+        val seen = HashSet<String>()
+        val ref = "${originOf(embedUrl)}/"
+
+        for (arrKey in listOf("streams", "sources", "links", "qualities")) {
+            val arr = props.optJSONArray(arrKey) ?: props.optJSONObject("video")?.optJSONArray(arrKey) ?: continue
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val u = item.optString("url", "").ifBlank { item.optString("src", "") }.ifBlank { item.optString("file", "") }.trim()
+                if (!u.startsWith("http") || !seen.add(u)) continue
+                val q = parseQualityInt(item.optString("quality", item.optString("label", "")), u)
+                count += if (u.contains(".m3u8", true)) {
+                    emitHlsStreamAndVariants(u, sourceName, ref, forcedQuality = q, subtitleCallback = subtitleCallback, callback = callback)
+                } else {
+                    emitProgressiveDownloadVideo(u, sourceName, ref, q, callback = callback)
+                }
+            }
+        }
+        val single = props.optJSONObject("video")?.optString("url", "")
+            ?.ifBlank { props.optString("stream_url", "") }
+            .orEmpty().trim()
+        if (single.startsWith("http") && seen.add(single)) {
+            count += if (single.contains(".m3u8", true)) {
+                emitHlsStreamAndVariants(single, sourceName, ref, subtitleCallback = subtitleCallback, callback = callback)
+            } else {
+                emitProgressiveDownloadVideo(single, sourceName, ref, parseQualityInt(sourceName, single), callback = callback)
+            }
+        }
+        return count
+    }
+
+    private suspend fun extractStreamHgVibuxer(
+        embedUrl: String,
+        sourceName: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Int {
+        val code = Regex("""/(?:e|v|d|f|embed)/([A-Za-z0-9_-]+)""").find(embedUrl)?.groupValues?.getOrNull(1)
+            ?: embedUrl.trimEnd('/').substringAfterLast('/').substringBefore('?').substringBefore('.')
+        if (code.isNotBlank()) {
+            for (mirrorHost in listOf("https://vibuxer.com", "https://hanerix.com")) {
+                val mirrorUrl = "$mirrorHost/e/$code"
+                val html = httpGetText(mirrorUrl, referer = embedUrl, fast = true) ?: continue
+                val combined = buildString {
+                    append(html)
+                    unpackDeanEdwards(html)?.let {
+                        append('\n')
+                        append(it)
+                    }
+                }
+                val hls = Regex("""["'](https?://[^"'\\\s<>]+?\.m3u8(?:\?[^"'\\\s<>]*)?)["']""", RegexOption.IGNORE_CASE)
+                    .find(combined)?.groupValues?.getOrNull(1)
+                if (!hls.isNullOrBlank()) {
+                    val emitted = emitHlsStreamAndVariants(
+                        m3u8Url = hls,
+                        sourceName = sourceName,
+                        referer = "$mirrorHost/",
+                        subtitleCallback = subtitleCallback,
+                        callback = callback,
+                    )
+                    if (emitted > 0) return emitted
+                }
+            }
+        }
+        return extractViaRemotePhpAndHtml(embedUrl, sourceName, subtitleCallback, callback)
+    }
+
+    private data class Mawdhou3Endpoint(
+        val scriptPath: String,
+        val isPost: Boolean = true,
+        val defaultReferer: String? = null,
+    )
+
+    private fun resolveMawdhou3Endpoint(embedUrl: String): Mawdhou3Endpoint? {
+        val u = embedUrl.lowercase()
+        return when {
+            u.contains("vidtube.") -> Mawdhou3Endpoint("scrapefinal/vidtube_new.php", true, embedUrl)
+            u.contains("vidspeed.") || u.contains("vidspeeds.") -> Mawdhou3Endpoint("scrapefinal/vidspeed.php", true, "https://vidspeed.org/")
+            u.contains("vidmoly.") -> Mawdhou3Endpoint("scrapefinal/vidmoly.php", false, "https://vidmoly.net/")
+            u.contains("uqload.") -> Mawdhou3Endpoint("scrapefinal/uqload_new.php", true, "https://uqload.cx/")
+            u.contains("mp4upload.") -> Mawdhou3Endpoint("scrapefinal/mp4upload_new.php", true, "https://www.mp4upload.com/")
+            u.contains("filemoon.") -> Mawdhou3Endpoint("scrapefinal/filemoon.php", true, "${originOf(embedUrl)}/")
+            u.contains("wishonly.") || u.contains("streamwish.") || u.contains("wishembed.") ||
+                u.contains("hlswish.") || u.contains("sfastwish.") || u.contains("hglink.") ||
+                u.contains("cavanhabg.") -> Mawdhou3Endpoint("scrapefinal/wishonly.php", true, "https://hglink.to/")
+            u.contains("savefiles.") || u.contains("streamhls.") -> Mawdhou3Endpoint("scrapefinal/savefiles.php", true, "${originOf(embedUrl)}/")
+            u.contains("lulustream.") || u.contains("luluvdo.") -> Mawdhou3Endpoint("scrapefinal/lulustream.php", true, "${originOf(embedUrl)}/")
+            u.contains("earnvids.") || u.contains("vidhide") || u.contains("smoothpre.") ||
+                u.contains("dintezuvio.") || u.contains("ryderjet.") -> Mawdhou3Endpoint("scrapefinal/earnvids.php", true, "${originOf(embedUrl)}/")
+            u.contains("streamtape.") -> Mawdhou3Endpoint("scrapefinal/streamtape.php", true, "https://streamtape.com/")
+            u.contains("vidoza.") -> Mawdhou3Endpoint("scrapefinal/vidoza.php", true, "https://vidoza.net/")
+            u.contains("vtube.") || u.contains("vtbe.") -> Mawdhou3Endpoint("scrapefinal/vtube.php", true, "https://vtbe.to/")
+            u.contains("upstream.") -> Mawdhou3Endpoint("scrapefinal/upstream.php", true, "${originOf(embedUrl)}/")
+            u.contains("goodstream.") -> Mawdhou3Endpoint("scrapefinal/goodstream.php", true, "${originOf(embedUrl)}/")
+            u.contains("files.im") -> Mawdhou3Endpoint("scrapefinal/filesim.php", true, "https://files.im/")
+            u.contains("turboviplay.") || u.contains("emturbovid.") -> Mawdhou3Endpoint("scrapefinal/turboviplay.php", true, "${originOf(embedUrl)}/")
+            u.contains("hexupload.") -> Mawdhou3Endpoint("scrapefinal/hexupload.php", true, "https://hexupload.net/")
+            u.contains("streamruby.") || u.contains("rubystm.") -> Mawdhou3Endpoint("scrapefinal/streamruby.php", true, "${originOf(embedUrl)}/")
+            u.contains("send.cm") -> Mawdhou3Endpoint("scrapefinal/sendcm.php", true, "https://send.cm/")
+            u.contains("drop.download") -> Mawdhou3Endpoint("scrapefinal/dropdownload.php", true, "https://drop.download/")
+            u.contains("govad.") -> Mawdhou3Endpoint("scrapefinal/govad.php", true, "${originOf(embedUrl)}/")
+            u.contains("dood") || u.contains("d000") || u.contains("ds2play") -> Mawdhou3Endpoint("scrapefinal/doodstream.php", false, "${originOf(embedUrl)}/")
+            else -> null
+        }
+    }
+
+    private suspend fun extractViaMawdhou3Scraper(
+        embedUrl: String,
+        prefetchedHtml: String?,
+        sourceName: String,
+        fallbackReferer: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Int {
+        val scraperBase = TimeMoviesPrefs.unlimitedScraperOverride?.trimEnd('/')?.plus("/")
+            ?: if (TimeMoviesPrefs.apiBaseUrlOverride != null) return 0 else MAWDHOU3_SCRAPER_BASE
+        val ep = resolveMawdhou3Endpoint(embedUrl) ?: return 0
+        val endpointUrl = "$scraperBase${ep.scriptPath}"
+
+        val responseJsonText: String? = if (ep.isPost) {
+            val htmlContent = prefetchedHtml ?: httpGetText(embedUrl, referer = fallbackReferer, fast = true) ?: return 0
+            runCatching {
+                val form = FormBody.Builder()
+                    .add("content", htmlContent)
+                    .add("url", embedUrl)
+                    .build()
+                val req = Request.Builder()
+                    .url(endpointUrl)
+                    .post(form)
+                    .header("User-Agent", BROWSER_UA)
+                    .header("Accept", "application/json, text/plain, */*")
+                    .build()
+                fastProbeClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) null else resp.body?.byteStream()?.use { readBoundedUtf8(it) }
+                }
+            }.getOrNull()
+        } else {
+            val encoded = URLEncoder.encode(embedUrl, "UTF-8")
+            httpGetText("$endpointUrl?api=$encoded&url=$encoded", fast = true)
+        }
+        if (responseJsonText.isNullOrBlank()) return 0
+
+        var count = 0
+        val seen = HashSet<String>()
+        val effRef = ep.defaultReferer ?: fallbackReferer
+
+        runCatching {
+            val trimmed = responseJsonText.trim()
+            if (trimmed.startsWith("{")) {
+                val root = JSONObject(trimmed)
+                val single = root.optString("url", "")
+                    .ifBlank { root.optString("file", "") }
+                    .ifBlank { root.optString("direct_url", "") }
+                    .ifBlank { root.optString("video", "") }
+                    .trim()
+                if (single.startsWith("http") && seen.add(single)) {
+                    count += if (single.contains(".m3u8", true)) {
+                        emitHlsStreamAndVariants(single, sourceName, effRef, subtitleCallback = subtitleCallback, callback = callback)
+                    } else {
+                        emitProgressiveDownloadVideo(single, sourceName, effRef, parseQualityInt(sourceName, single), callback = callback)
+                    }
+                }
+                for (arrKey in listOf("sources", "links", "servers", "qualities", "data")) {
+                    val arr = root.optJSONArray(arrKey) ?: continue
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i)
+                        val u = (obj?.optString("url", "")?.ifBlank { obj.optString("file", "") } ?: arr.optString(i, "")).trim()
+                        if (!u.startsWith("http") || !seen.add(u)) continue
+                        val q = parseQualityInt(obj?.optString("quality", obj.optString("label", "")), u)
+                        count += if (u.contains(".m3u8", true)) {
+                            emitHlsStreamAndVariants(u, sourceName, effRef, forcedQuality = q, subtitleCallback = subtitleCallback, callback = callback)
+                        } else {
+                            emitProgressiveDownloadVideo(u, sourceName, effRef, q, callback = callback)
+                        }
+                    }
+                }
+            } else if (trimmed.startsWith("http")) {
+                val u = trimmed.lineSequence().first().trim()
+                if (seen.add(u)) {
+                    count += if (u.contains(".m3u8", true)) {
+                        emitHlsStreamAndVariants(u, sourceName, effRef, subtitleCallback = subtitleCallback, callback = callback)
+                    } else {
+                        emitProgressiveDownloadVideo(u, sourceName, effRef, parseQualityInt(sourceName, u), callback = callback)
+                    }
+                }
+            }
+        }
+        return count
+    }
+
+    private fun unwrapEmbedWrapperUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.contains("strema.top/embed", ignoreCase = true) && trimmed.contains("id=")) {
+            val idParam = trimmed.substringAfter("id=").substringBefore('&')
+            val decoded = runCatching { URLDecoder.decode(idParam, "UTF-8") }.getOrDefault(idParam).trim()
+            if (decoded.startsWith("http")) return decoded
+        }
+        return trimmed
     }
 
     private suspend fun dispatchSingleServer(
@@ -1778,22 +2421,52 @@ object TimeMoviesUnlimitedEngine {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Int {
-        val url = embed.url.trim()
+        val url = unwrapEmbedWrapperUrl(embed.url)
+        if (!url.startsWith("http")) return 0
         val host = url.lowercase()
         val sourceName = embed.name
+        val customHeaders = LinkedHashMap<String, String>().apply {
+            embed.userAgent?.takeIf { it.isNotBlank() }?.let { put("User-Agent", it) }
+            embed.origin?.takeIf { it.isNotBlank() }?.let { put("Origin", it) }
+            embed.referer?.takeIf { it.isNotBlank() }?.let { put("Referer", it) }
+        }
+        val effectiveReferer = embed.referer?.takeIf { it.isNotBlank() } ?: "${originOf(url)}/"
 
         var count = when {
-            host.endsWith(".mp4") || host.endsWith(".mkv") || Regex("""\.(?:mp4|mkv)\?""").containsMatchIn(host) ->
-                emitProgressiveDownloadVideo(url, sourceName, "${originOf(url)}/", parseQualityInt(sourceName, url), callback = callback)
+            host.endsWith(".mp4") || host.endsWith(".mkv") || Regex("""\.(?:mp4|mkv)\?""").containsMatchIn(host) ||
+                host.contains("/dl/") && (host.contains(".mp4") || host.contains(".mkv")) -> {
+                if (!probeDirectVideoAlive(url, customHeaders)) 0
+                else emitProgressiveDownloadVideo(
+                    mp4Url = url,
+                    sourceName = sourceName,
+                    referer = effectiveReferer,
+                    quality = parseQualityInt(sourceName, url),
+                    extraHeaders = customHeaders,
+                    callback = callback,
+                )
+            }
 
             host.endsWith(".m3u8") || Regex("""\.m3u8\?""").containsMatchIn(host) ->
-                emitHlsStreamAndVariants(url, sourceName, "${originOf(url)}/", subtitleCallback = subtitleCallback, callback = callback)
+                emitHlsStreamAndVariants(
+                    m3u8Url = url,
+                    sourceName = sourceName,
+                    referer = effectiveReferer,
+                    extraHeaders = customHeaders,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
 
             host.contains("photos.app.goo.gl") || host.contains("photos.google.com") ->
                 extractGooglePhotos(url, sourceName, callback)
 
             host.contains("workers.dev") ->
                 extractCloudWorker(url, sourceName, subtitleCallback, callback)
+
+            host.contains("hyperwatching.") ->
+                extractHyperWatching(url, sourceName, subtitleCallback, callback)
+
+            host.contains("cavanhabg.") || host.contains("streamhg.") || host.contains("vibuxer.") || host.contains("hanerix.") ->
+                extractStreamHgVibuxer(url, sourceName, subtitleCallback, callback)
 
             host.contains("pixeldrain.com") ->
                 extractPixelDrain(url, sourceName, callback)
@@ -1825,11 +2498,11 @@ object TimeMoviesUnlimitedEngine {
 
         // Universal CloudStream built-in extractor fallback on Android runtime if custom handler yielded 0 links
         if (count == 0 && isAndroidDeviceRuntime && TimeMoviesPrefs.apiBaseUrlOverride == null) {
-            val beforeFallback = java.util.concurrent.atomic.AtomicInteger(0)
+            val beforeFallback = AtomicInteger(0)
             runCatching {
                 loadExtractor(
                     url = url,
-                    referer = "${originOf(url)}/",
+                    referer = effectiveReferer,
                     subtitleCallback = subtitleCallback,
                     callback = { link ->
                         beforeFallback.incrementAndGet()
@@ -1843,8 +2516,645 @@ object TimeMoviesUnlimitedEngine {
     }
 
     // =========================================================================
-    // 4. Opportunistic Residential `CimaNow` Direct MP4 Download Harvester
+    // 4. Multi-Engine Zero-Quota Movie & Series Catalog Federation
+    //    (`Egywatch`, `DramaWorld`, `StarDima`, `Cimawbas`, `TopCinema`, `CimaNow`)
     // =========================================================================
+
+    private fun parsePipeHeaderMap(rawHeader: String?): Pair<String?, String?> {
+        if (rawHeader.isNullOrBlank()) return null to null
+        var referer: String? = null
+        var origin: String? = null
+        for (segment in rawHeader.split('|', '\n', ';')) {
+            val idx = segment.indexOf(':')
+            if (idx <= 0) continue
+            val k = segment.substring(0, idx).trim().lowercase()
+            val v = segment.substring(idx + 1).trim()
+            if (v.isEmpty()) continue
+            when (k) {
+                "referer", "referrer" -> referer = v
+                "origin" -> origin = v
+            }
+        }
+        return referer to origin
+    }
+
+    private fun egywatchGetJson(base: String, path: String): JSONObject? = runCatching {
+        val cleanBase = base.trimEnd('/') + "/"
+        val req = Request.Builder()
+            .url(cleanBase + path.trimStart('/'))
+            .get()
+            .header("User-Agent", EGYWATCH_APP_UA)
+            .header("Accept", "application/json")
+            .header("packagename", EGYWATCH_PACKAGE)
+            .build()
+        fastProbeClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val body = resp.body?.byteStream()?.use { readBoundedUtf8(it) }.orEmpty().trim()
+            if (!body.startsWith("{")) null else JSONObject(body)
+        }
+    }.getOrNull()
+
+    internal fun resolveEgywatchEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
+        val override = TimeMoviesPrefs.unlimitedEgywatchApiOverride?.trim()
+        if (TimeMoviesPrefs.apiBaseUrlOverride != null && override.isNullOrBlank()) return emptyList()
+        val bases = if (!override.isNullOrBlank()) listOf(override) else EGYWATCH_BASES
+
+        val queries = buildSearchQueries(payload).take(4)
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        if (queries.isEmpty() || targetNorms.isEmpty()) return emptyList()
+
+        data class EgyCand(val id: Int, val rawType: String, val score: Int, val base: String)
+
+        val candidates = LinkedHashMap<Int, EgyCand>()
+        for (base in bases) {
+            var baseReachable = false
+            for (q in queries) {
+                val enc = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
+                val json = egywatchGetJson(base, "search/$enc/$EGYWATCH_CODE") ?: continue
+                baseReachable = true
+                val arr = json.optJSONArray("search")
+                    ?: json.optJSONArray("data")
+                    ?: json.optJSONArray("results")
+                    ?: continue
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    // Normalize Egywatch `type` (`"movie"`, `"serie"`, `"anime"`) for `scoreCatalogItem`
+                    val itemCopy = JSONObject(obj.toString())
+                    val ewType = obj.optString("type", "").lowercase()
+                    if (ewType == "anime" && payload.isMovie) {
+                        // In EasyPlex, anime movies have no `seasons` array on `animes/show` or appear as movie
+                        if (!obj.has("seasons") && obj.optInt("seasons_count", 0) == 0) {
+                            itemCopy.put("type", "movie")
+                        }
+                    }
+                    val scored = scoreCatalogItem(itemCopy, payload, targetNorms) ?: continue
+                    val prev = candidates[scored.id]
+                    if (prev == null || scored.score > prev.score) {
+                        candidates[scored.id] = EgyCand(scored.id, ewType, scored.score, base)
+                    }
+                }
+                if (candidates.values.any { it.score >= 115 }) break
+            }
+            if (candidates.isNotEmpty() || baseReachable) break
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+        fun collectVideosArray(videos: JSONArray?) {
+            if (videos == null) return
+            for (i in 0 until videos.length()) {
+                val v = videos.optJSONObject(i) ?: continue
+                val link = v.optString("link", "").ifBlank { v.optString("url", "") }.trim()
+                if (!link.startsWith("http")) continue
+                val srvLabel = v.optString("server", "").ifBlank { v.optString("lang", "") }
+                    .ifBlank { extractHostLabel(link, i + 1) }.trim()
+                val ua = v.optString("useragent", "").trim().takeIf { it.isNotEmpty() }
+                val (hdrRef, hdrOrigin) = parsePipeHeaderMap(v.optString("header", ""))
+                val finalRef = hdrRef ?: v.optString("referer", "").trim().takeIf { it.isNotEmpty() }
+                out.putIfAbsent(
+                    link,
+                    UnlimitedServerEmbed(
+                        name = "TimeMovies ♾️ EgyWatch - $srvLabel",
+                        url = link,
+                        sourceBackend = "TimeMovies ♾️ EgyWatch",
+                        referer = finalRef,
+                        origin = hdrOrigin,
+                        userAgent = ua,
+                    ),
+                )
+            }
+        }
+
+        val ranked = candidates.values.sortedByDescending { it.score }
+        if (payload.isMovie) {
+            for (cand in ranked.take(3)) {
+                val detail = egywatchGetJson(cand.base, "media/detail/${cand.id}/$EGYWATCH_CODE")
+                    ?: egywatchGetJson(cand.base, "animes/show/${cand.id}/$EGYWATCH_CODE")
+                    ?: continue
+                collectVideosArray(detail.optJSONArray("videos"))
+                if (out.size >= 6) break
+            }
+        } else {
+            val targetSeason = payload.seasonNum ?: 1
+            val targetEpisode = payload.episodeNum ?: 1
+            for (cand in ranked.take(2)) {
+                val showJson = egywatchGetJson(cand.base, "series/show/${cand.id}/$EGYWATCH_CODE")
+                    ?: egywatchGetJson(cand.base, "animes/show/${cand.id}/$EGYWATCH_CODE")
+                    ?: continue
+                val seasons = showJson.optJSONArray("seasons") ?: continue
+                var matchedSeasonObj: JSONObject? = null
+                for (sIdx in 0 until seasons.length()) {
+                    val sObj = seasons.optJSONObject(sIdx) ?: continue
+                    val sNum = sObj.optInt("season_number", 0).takeIf { it > 0 }
+                        ?: extractTrailingEpisodeInt(sObj.optString("name", ""))
+                        ?: (sIdx + 1)
+                    if (sNum == targetSeason || (seasons.length() == 1 && targetSeason == 1)) {
+                        matchedSeasonObj = sObj
+                        break
+                    }
+                }
+                val sObj = matchedSeasonObj ?: continue
+                val inlineEps = sObj.optJSONArray("episodes")
+                val epsArr = if (inlineEps != null && inlineEps.length() > 0) {
+                    inlineEps
+                } else {
+                    val sId = sObj.optInt("id", 0)
+                    if (sId > 0) egywatchGetJson(cand.base, "series/season/$sId/$EGYWATCH_CODE")?.optJSONArray("episodes") else null
+                } ?: continue
+                for (eIdx in 0 until epsArr.length()) {
+                    val epObj = epsArr.optJSONObject(eIdx) ?: continue
+                    val epNum = epObj.optInt("episode_number", 0).takeIf { it > 0 }
+                        ?: extractTrailingEpisodeInt(epObj.optString("name", ""))
+                        ?: (eIdx + 1)
+                    if (epNum == targetEpisode) {
+                        collectVideosArray(epObj.optJSONArray("videos"))
+                        break
+                    }
+                }
+                if (out.isNotEmpty()) break
+            }
+        }
+        return out.values.toList()
+    }
+
+    private fun dramaWorldGetRaw(base: String, path: String): String? = runCatching {
+        val cleanBase = base.trimEnd('/')
+        val req = Request.Builder()
+            .url("$cleanBase/${path.trimStart('/')}")
+            .get()
+            .header("User-Agent", DRAMAWORLD_UA)
+            .header("Accept", "application/json, text/plain, */*")
+            .build()
+        fastProbeClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) null else resp.body?.byteStream()?.use { readBoundedUtf8(it) }?.trim()
+        }
+    }.getOrNull()
+
+    private fun decodeDramaWorldJsonArray(raw: String?): JSONArray? {
+        if (raw.isNullOrBlank()) return null
+        val trimmed = raw.trim().trim('"')
+        if (trimmed.startsWith("[")) return runCatching { JSONArray(trimmed) }.getOrNull()
+        if (trimmed.startsWith("{")) return runCatching {
+            val obj = JSONObject(trimmed)
+            obj.optJSONArray("sources") ?: obj.optJSONArray("posters") ?: obj.optJSONArray("data")
+        }.getOrNull()
+        // ArabyPros `movie/source/by` & `episode/source/by` return Base64-encoded JSON arrays (`W3s...`)
+        return runCatching {
+            val decoded = String(TimeMoviesCrypto.base64DecodeFlexible(trimmed), StandardCharsets.UTF_8).trim()
+            if (decoded.startsWith("[")) JSONArray(decoded) else null
+        }.getOrNull()
+    }
+
+    internal suspend fun resolveDramaWorldEmbedsAndSubtitles(
+        payload: TimeMoviesModels.LinkPayload,
+        subtitleCallback: (SubtitleFile) -> Unit,
+    ): List<UnlimitedServerEmbed> {
+        val override = TimeMoviesPrefs.unlimitedDramaWorldApiOverride?.trim()
+        if (TimeMoviesPrefs.apiBaseUrlOverride != null && override.isNullOrBlank()) return emptyList()
+        val bases = when {
+            !override.isNullOrBlank() -> listOf(override)
+            resolvedDramaWorldBase != null -> (listOf(resolvedDramaWorldBase!!) + DRAMAWORLD_BASES).distinct()
+            else -> DRAMAWORLD_BASES
+        }
+
+        val queries = buildSearchQueries(payload).take(4)
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        if (queries.isEmpty() || targetNorms.isEmpty()) return emptyList()
+
+        data class DwCand(val id: Int, val score: Int, val base: String)
+
+        val candidates = LinkedHashMap<Int, DwCand>()
+        for (base in bases) {
+            var baseOk = false
+            for (q in queries) {
+                val enc = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
+                val raw = dramaWorldGetRaw(base, "search/$enc/0/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/") ?: continue
+                baseOk = true
+                if (override.isNullOrBlank()) resolvedDramaWorldBase = base
+                val posters = runCatching {
+                    val t = raw.trim()
+                    if (t.startsWith("{")) JSONObject(t).optJSONArray("posters")
+                    else if (t.startsWith("[")) JSONArray(t)
+                    else null
+                }.getOrNull() ?: continue
+
+                for (i in 0 until posters.length()) {
+                    val p = posters.optJSONObject(i) ?: continue
+                    val pCopy = JSONObject(p.toString())
+                    // ArabyPros uses `classification` / `label` / `sublabel` in addition to `title` and `type`
+                    val pType = p.optString("type", "").lowercase()
+                    if (pType.isBlank()) {
+                        pCopy.put("type", if (payload.isMovie) "movie" else "serie")
+                    }
+                    val scored = scoreCatalogItem(pCopy, payload, targetNorms) ?: continue
+                    val prev = candidates[scored.id]
+                    if (prev == null || scored.score > prev.score) {
+                        candidates[scored.id] = DwCand(scored.id, scored.score, base)
+                    }
+                }
+                if (candidates.values.any { it.score >= 115 }) break
+            }
+            if (candidates.isNotEmpty() || baseOk) break
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+        suspend fun collectDramaWorldSubtitles(base: String, subPath: String) {
+            val subRaw = dramaWorldGetRaw(base, subPath) ?: return
+            val langArr = decodeDramaWorldJsonArray(subRaw) ?: return
+            for (i in 0 until langArr.length()) {
+                val langObj = langArr.optJSONObject(i) ?: continue
+                val langLabel = langObj.optString("language", "Arabic").ifBlank { "Arabic" }
+                val subList = langObj.optJSONArray("subtitles")
+                if (subList != null) {
+                    for (j in 0 until subList.length()) {
+                        val s = subList.optJSONObject(j) ?: continue
+                        val u = s.optString("url", "").ifBlank { s.optString("file", "") }.trim()
+                        if (u.startsWith("http")) subtitleCallback(newSubtitleFile(langLabel, u))
+                    }
+                } else {
+                    val directSub = langObj.optString("url", "").trim()
+                    if (directSub.startsWith("http")) subtitleCallback(newSubtitleFile(langLabel, directSub))
+                }
+            }
+        }
+
+        fun collectSourcesArray(arr: JSONArray?) {
+            if (arr == null) return
+            for (i in 0 until arr.length()) {
+                val s = arr.optJSONObject(i) ?: continue
+                val u = s.optString("url", "").ifBlank { s.optString("link", "") }.trim()
+                if (!u.startsWith("http")) continue
+                val lbl = s.optString("title", "").ifBlank { s.optString("quality", "") }
+                    .ifBlank { extractHostLabel(u, i + 1) }.trim()
+                out.putIfAbsent(
+                    u,
+                    UnlimitedServerEmbed(
+                        name = "TimeMovies ♾️ DramaWorld - $lbl",
+                        url = u,
+                        sourceBackend = "TimeMovies ♾️ DramaWorld",
+                    ),
+                )
+            }
+        }
+
+        val ranked = candidates.values.sortedByDescending { it.score }
+        if (payload.isMovie) {
+            for (cand in ranked.take(2)) {
+                val srcRaw = dramaWorldGetRaw(cand.base, "movie/source/by/${cand.id}/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/")
+                val srcArr = decodeDramaWorldJsonArray(srcRaw)
+                if (srcArr != null && srcArr.length() > 0) {
+                    collectSourcesArray(srcArr)
+                    runCatching {
+                        collectDramaWorldSubtitles(cand.base, "subtitles/by/movie/${cand.id}/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/")
+                    }
+                }
+                if (out.size >= 5) break
+            }
+        } else {
+            val targetSeason = payload.seasonNum ?: 1
+            val targetEpisode = payload.episodeNum ?: 1
+            for (cand in ranked.take(2)) {
+                val seasonsRaw = dramaWorldGetRaw(cand.base, "season/by/serie/${cand.id}/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/")
+                val seasonsArr = decodeDramaWorldJsonArray(seasonsRaw) ?: continue
+                var matchedEpId = 0
+                for (sIdx in 0 until seasonsArr.length()) {
+                    val sObj = seasonsArr.optJSONObject(sIdx) ?: continue
+                    val sNum = extractTrailingEpisodeInt(sObj.optString("title", "")) ?: (sIdx + 1)
+                    if (sNum == targetSeason || (seasonsArr.length() == 1 && targetSeason == 1)) {
+                        val eps = sObj.optJSONArray("episodes") ?: continue
+                        for (eIdx in 0 until eps.length()) {
+                            val epObj = eps.optJSONObject(eIdx) ?: continue
+                            val epNum = extractTrailingEpisodeInt(epObj.optString("title", "")) ?: (eIdx + 1)
+                            if (epNum == targetEpisode) {
+                                matchedEpId = epObj.optInt("id", 0)
+                                break
+                            }
+                        }
+                        if (matchedEpId > 0) break
+                    }
+                }
+                if (matchedEpId > 0) {
+                    val epSrcRaw = dramaWorldGetRaw(cand.base, "episode/source/by/$matchedEpId/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/")
+                    collectSourcesArray(decodeDramaWorldJsonArray(epSrcRaw))
+                    runCatching {
+                        collectDramaWorldSubtitles(cand.base, "subtitles/by/episode/$matchedEpId/$DRAMAWORLD_KEY/$DRAMAWORLD_UUID/")
+                    }
+                    if (out.isNotEmpty()) break
+                }
+            }
+        }
+        return out.values.toList()
+    }
+
+    private fun starDimaGetJson(base: String, path: String): JSONObject? = runCatching {
+        val req = Request.Builder()
+            .url("${base.trimEnd('/')}/${path.trimStart('/')}")
+            .get()
+            .header("User-Agent", STARDIMA_UA)
+            .header("Accept", "application/json")
+            .header("x-api-key", STARDIMA_API_KEY)
+            .header("X-Secure-Token", STARDIMA_SECURE_TOKEN)
+            .build()
+        fastProbeClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val body = resp.body?.byteStream()?.use { readBoundedUtf8(it) }.orEmpty().trim()
+            if (!body.startsWith("{")) null else JSONObject(body)
+        }
+    }.getOrNull()
+
+    private fun resolveStarDimaActiveBase(): String? {
+        resolvedStarDimaBase?.let { return it }
+        for (seed in STARDIMA_BASES) {
+            val info = starDimaGetJson(seed, "api/app/info") ?: continue
+            val newDomain = info.optJSONObject("data")?.optString("new_domain", "")
+                ?.ifBlank { info.optString("new_domain", "") }
+                .orEmpty().trim().trimEnd('/')
+            val active = if (newDomain.startsWith("http")) newDomain else seed
+            resolvedStarDimaBase = active
+            return active
+        }
+        return null
+    }
+
+    internal fun resolveStarDimaEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
+        if (TimeMoviesPrefs.apiBaseUrlOverride != null) return emptyList()
+        val base = resolveStarDimaActiveBase() ?: return emptyList()
+        val queries = buildSearchQueries(payload).take(4)
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        if (queries.isEmpty() || targetNorms.isEmpty()) return emptyList()
+
+        val candidates = LinkedHashMap<String, Pair<String, Double>>()
+        for (q in queries) {
+            val enc = URLEncoder.encode(q, "UTF-8")
+            val json = starDimaGetJson(base, "api/search?q=$enc&query=$enc&page=1") ?: continue
+            val dataObj = json.optJSONObject("data")
+            val arrays = listOfNotNull(
+                json.optJSONArray("data"),
+                dataObj?.optJSONArray("videos"),
+                dataObj?.optJSONArray("movies"),
+                dataObj?.optJSONArray("series"),
+                dataObj?.optJSONArray("results"),
+                json.optJSONArray("results"),
+            )
+            for (arr in arrays) {
+                for (i in 0 until arr.length()) {
+                    val item = arr.optJSONObject(i) ?: continue
+                    val slugOrId = item.optString("slug", "").ifBlank { item.optString("id", "") }.trim()
+                    if (slugOrId.isEmpty()) continue
+                    val names = listOfNotNull(
+                        item.optString("title", "").takeIf { it.isNotBlank() },
+                        item.optString("name", "").takeIf { it.isNotBlank() },
+                        item.optString("english_title", "").takeIf { it.isNotBlank() },
+                    )
+                    val views = names.flatMap { extractTitleNormViews(it, stripSeasonSuffix = !payload.isMovie) }
+                    var sim = 0.0
+                    for (v in views) {
+                        for (t in targetNorms) sim = maxOf(sim, computeTitleSimilarity(t, v))
+                    }
+                    if (sim >= 0.62 && !areSequelNumbersIncompatible(targetNorms, views)) {
+                        val prev = candidates[slugOrId]
+                        if (prev == null || sim > prev.second) {
+                            candidates[slugOrId] = slugOrId to sim
+                        }
+                    }
+                }
+            }
+            if (candidates.values.any { it.second >= 0.98 }) break
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+        for ((vidId, _) in candidates.values.sortedByDescending { it.second }.take(2)) {
+            val detail = starDimaGetJson(base, "api/video/$vidId") ?: continue
+            val rootData = detail.optJSONObject("data") ?: detail
+            val servers = rootData.optJSONArray("servers") ?: rootData.optJSONObject("video")?.optJSONArray("servers")
+            if (servers != null) {
+                for (i in 0 until servers.length()) {
+                    val s = servers.optJSONObject(i) ?: continue
+                    val rawUrl = s.optString("url", "").ifBlank { s.optString("embed_url", "") }.ifBlank { s.optString("link", "") }.trim()
+                    val unwrapped = unwrapEmbedWrapperUrl(rawUrl)
+                    if (!unwrapped.startsWith("http")) continue
+                    val name = s.optString("name", "").ifBlank { extractHostLabel(unwrapped, i + 1) }.trim()
+                    out.putIfAbsent(
+                        unwrapped,
+                        UnlimitedServerEmbed(
+                            name = "TimeMovies ♾️ StarDima - $name",
+                            url = unwrapped,
+                            sourceBackend = "TimeMovies ♾️ StarDima",
+                        ),
+                    )
+                }
+            }
+            val backups = rootData.optJSONArray("backup") ?: rootData.optJSONArray("downloads")
+            if (backups != null) {
+                for (i in 0 until backups.length()) {
+                    val b = backups.optJSONObject(i) ?: continue
+                    val bUrl = b.optString("url", "").ifBlank { b.optString("link", "") }.trim()
+                    if (!bUrl.startsWith("http")) continue
+                    val qLbl = b.optString("quality", "720p")
+                    out.putIfAbsent(
+                        bUrl,
+                        UnlimitedServerEmbed(
+                            name = "TimeMovies ♾️ StarDima Direct ($qLbl)",
+                            url = bUrl,
+                            sourceBackend = "TimeMovies ♾️ StarDima",
+                            referer = "$base/",
+                        ),
+                    )
+                }
+            }
+            if (out.isNotEmpty()) break
+        }
+        return out.values.toList()
+    }
+
+    private fun resolveCimawbasMovieEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
+        if (!payload.isMovie || TimeMoviesPrefs.apiBaseUrlOverride != null) return emptyList()
+        val now = System.currentTimeMillis()
+        if (now < cimawbasBlockedUntilMs) return emptyList()
+
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        val queries = buildSearchQueries(payload).take(2)
+        if (targetNorms.isEmpty() || queries.isEmpty()) return emptyList()
+
+        var bestVid: String? = null
+        var bestSim = 0.0
+        for (q in queries) {
+            val searchUrl = "$CIMAWBAS_BASE_URL/search.php?keywords=${URLEncoder.encode(q, "UTF-8")}"
+            val html = runCatching {
+                val req = Request.Builder()
+                    .url(searchUrl)
+                    .get()
+                    .header("User-Agent", BROWSER_UA)
+                    .header("Accept", "text/html")
+                    .header("Referer", "$CIMAWBAS_BASE_URL/")
+                    .build()
+                fastProbeClient.newCall(req).execute().use { resp ->
+                    if (resp.code == 403 || resp.code == 503) {
+                        cimawbasBlockedUntilMs = now + 20L * 60L * 1000L
+                        return@use null
+                    }
+                    if (!resp.isSuccessful) null else resp.body?.byteStream()?.use { readBoundedUtf8(it) }
+                }
+            }.getOrNull() ?: continue
+
+            val linkRegex = Regex("""<a[^>]+href=["']([^"']*watch\.php\?vid=([A-Za-z0-9]+)[^"']*)["'][^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE)
+            for (m in linkRegex.findAll(html)) {
+                val vid = m.groupValues[2].trim()
+                val rawAnchor = m.groupValues[3].replace(Regex("<[^>]+>"), " ").trim()
+                val titleAttr = Regex("""title=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(m.value)?.groupValues?.getOrNull(1).orEmpty()
+                val label = titleAttr.ifBlank { rawAnchor }
+                if (label.contains("مسلسل") || label.contains("حلقة")) continue
+                val views = extractTitleNormViews(label, stripSeasonSuffix = false)
+                if (areSequelNumbersIncompatible(targetNorms, views)) continue
+                val sim = views.maxOfOrNull { c -> targetNorms.maxOfOrNull { t -> computeTitleSimilarity(t, c) } ?: 0.0 } ?: 0.0
+                if (sim > bestSim && sim >= 0.65) {
+                    bestSim = sim
+                    bestVid = vid
+                }
+            }
+            if (bestSim >= 0.95) break
+        }
+
+        val vid = bestVid ?: return emptyList()
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+
+        // Direct fetch to `play.php?vid=...` + `downloads.php?vid=...`
+        val playHtml = httpGetText("$CIMAWBAS_BASE_URL/play.php?vid=$vid", referer = "$CIMAWBAS_BASE_URL/watch.php?vid=$vid", fast = true)
+        if (!playHtml.isNullOrBlank()) {
+            for (m in Regex("""(?:data-embed|data-url|src)=["'](https?://[^"'\s<>]+)["']""", RegexOption.IGNORE_CASE).findAll(playHtml)) {
+                val u = m.groupValues[1].trim()
+                if (u.contains("mycima.cc", true) || u.endsWith(".js", true) || u.endsWith(".css", true) || u.endsWith(".png", true)) continue
+                out.putIfAbsent(
+                    u,
+                    UnlimitedServerEmbed(
+                        name = "TimeMovies ♾️ CimaWbas - ${extractHostLabel(u, out.size + 1)}",
+                        url = u,
+                        sourceBackend = "TimeMovies ♾️ CimaWbas",
+                        referer = "$CIMAWBAS_BASE_URL/",
+                    ),
+                )
+            }
+        }
+        val dlHtml = httpGetText("$CIMAWBAS_BASE_URL/downloads.php?vid=$vid", referer = "$CIMAWBAS_BASE_URL/watch.php?vid=$vid", fast = true)
+        if (!dlHtml.isNullOrBlank()) {
+            for (m in Regex("""href=["'](https?://[^"'\s<>]+)["']""", RegexOption.IGNORE_CASE).findAll(dlHtml)) {
+                val u = m.groupValues[1].trim()
+                if (u.contains("mycima.cc", true) || u.contains("facebook.", true) || u.contains("twitter.", true) || u.contains("t.me/", true)) continue
+                out.putIfAbsent(
+                    u,
+                    UnlimitedServerEmbed(
+                        name = "TimeMovies ♾️ CimaWbas DL - ${extractHostLabel(u, out.size + 1)}",
+                        url = u,
+                        sourceBackend = "TimeMovies ♾️ CimaWbas",
+                        referer = "$CIMAWBAS_BASE_URL/",
+                    ),
+                )
+                if (out.size >= 10) break
+            }
+        }
+        return out.values.toList()
+    }
+
+    private fun resolveTopCinemaMovieEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
+        if (!payload.isMovie || TimeMoviesPrefs.apiBaseUrlOverride != null) return emptyList()
+        val now = System.currentTimeMillis()
+        if (now < topCinemaBlockedUntilMs) return emptyList()
+
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        val queries = buildSearchQueries(payload).take(2)
+        if (targetNorms.isEmpty() || queries.isEmpty()) return emptyList()
+
+        var matchedUrl: String? = null
+        var bestSim = 0.0
+        for (q in queries) {
+            val html = runCatching {
+                val form = FormBody.Builder()
+                    .add("search", q)
+                    .add("type", "all")
+                    .build()
+                val req = Request.Builder()
+                    .url("$TOPCINEMA_BASE_URL/wp-content/themes/movies2023/Ajaxat/Searching.php")
+                    .post(form)
+                    .header("User-Agent", BROWSER_UA)
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("Referer", "$TOPCINEMA_BASE_URL/")
+                    .header("Origin", TOPCINEMA_BASE_URL)
+                    .build()
+                fastProbeClient.newCall(req).execute().use { resp ->
+                    if (resp.code == 403 || resp.code == 503) {
+                        topCinemaBlockedUntilMs = now + 20L * 60L * 1000L
+                        return@use null
+                    }
+                    if (!resp.isSuccessful) null else resp.body?.byteStream()?.use { readBoundedUtf8(it) }
+                }
+            }.getOrNull() ?: continue
+
+            for (m in Regex("""<a[^>]+href=["'](https?://[^"']+)["'][^>]*title=["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(html)) {
+                val href = m.groupValues[1].trim()
+                val title = m.groupValues[2].trim()
+                if (title.contains("مسلسل") || title.contains("حلقة") || href.contains("/series/", true)) continue
+                val views = extractTitleNormViews(title, stripSeasonSuffix = false)
+                if (areSequelNumbersIncompatible(targetNorms, views)) continue
+                val sim = views.maxOfOrNull { c -> targetNorms.maxOfOrNull { t -> computeTitleSimilarity(t, c) } ?: 0.0 } ?: 0.0
+                if (sim > bestSim && sim >= 0.65) {
+                    bestSim = sim
+                    matchedUrl = href
+                }
+            }
+            if (bestSim >= 0.95) break
+        }
+
+        val movieUrl = matchedUrl ?: return emptyList()
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+        val watchPageUrl = "${movieUrl.trimEnd('/')}/watch/"
+        val watchHtml = httpGetText(watchPageUrl, referer = movieUrl, fast = true)
+        if (!watchHtml.isNullOrBlank()) {
+            // Initial iframe + AJAX `Single/Server.php` `data-id` & `data-server`
+            Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE).find(watchHtml)?.groupValues?.getOrNull(1)?.let { ifr ->
+                out.putIfAbsent(
+                    ifr,
+                    UnlimitedServerEmbed(
+                        name = "TimeMovies ♾️ TopCinema - ${extractHostLabel(ifr, 1)}",
+                        url = ifr,
+                        sourceBackend = "TimeMovies ♾️ TopCinema",
+                        referer = "$TOPCINEMA_BASE_URL/",
+                    ),
+                )
+            }
+            for (srvMatch in Regex("""data-id=["'](\d+)["'][^>]+data-server=["'](\d+)["']""", RegexOption.IGNORE_CASE).findAll(watchHtml).take(5)) {
+                val postId = srvMatch.groupValues[1]
+                val srvIdx = srvMatch.groupValues[2]
+                val ajaxHtml = runCatching {
+                    val form = FormBody.Builder().add("id", postId).add("i", srvIdx).build()
+                    val req = Request.Builder()
+                        .url("$TOPCINEMA_BASE_URL/wp-content/themes/movies2023/Ajaxat/Single/Server.php")
+                        .post(form)
+                        .header("User-Agent", BROWSER_UA)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Referer", watchPageUrl)
+                        .header("Origin", TOPCINEMA_BASE_URL)
+                        .build()
+                    fastProbeClient.newCall(req).execute().use { r ->
+                        if (!r.isSuccessful) null else r.body?.byteStream()?.use { readBoundedUtf8(it) }
+                    }
+                }.getOrNull() ?: continue
+                Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE).find(ajaxHtml)?.groupValues?.getOrNull(1)?.trim()?.let { ifr ->
+                    out.putIfAbsent(
+                        ifr,
+                        UnlimitedServerEmbed(
+                            name = "TimeMovies ♾️ TopCinema - ${extractHostLabel(ifr, out.size + 1)}",
+                            url = ifr,
+                            sourceBackend = "TimeMovies ♾️ TopCinema",
+                            referer = "$TOPCINEMA_BASE_URL/",
+                        ),
+                    )
+                }
+            }
+        }
+        return out.values.toList()
+    }
 
     private suspend fun extractOpportunisticCimaNowDirectMp4s(
         payload: TimeMoviesModels.LinkPayload,
@@ -1873,15 +3183,12 @@ object TimeMoviesUnlimitedEngine {
                     return@use null
                 }
                 if (!resp.isSuccessful) return@use null
-                resp.body?.string()
+                resp.body?.byteStream()?.use { readBoundedUtf8(it) }
             }
         }.getOrNull() ?: return 0
 
         val decodedHtml = decodeCimaNowObfuscatedHtmlIfNeeded(html)
-        val targetNorms = listOfNotNull(
-            normalizeCompareTitle(payload.title, stripSeasonSuffix = !payload.isMovie).takeIf { it.isNotEmpty() },
-            normalizeCompareTitle(payload.titleAr, stripSeasonSuffix = !payload.isMovie).takeIf { it.isNotEmpty() },
-        )
+        val targetNorms = buildPrimaryTargetNorms(payload)
         if (targetNorms.isEmpty()) return 0
 
         val articleRegex = Regex("""<article[^>]*>([\s\S]*?)</article>""", RegexOption.IGNORE_CASE)
@@ -1898,9 +3205,10 @@ object TimeMoviesUnlimitedEngine {
             val titleText = Regex("""<li[^>]*aria-label=["']title["'][^>]*>([\s\S]*?)</li>""", RegexOption.IGNORE_CASE)
                 .find(block)?.groupValues?.getOrNull(1)?.replace(Regex("<[^>]+>"), " ")
                 ?: URLDecoder.decode(href.trimEnd('/').substringAfterLast('/'), "UTF-8")
-            val normCand = normalizeCompareTitle(titleText, stripSeasonSuffix = !payload.isMovie)
-            val sim = targetNorms.maxOfOrNull { computeTitleSimilarity(it, normCand) } ?: 0.0
-            if (sim > bestSim && sim >= 0.60) {
+            val candViews = extractTitleNormViews(titleText, stripSeasonSuffix = !payload.isMovie)
+            if (areSequelNumbersIncompatible(targetNorms, candViews)) continue
+            val sim = candViews.maxOfOrNull { c -> targetNorms.maxOfOrNull { t -> computeTitleSimilarity(t, c) } ?: 0.0 } ?: 0.0
+            if (sim > bestSim && sim >= 0.62) {
                 bestSim = sim
                 matchedPageUrl = href
             }
@@ -1962,7 +3270,8 @@ object TimeMoviesUnlimitedEngine {
 
     /**
      * Resolves multi-quality HLS Watch streams + Direct Progressive `.mp4` Download links + Arabic
-     * subtitles at **zero quota cost**.
+     * subtitles at **zero quota cost** across the 6-engine catalog federation (`CimaCloud v1.3`,
+     * `AnimeDay v3.8`, `Egywatch`, `DramaWorld`, `StarDima`, and `Cimawbas`/`TopCinema`/`CimaNow`).
      */
     suspend fun extractUnlimitedLinks(
         payload: TimeMoviesModels.LinkPayload,
@@ -1971,37 +3280,125 @@ object TimeMoviesUnlimitedEngine {
     ): Int {
         if (!isRuntimeActive()) return 0
 
-        val totalLinks = java.util.concurrent.atomic.AtomicInteger(0)
-        val countCallback: (ExtractorLink) -> Unit = { link ->
-            totalLinks.incrementAndGet()
-            callback(link)
+        val totalLinks = AtomicInteger(0)
+        val hasDirectMp4 = AtomicBoolean(false)
+        val emittedLinkUrls = ConcurrentHashMap.newKeySet<String>()
+        val emittedSubUrls = ConcurrentHashMap.newKeySet<String>()
+
+        val dedupLinkCallback: (ExtractorLink) -> Unit = { link ->
+            if (emittedLinkUrls.add(link.url)) {
+                if (link.type == ExtractorLinkType.VIDEO) {
+                    hasDirectMp4.set(true)
+                }
+                totalLinks.incrementAndGet()
+                callback(link)
+            }
+        }
+        val dedupSubtitleCallback: (SubtitleFile) -> Unit = { sub ->
+            if (emittedSubUrls.add(sub.url)) {
+                subtitleCallback(sub)
+            }
         }
 
-        val embeds = withContext(Dispatchers.IO) { resolveUnlimitedEmbeds(payload) }
+        val dispatchedEmbedUrls = ConcurrentHashMap.newKeySet<String>()
         val semaphore = Semaphore(8)
 
-        withContext(Dispatchers.IO) {
-            val cloudDayJobs = embeds.map { embed ->
-                async(Dispatchers.IO) {
-                    semaphore.withPermit {
-                        withTimeoutOrNull(14_000L) {
-                            runCatching {
-                                dispatchSingleServer(embed, subtitleCallback, countCallback)
-                            }.getOrDefault(0)
-                        } ?: 0
+        suspend fun dispatchBatch(embeds: List<UnlimitedServerEmbed>, perServerTimeoutMs: Long = 13_000L) {
+            val fresh = embeds.filter { dispatchedEmbedUrls.add(unwrapEmbedWrapperUrl(it.url)) }
+            if (fresh.isEmpty()) return
+            supervisorScope {
+                fresh.map { embed ->
+                    async(Dispatchers.IO) {
+                        semaphore.withPermit {
+                            withTimeoutOrNull(perServerTimeoutMs) {
+                                runCatching {
+                                    dispatchSingleServer(embed, dedupSubtitleCallback, dedupLinkCallback)
+                                }.getOrDefault(0)
+                            } ?: 0
+                        }
                     }
-                }
+                }.awaitAll()
             }
-            val cimaNowJob = async(Dispatchers.IO) {
-                withTimeoutOrNull(7_000L) {
-                    runCatching {
-                        extractOpportunisticCimaNowDirectMp4s(payload, countCallback)
-                    }.getOrDefault(0)
-                } ?: 0
+        }
+
+        withContext(Dispatchers.IO) {
+            // Stage 1: Primary encrypted Cloud-Day catalogs (`CimaCloud` + `AnimeDay`) + `StarDima` for Animation/Cartoon/Anime
+            supervisorScope {
+                val primaryDef = async(Dispatchers.IO) {
+                    runCatching { resolveUnlimitedEmbeds(payload) }.getOrDefault(emptyList())
+                }
+                val starDimaStage1Def = if (payload.isAnime) {
+                    async(Dispatchers.IO) {
+                        withTimeoutOrNull(8_000L) {
+                            runCatching { resolveStarDimaEmbeds(payload) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                } else {
+                    null
+                }
+                val cimaNowDef = async(Dispatchers.IO) {
+                    withTimeoutOrNull(7_000L) {
+                        runCatching { extractOpportunisticCimaNowDirectMp4s(payload, dedupLinkCallback) }.getOrDefault(0)
+                    } ?: 0
+                }
+
+                val stage1Embeds = buildList {
+                    addAll(primaryDef.await())
+                    starDimaStage1Def?.await()?.let { addAll(it) }
+                }
+                dispatchBatch(stage1Embeds, perServerTimeoutMs = 13_000L)
+                cimaNowDef.await()
             }
 
-            cloudDayJobs.awaitAll()
-            cimaNowJob.await()
+            // Stage 2: Secondary Zero-Quota Movie & Series Federation (`Egywatch` + `DramaWorld` + `Cimawbas` + `TopCinema` + `StarDima`)
+            // Triggered automatically whenever Stage 1 yielded < 2 links OR when a Movie still needs progressive MP4 download mirrors!
+            val needsStage2 = totalLinks.get() < 2 || (payload.isMovie && (!hasDirectMp4.get() || totalLinks.get() < 4))
+            if (needsStage2) {
+                val needStarDimaFallback = payload.isMovie && !payload.isAnime && totalLinks.get() == 0
+                val stage2Embeds = supervisorScope {
+                    val egywatchDef = async(Dispatchers.IO) {
+                        withTimeoutOrNull(9_000L) {
+                            runCatching { resolveEgywatchEmbeds(payload) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                    val dramaWorldDef = async(Dispatchers.IO) {
+                        withTimeoutOrNull(9_000L) {
+                            runCatching { resolveDramaWorldEmbedsAndSubtitles(payload, dedupSubtitleCallback) }
+                                .getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                    val cimawbasDef = if (payload.isMovie && totalLinks.get() < 3) {
+                        async(Dispatchers.IO) {
+                            withTimeoutOrNull(8_000L) {
+                                runCatching { resolveCimawbasMovieEmbeds(payload) }.getOrDefault(emptyList())
+                            } ?: emptyList()
+                        }
+                    } else null
+                    val topCinemaDef = if (payload.isMovie && totalLinks.get() < 2) {
+                        async(Dispatchers.IO) {
+                            withTimeoutOrNull(8_000L) {
+                                runCatching { resolveTopCinemaMovieEmbeds(payload) }.getOrDefault(emptyList())
+                            } ?: emptyList()
+                        }
+                    } else null
+                    val starDimaFallbackDef = if (needStarDimaFallback) {
+                        async(Dispatchers.IO) {
+                            withTimeoutOrNull(8_000L) {
+                                runCatching { resolveStarDimaEmbeds(payload) }.getOrDefault(emptyList())
+                            } ?: emptyList()
+                        }
+                    } else null
+
+                    buildList {
+                        addAll(egywatchDef.await())
+                        addAll(dramaWorldDef.await())
+                        cimawbasDef?.await()?.let { addAll(it) }
+                        topCinemaDef?.await()?.let { addAll(it) }
+                        starDimaFallbackDef?.await()?.let { addAll(it) }
+                    }
+                }
+                dispatchBatch(stage2Embeds, perServerTimeoutMs = 12_000L)
+            }
         }
 
         return totalLinks.get()

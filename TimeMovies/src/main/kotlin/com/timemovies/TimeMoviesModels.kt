@@ -195,6 +195,7 @@ object TimeMoviesModels {
         val related: List<WorkCard>,
         val collection: List<WorkCard>,
         val trailers: List<TrailerVideo>,
+        val originalTitle: String? = null,
     ) {
         fun displayTitle(preferArabic: Boolean): String {
             return if (preferArabic) {
@@ -289,6 +290,7 @@ object TimeMoviesModels {
         val titleAr: String? = null,
         val year: Int? = null,
         val isAnime: Boolean = false,
+        val originalTitle: String? = null,
     ) {
         fun toJson(): String = JSONObject().apply {
             put("wk", workId)
@@ -302,11 +304,13 @@ object TimeMoviesModels {
             if (!titleAr.isNullOrBlank()) put("tlr", titleAr)
             if (year != null) put("ry", year)
             if (isAnime) put("ani", true)
+            if (!originalTitle.isNullOrBlank()) put("otl", originalTitle)
         }.toString()
 
         companion object {
             fun fromJson(raw: String): LinkPayload? = runCatching {
-                val obj = JSONObject(raw)
+                val jsonSlice = raw.indexOf('{').let { if (it >= 0) raw.substring(it) else raw }
+                val obj = JSONObject(jsonSlice)
                 val wk = obj.optNonBlank("wk") ?: return null
                 val fc = obj.optNonBlank("fc").orEmpty()
                 LinkPayload(
@@ -321,6 +325,7 @@ object TimeMoviesModels {
                     titleAr = obj.optNonBlank("tlr"),
                     year = obj.optIntOrNull("ry"),
                     isAnime = obj.optBoolean("ani", false),
+                    originalTitle = obj.optNonBlank("otl"),
                 )
             }.getOrNull()
         }
@@ -553,6 +558,7 @@ object TimeMoviesModels {
             related = parseWorkCardList(obj.optJSONArray("rlt")),
             collection = parseWorkCardList(obj.optJSONArray("wcl")),
             trailers = trailers,
+            originalTitle = obj.optNonBlank("otl") ?: obj.optNonBlank("ot") ?: obj.optNonBlank("on"),
         )
     }
 

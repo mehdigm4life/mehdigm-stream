@@ -1489,4 +1489,275 @@ class TimeMoviesUnitTest {
         println("LIVE_UNLIMITED_ANIME links=$animeCount hls=${animeLinks.count { it.type == ExtractorLinkType.M3U8 }} mp4=${animeLinks.count { it.type == ExtractorLinkType.VIDEO }}")
         assertTrue("Live Unlimited Anime S01E01 must return playable Watch/Download links (got $animeCount)", animeCount > 0)
     }
+
+    @Test
+    fun testV6BilingualSingleWordSequelNumericHyphenatedAndPrefixMovieMatching() {
+        // 1. Single-word movie ("Oppenheimer") vs noisy bilingual Arabic+English catalog cards (trailing AND mid-title year)
+        val oppenPayload = TimeMoviesModels.LinkPayload(
+            workId = "wk_opp",
+            fileCode = "fc_opp",
+            isMovie = true,
+            title = "Oppenheimer",
+            titleAr = "أوبنهايمر",
+            year = 2023,
+        )
+        val oppCard1 = JSONObject("""{"id":101,"type":"movie","name":"فيلم Oppenheimer اوبنهايمر 2023 مترجم HD","year":"2023"}""")
+        val oppCard2 = JSONObject("""{"id":102,"type":"movie","name":"فيلم Oppenheimer 2023 اوبنهايمر مترجم اون لاين","year":"0"}""")
+        val sOpp1 = TimeMoviesUnlimitedEngine.scoreCatalogItem(oppCard1, oppenPayload)
+        val sOpp2 = TimeMoviesUnlimitedEngine.scoreCatalogItem(oppCard2, oppenPayload)
+        assertNotNull("1-word movie must match noisy bilingual card", sOpp1)
+        assertTrue("Exact 1-word + year match must score >= 130 (got ${sOpp1!!.score})", sOpp1.score >= 130)
+        assertNotNull("1-word movie must match mid-title year card with missing year=0", sOpp2)
+        assertTrue("Exact 1-word match with year=0 must score >= 95 (got ${sOpp2!!.score})", sOpp2.score >= 95)
+
+        // 2. Pure numeric movie titles ("1917" and "2012") must NOT strip the movie's own title number
+        val m1917 = TimeMoviesModels.LinkPayload(workId = "w_1917", fileCode = "", isMovie = true, title = "1917", year = 2019)
+        val card1917 = JSONObject("""{"id":201,"type":"movie","name":"فيلم 1917 2019 مترجم BluRay","year":"2019"}""")
+        val s1917 = TimeMoviesUnlimitedEngine.scoreCatalogItem(card1917, m1917)
+        assertNotNull("Numeric movie '1917' must match 'فيلم 1917 2019 مترجم'", s1917)
+        assertTrue(s1917!!.score >= 130)
+
+        val m2012 = TimeMoviesModels.LinkPayload(workId = "w_2012", fileCode = "", isMovie = true, title = "2012", year = 2009)
+        val card2012 = JSONObject("""{"id":202,"type":"movie","name":"فيلم 2012 2009 مترجم","year":"2009"}""")
+        val s2012 = TimeMoviesUnlimitedEngine.scoreCatalogItem(card2012, m2012)
+        assertNotNull("Numeric movie '2012' must match 'فيلم 2012 2009 مترجم'", s2012)
+        assertTrue(s2012!!.score >= 130)
+
+        // 3. Hyphenated & accented movie titles ("Spider-Man" <-> "Spiderman", "Carry-On" <-> "Carryon", "Folie à Deux")
+        val spidey = TimeMoviesModels.LinkPayload(workId = "w_sm", fileCode = "", isMovie = true, title = "Spider-Man: No Way Home", year = 2021)
+        val cardSpidey = JSONObject("""{"id":301,"type":"movie","name":"فيلم Spiderman No Way Home 2021 مترجم","year":"2021"}""")
+        assertNotNull("Spider-Man must match joined Spiderman card", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardSpidey, spidey))
+
+        val carryOn = TimeMoviesModels.LinkPayload(workId = "w_co", fileCode = "", isMovie = true, title = "Carry-On", year = 2024)
+        val cardCarryOn = JSONObject("""{"id":302,"type":"movie","name":"فيلم Carryon 2024 مترجم","year":"2024"}""")
+        assertNotNull("Carry-On must match Carryon card", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardCarryOn, carryOn))
+
+        val joker2 = TimeMoviesModels.LinkPayload(workId = "w_jk2", fileCode = "", isMovie = true, title = "Joker: Folie à Deux", year = 2024)
+        val cardJoker2 = JSONObject("""{"id":303,"type":"movie","name":"فيلم Joker Folie a Deux 2024 مترجم","year":"2024"}""")
+        assertNotNull("Accented Folie à Deux must match ASCII Folie a Deux", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardJoker2, joker2))
+
+        // 4. Sequel Guard: "Dune" (2021) must NEVER match "Dune 2" (2024), while "Dune: Part Two" (2024) MUST match "Dune 2"
+        val dune1 = TimeMoviesModels.LinkPayload(workId = "w_d1", fileCode = "", isMovie = true, title = "Dune", year = 2021)
+        val cardDune2 = JSONObject("""{"id":401,"type":"movie","name":"فيلم Dune 2 2024 مترجم","year":"2024"}""")
+        assertNull("Part 1 'Dune' (2021) must reject 'Dune 2' (2024)", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardDune2, dune1))
+
+        val dune2 = TimeMoviesModels.LinkPayload(workId = "w_d2", fileCode = "", isMovie = true, title = "Dune: Part Two", year = 2024)
+        val cardDune1 = JSONObject("""{"id":402,"type":"movie","name":"فيلم Dune 2021 مترجم","year":"2021"}""")
+        assertNotNull("'Dune: Part Two' must match 'Dune 2'", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardDune2, dune2))
+        assertNull("'Dune: Part Two' (2024) must reject 'Dune' (2021)", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardDune1, dune2))
+
+        // 5. Year-Anchored Colon Prefix Matching ("Furiosa: A Mad Max Saga" -> "Furiosa" 2024, while "Bad Boys: Ride or Die" 2024 rejects "Bad Boys" 1995)
+        val furiosa = TimeMoviesModels.LinkPayload(workId = "w_fur", fileCode = "", isMovie = true, title = "Furiosa: A Mad Max Saga", year = 2024)
+        val cardFuriosaShort = JSONObject("""{"id":501,"type":"movie","name":"فيلم Furiosa 2024 مترجم","year":"2024"}""")
+        assertNotNull("Furiosa: A Mad Max Saga (2024) must match shortened 'Furiosa' (2024)", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardFuriosaShort, furiosa))
+
+        val badBoys4 = TimeMoviesModels.LinkPayload(workId = "w_bb4", fileCode = "", isMovie = true, title = "Bad Boys: Ride or Die", year = 2024)
+        val cardBadBoys1995 = JSONObject("""{"id":502,"type":"movie","name":"فيلم Bad Boys 1995 مترجم","year":"1995"}""")
+        assertNull("Bad Boys: Ride or Die (2024) must reject 1995 Bad Boys", TimeMoviesUnlimitedEngine.scoreCatalogItem(cardBadBoys1995, badBoys4))
+
+        // 6. Arabic query punctuation + hamza stripping & prefix-tolerant LinkPayload.fromJson
+        val weladPayload = TimeMoviesModels.LinkPayload(
+            workId = "w_wr3",
+            fileCode = "",
+            isMovie = true,
+            title = "Sons of Rizk 3",
+            titleAr = "ولاد رزق 3: القاضية",
+            originalTitle = "Welad Rizk 3",
+            year = 2024,
+        )
+        val queries = TimeMoviesUnlimitedEngine.buildSearchQueries(weladPayload)
+        assertTrue("Must include originalTitle in search queries: $queries", queries.contains("Welad Rizk 3"))
+        assertTrue("Must include punctuation-stripped Arabic query: $queries", queries.any { it.contains("ولاد رزق 3 القاضية") || it == "ولاد رزق 3" })
+
+        val prefixedRaw = "timemovies://load?payload=" + weladPayload.toJson()
+        val parsedPrefixed = TimeMoviesModels.LinkPayload.fromJson(prefixedRaw)
+        assertNotNull("LinkPayload.fromJson must tolerate URI scheme prefixes", parsedPrefixed)
+        assertEquals("Welad Rizk 3", parsedPrefixed?.originalTitle)
+    }
+
+    @Test
+    fun testV6MultiCandidateMovieMergeAndStage2EgywatchDramaWorldMawdhou3Failover() = runBlocking {
+        val dramaSourcesB64 = java.util.Base64.getEncoder().encodeToString(
+            """[{"title":"VidTube 1080p","url":"__HOST__/vidtube.one/embed-abc999.html"}]"""
+                .toByteArray(Charsets.UTF_8),
+        )
+        val dramaSubsB64 = java.util.Base64.getEncoder().encodeToString(
+            """[{"language":"Arabic","subtitles":[{"url":"__HOST__/subs/oppenheimer_ar.srt"}]}]"""
+                .toByteArray(Charsets.UTF_8),
+        )
+
+        MiniHttpServer { req ->
+            val hostOrigin = "http://${req.header("host")}"
+            when {
+                // TimeMovies native backend refuses with quota_exhausted (`تم انتهاء رصيد`)
+                req.path.endsWith("/media/grant") ->
+                    MiniResponse(200, "application/json", """{"status":200,"result":{"ok":false,"reason":"quota_exhausted","charged":false}}""")
+
+                // Primary CimaCloud returns 2 duplicate movie entries: #1 has empty servers, #2 has only HLS (no direct MP4 -> triggers Stage 2 too!)
+                req.path == "/v1.3/api/search" -> {
+                    val cfId = req.header("cloudflare-id").orEmpty()
+                    val plain = """{"results":[
+                        {"id":801,"type":"movie","name":"فيلم Oppenheimer اوبنهايمر 2023 مترجم","year":"2023"},
+                        {"id":802,"type":"movie","name":"فيلم Oppenheimer 2023 مدبلج","year":"2023"}
+                    ]}"""
+                    MiniResponse(200, "application/json", TimeMoviesUnlimitedEngine.encryptCloudDayPayloadForTest(plain, cfId, false))
+                }
+
+                req.path == "/v1.3/api/movie/801/servers" || req.path == "/v1.3/api/movie/801" -> {
+                    val cfId = req.header("cloudflare-id").orEmpty()
+                    MiniResponse(200, "text/plain", TimeMoviesUnlimitedEngine.encryptCloudDayPayloadForTest("""{"servers":[]}""", cfId, true))
+                }
+
+                req.path == "/v1.3/api/movie/802/servers" -> {
+                    val cfId = req.header("cloudflare-id").orEmpty()
+                    val plain = """{"servers":[{"name":"HLS1","link":"$hostOrigin/hls/opp_master.m3u8"}]}"""
+                    MiniResponse(200, "text/plain", TimeMoviesUnlimitedEngine.encryptCloudDayPayloadForTest(plain, cfId, true))
+                }
+
+                req.path == "/hls/opp_master.m3u8" -> {
+                    val m3u8 = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3800000,RESOLUTION=1920x1080\n$hostOrigin/hls/opp_1080.m3u8"
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
+                }
+
+                // Stage 2 Engine A: Egywatch EasyPlex JSON API -> Direct 1080p MP4 with custom Referer|Origin header
+                req.path.startsWith("/egywatch/search/") ->
+                    MiniResponse(
+                        200,
+                        "application/json",
+                        """{"search":[{"id":910,"type":"movie","title":"Oppenheimer","release_date":"2023-07-21"}]}""",
+                    )
+
+                req.path.startsWith("/egywatch/media/detail/910/") ->
+                    MiniResponse(
+                        200,
+                        "application/json",
+                        """{"id":910,"videos":[{"server":"EgyDirect 1080p","link":"$hostOrigin/cdn/oppenheimer_1080p.mp4","header":"referer:https://egywatch.live/|origin:https://egywatch.live"}]}""",
+                    )
+
+                // Stage 2 Engine B: DramaWorld ArabyPros JSON API -> Base64 W3s... VidTube embed + Arabic SRT subtitle
+                req.path.startsWith("/dramaworld/search/") ->
+                    MiniResponse(
+                        200,
+                        "application/json",
+                        """{"posters":[{"id":777,"type":"movie","title":"فيلم Oppenheimer 2023 مترجم","year":"2023"}]}""",
+                    )
+
+                req.path.startsWith("/dramaworld/movie/source/by/777/") -> {
+                    val b64 = java.util.Base64.getEncoder().encodeToString(
+                        String(java.util.Base64.getDecoder().decode(dramaSourcesB64), Charsets.UTF_8)
+                            .replace("__HOST__", hostOrigin)
+                            .toByteArray(Charsets.UTF_8),
+                    )
+                    MiniResponse(200, "text/plain", b64)
+                }
+
+                req.path.startsWith("/dramaworld/subtitles/by/movie/777/") -> {
+                    val b64 = java.util.Base64.getEncoder().encodeToString(
+                        String(java.util.Base64.getDecoder().decode(dramaSubsB64), Charsets.UTF_8)
+                            .replace("__HOST__", hostOrigin)
+                            .toByteArray(Charsets.UTF_8),
+                    )
+                    MiniResponse(200, "text/plain", b64)
+                }
+
+                req.path == "/vidtube.one/embed-abc999.html" ->
+                    MiniResponse(200, "text/html", "<html><body>obfuscated_vidtube_payload_999</body></html>")
+
+                req.path == "/extractor.php" ->
+                    MiniResponse(200, "application/json", """{"error":"unsupported"}""")
+
+                // Universal ~50-host `mawdhou3.com/scrapefinal/vidtube_new.php` POST scraper resolves VidTube embed -> 720p MP4!
+                req.path == "/scraper/scrapefinal/vidtube_new.php" -> {
+                    assertEquals("POST", req.method)
+                    assertTrue(req.bodyText.contains("obfuscated_vidtube_payload_999"))
+                    MiniResponse(200, "application/json", """{"url":"$hostOrigin/cdn/vidtube_oppenheimer_720p.mp4"}""")
+                }
+
+                else -> MiniResponse(404, "application/json", """{"status":404}""")
+            }
+        }.use { server ->
+            TimeMoviesPrefs.apiBaseUrlOverride = "${server.baseOrigin}/api/v4.7/app/"
+            TimeMoviesPrefs.unlimitedCloudApiOverride = "${server.baseOrigin}/v1.3/api"
+            TimeMoviesPrefs.unlimitedExtractorOverride = "${server.baseOrigin}/extractor.php"
+            TimeMoviesPrefs.unlimitedEgywatchApiOverride = "${server.baseOrigin}/egywatch/"
+            TimeMoviesPrefs.unlimitedDramaWorldApiOverride = "${server.baseOrigin}/dramaworld"
+            TimeMoviesPrefs.unlimitedScraperOverride = "${server.baseOrigin}/scraper/"
+
+            val moviePayload = TimeMoviesModels.LinkPayload(
+                workId = "wk_opp_v6",
+                fileCode = "fc_opp_v6",
+                isMovie = true,
+                title = "Oppenheimer",
+                titleAr = "أوبنهايمر",
+                year = 2023,
+            )
+
+            val links = Collections.synchronizedList(ArrayList<ExtractorLink>())
+            val subs = Collections.synchronizedList(ArrayList<SubtitleFile>())
+            val ok = TimeMovies().loadLinks(
+                data = moviePayload.toJson(),
+                isCasting = false,
+                subtitleCallback = { subs.add(it) },
+                callback = { links.add(it) },
+            )
+
+            assertTrue("v6 Movie loadLinks must succeed across multi-candidate + Stage 2 federation", ok)
+            assertEquals(null, TimeMoviesApi.lastMediaRefusalReason)
+            assertTrue("Candidate #2 HLS stream must resolve when Candidate #1 servers are empty", links.any { it.type == ExtractorLinkType.M3U8 && it.url.endsWith("/hls/opp_1080.m3u8") })
+            val egyMp4 = links.firstOrNull { it.url.endsWith("/cdn/oppenheimer_1080p.mp4") }
+            assertNotNull("Stage 2 Egywatch 1080p direct MP4 must resolve", egyMp4)
+            assertEquals("https://egywatch.live/", egyMp4!!.referer)
+            assertTrue("Stage 2 DramaWorld + mawdhou3 VidTube scraper 720p MP4 must resolve", links.any { it.type == ExtractorLinkType.VIDEO && it.url.endsWith("/cdn/vidtube_oppenheimer_720p.mp4") })
+            assertTrue("Stage 2 DramaWorld external Arabic SRT subtitle must resolve", subs.any { it.url.endsWith("/subs/oppenheimer_ar.srt") })
+        }
+    }
+
+    @Test(timeout = 240_000L)
+    fun testLiveV6DiverseMovieCategoriesUnlimitedMatrixWhenOnline() = runBlocking {
+        val online = runCatching {
+            val req = okhttp3.Request.Builder()
+                .url("https://config-backup2.animegateshorts.workers.dev/")
+                .get()
+                .build()
+            TimeMoviesApi.plainClient.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+        if (!online) return@runBlocking
+
+        val diverseMovies = listOf(
+            TimeMoviesModels.LinkPayload("m_opp", "", true, "Oppenheimer", titleAr = "أوبنهايمر", year = 2023),
+            TimeMoviesModels.LinkPayload("m_inc", "", true, "Inception", titleAr = "إنسبشن", year = 2010),
+            TimeMoviesModels.LinkPayload("m_int", "", true, "Interstellar", titleAr = "بين النجوم", year = 2014),
+            TimeMoviesModels.LinkPayload("m_1917", "", true, "1917", year = 2019),
+            TimeMoviesModels.LinkPayload("m_sm3", "", true, "Spider-Man: No Way Home", year = 2021),
+            TimeMoviesModels.LinkPayload("m_dune2", "", true, "Dune: Part Two", year = 2024),
+            TimeMoviesModels.LinkPayload("m_dp3", "", true, "Deadpool & Wolverine", year = 2024),
+            TimeMoviesModels.LinkPayload("m_fur", "", true, "Furiosa: A Mad Max Saga", year = 2024),
+            TimeMoviesModels.LinkPayload("m_jw4", "", true, "John Wick: Chapter 4", year = 2023),
+            TimeMoviesModels.LinkPayload("m_io2", "", true, "Inside Out 2", titleAr = "قلبا وقالبا 2", year = 2024, isAnime = true),
+            TimeMoviesModels.LinkPayload("m_suz", "", true, "Suzume", titleAr = "سوزومي", year = 2022, isAnime = true),
+            TimeMoviesModels.LinkPayload("m_wr3", "", true, "Sons of Rizk 3", titleAr = "ولاد رزق 3: القاضية", originalTitle = "Welad Rizk 3", year = 2024),
+        )
+
+        var resolvedMovies = 0
+        for (movie in diverseMovies) {
+            val mLinks = Collections.synchronizedList(ArrayList<ExtractorLink>())
+            val mSubs = Collections.synchronizedList(ArrayList<SubtitleFile>())
+            val count = TimeMoviesUnlimitedEngine.extractUnlimitedLinks(
+                payload = movie,
+                subtitleCallback = { mSubs.add(it) },
+                callback = { mLinks.add(it) },
+            )
+            val hlsCount = mLinks.count { it.type == ExtractorLinkType.M3U8 }
+            val mp4Count = mLinks.count { it.type == ExtractorLinkType.VIDEO }
+            val backends = mLinks.map { it.source.substringBefore(" -") }.distinct()
+            println("LIVE_V6_MATRIX [${movie.title} (${movie.year})] -> total=$count hls=$hlsCount mp4=$mp4Count subs=${mSubs.size} backends=$backends")
+            if (count > 0) resolvedMovies++
+        }
+
+        println("LIVE_V6_MATRIX_SUMMARY resolved=$resolvedMovies/${diverseMovies.size}")
+        assertTrue(
+            "At least 10/${diverseMovies.size} diverse movie categories must resolve live zero-quota links (got $resolvedMovies/${diverseMovies.size})",
+            resolvedMovies >= 10,
+        )
+    }
 }

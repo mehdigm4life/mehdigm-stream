@@ -430,6 +430,15 @@ object TimeMoviesPrefs {
     internal var unlimitedExtractorOverride: String? = null
 
     @Volatile
+    internal var unlimitedEgywatchApiOverride: String? = null
+
+    @Volatile
+    internal var unlimitedDramaWorldApiOverride: String? = null
+
+    @Volatile
+    internal var unlimitedScraperOverride: String? = null
+
+    @Volatile
     internal var forceUnlimitedInMockTests: Boolean = false
 
     fun init(context: Context) {
@@ -764,6 +773,9 @@ object TimeMoviesPrefs {
         remotePoolUrlsOverride = null
         unlimitedCloudApiOverride = null
         unlimitedExtractorOverride = null
+        unlimitedEgywatchApiOverride = null
+        unlimitedDramaWorldApiOverride = null
+        unlimitedScraperOverride = null
         forceUnlimitedInMockTests = false
         TimeMoviesGrantCache.clearAll()
     }
