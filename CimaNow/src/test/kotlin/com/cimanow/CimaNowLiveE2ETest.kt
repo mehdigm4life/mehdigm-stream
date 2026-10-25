@@ -238,16 +238,24 @@ class CimaNowLiveE2ETest {
                             if (glb && glb.result && glb.result.body) {
                                 getLinkBody = glb.result.base64Encoded ? Buffer.from(glb.result.body, 'base64').toString('utf8') : glb.result.body;
                                 logs.push('GET_LINK_BODY=' + getLinkBody.slice(0, 300));
+                                try {
+                                    const parsed = JSON.parse(getLinkBody);
+                                    if (parsed && parsed.url) mintedUrl = parsed.url;
+                                } catch(e) {}
                             }
                         }
 
-                        // Scroll into viewport first, then read centered coordinates for real trusted tap!
+                        // Scroll into viewport first (and reveal if #watch-ready), then read centered coordinates for real trusted tap!
                         const state = await evalJs(`(function(){
                             var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
                             if (ts && ts.getBoundingClientRect().width > 20) ts.scrollIntoView({block: 'center'});
                             var tsRect = ts ? ts.getBoundingClientRect() : null;
                             var btn = document.getElementById('downloadbtn');
                             var btnHref = btn ? (btn.getAttribute('href') || '') : '';
+                            if (btn && btnHref === '#watch-ready') {
+                                btn.removeAttribute('hidden');
+                                btn.style.setProperty('display', 'inline-block', 'important');
+                            }
                             var btnVis = btn && !btn.hidden && getComputedStyle(btn).display !== 'none';
                             if (btnVis) btn.scrollIntoView({block: 'center'});
                             var btnRect = btnVis ? btn.getBoundingClientRect() : null;
@@ -361,7 +369,31 @@ class CimaNowLiveE2ETest {
                 val rawWatchHtml = wRes?.second.orEmpty()
                 if (rawWatchHtml.length > 500 && !CimaNowNetwork.isCimaBlocked(wRes?.first ?: 0, rawWatchHtml)) {
                     val decoded = CimaNowCrypto.decodeWatchingVault(rawWatchHtml)
-                    println("[DIAG] decodeWatchingVault(rawWatchHtml) -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(24)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads?.size}")
+                    println("[DIAG] decodeWatchingVault(rawWatchHtml) -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(24)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads}")
+                    if (decoded == null) {
+                        val rawDoc = org.jsoup.Jsoup.parse(rawWatchHtml)
+                        val gEl = rawDoc.select("script").firstOrNull { s -> s.data().isNotBlank() && s.attributes().any { a -> a.value.length > 200 } }
+                        if (gEl != null) {
+                            val rawG = gEl.attributes().first { it.value.length > 200 }.value
+                            val modG = Regex("""%\s*(\d+)""").find(gEl.data())?.groupValues?.get(1)?.toIntOrNull() ?: 6
+                            val s2 = runCatching { String(CimaNowCrypto.b64Decode(CimaNowCrypto.uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
+                            println("[DIAG] OKHTTP UNPACKED_S2 (len=${s2?.length}):\n${s2?.take(12000)}")
+                        }
+                    } else {
+                        val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
+                        for (tab in decoded.serverTabs.take(8)) {
+                            val sig = CimaNowCrypto.calcCoreSig(decoded.coreToken, tab.dataId, tab.dataIndex, decoded.sigSalt)
+                            val coreUrl = "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
+                                "?token=${java.net.URLEncoder.encode(decoded.coreToken, "UTF-8")}" +
+                                "&action=switch&index=${java.net.URLEncoder.encode(tab.dataIndex, "UTF-8")}" +
+                                "&id=${java.net.URLEncoder.encode(tab.dataId, "UTF-8")}" +
+                                "&_s=${java.net.URLEncoder.encode(sig, "UTF-8")}"
+                            val resp = session.getText(coreUrl, mintedUrl, mapOf("X-Requested-With" to "XMLHttpRequest"))
+                            val emb = resp?.second?.let { CimaNowCrypto.decodeCnBootFrame(it) }
+                            val rawSample = resp?.second?.take(140)?.replace('\n', ' ')
+                            println("[DIAG] OKHTTP core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} embed=$emb raw='$rawSample'")
+                        }
+                    }
                     val outerDoc = org.jsoup.Jsoup.parse(rawWatchHtml)
                     outerDoc.select("script").forEachIndexed { idx, s ->
                         val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
