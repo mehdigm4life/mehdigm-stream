@@ -108,9 +108,11 @@ class CimaNowLiveE2ETest {
             val proxySpec = session.proxySpec ?: return@withStickySession null
             // Verify this proxy reaches rm.freex2line.online cleanly first
             val t0 = System.currentTimeMillis()
+            val cCheck = session.getText(detailPage.finalUrl, "${CimaNowNetwork.mainUrl}/home/")
+            if (cCheck == null || CimaNowNetwork.isCimaBlocked(cCheck.first, cCheck.second)) return@withStickySession null
             val hop1 = session.getNoRedirect(shine, detailPage.finalUrl)
             val hopMs = System.currentTimeMillis() - t0
-            if (hop1 == null || hop1.code !in 200..399 || hopMs > 2500L) {
+            if (hop1 == null || hop1.code !in 200..399 || hopMs > 4000L) {
                 println("[DIAG] Skipping slow/dead proxy=$proxySpec code=${hop1?.code} ms=$hopMs")
                 return@withStickySession null
             }
@@ -310,8 +312,13 @@ class CimaNowLiveE2ETest {
             val mintedUrl = cdpJson.optString("mintedUrl")
             val renderedDomLen = cdpJson.optInt("renderedDomLen")
             println("[DIAG] CDP mintedUrl=$mintedUrl renderedDomLen=$renderedDomLen cookies=${cdpJson.optJSONArray("cookies")}")
-            val rawFileHtml = java.io.File("/tmp/raw_watch.html").takeIf { it.exists() }?.readText().orEmpty()
+            var rawFileHtml = java.io.File("/tmp/raw_watch.html").takeIf { it.exists() }?.readText().orEmpty()
             val domFileHtml = java.io.File("/tmp/dom_watch.html").takeIf { it.exists() }?.readText().orEmpty()
+            if (rawFileHtml.length < 1000 && mintedUrl.startsWith("http")) {
+                val fallbackPage = CimaNowNetwork.getPage(mintedUrl, "https://rm.freex2line.online/2020/02/blog-post.html/")
+                if (fallbackPage != null) rawFileHtml = fallbackPage.html
+                println("[DIAG] Fetched mintedUrl via CimaNowNetwork.getPage -> len=${rawFileHtml.length} finalUrl=${fallbackPage?.finalUrl}")
+            }
             println("[DIAG] Saved raw_watch.html len=${rawFileHtml.length}, dom_watch.html len=${domFileHtml.length}")
 
             if (rawFileHtml.length > 500) {
