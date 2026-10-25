@@ -68,8 +68,30 @@ object CimaNowExtractors {
         "0123456789abcdef".toByteArray(Charsets.UTF_8),
     )
 
+    private const val EXT_TAG = "CimaNowExt"
+
     @Volatile
     internal var debugLogger: ((String) -> Unit)? = null
+
+    private fun logExtInfo(msg: String) {
+        debugLogger?.invoke(msg)
+        if (android.os.Build.VERSION.SDK_INT > 0) {
+            runCatching { android.util.Log.i(EXT_TAG, msg) }
+        }
+    }
+
+    private fun logExtWarn(msg: String) {
+        debugLogger?.invoke("[WARN] $msg")
+        if (android.os.Build.VERSION.SDK_INT > 0) {
+            runCatching { android.util.Log.w(EXT_TAG, msg) }
+        }
+    }
+
+    private fun isVidGuardHost(h: String): Boolean =
+        h.contains("vid-guard.") || h.contains("vgfplay.") ||
+            h.contains("listeamed.") || h.contains("bembed.") ||
+            h.contains("embedv.") || h.contains("vembed.") ||
+            h.contains("damedamehoy.") || h.contains("vidguard")
 
     private val byseAttestCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
     private val unlockedSourcesCache = ConcurrentHashMap<String, Pair<Long, UnlockedSources>>()
@@ -109,7 +131,11 @@ object CimaNowExtractors {
         val cachedShine = parsedJson?.optString("shineUrl")?.takeIf { it.isNotBlank() }
         if (itemUrl.isBlank()) return@withContext false
 
-        val unlocked = unlockWatchingPage(itemUrl, cachedShine) ?: return@withContext false
+        logExtInfo("loadAllLinks start hasShine=${!cachedShine.isNullOrBlank()} item=${itemUrl.take(90)}")
+        val unlocked = unlockWatchingPage(itemUrl, cachedShine) ?: run {
+            logExtWarn("unlockWatchingPage returned null for ${itemUrl.take(90)}")
+            return@withContext false
+        }
         val tasks = ArrayList<CandidateTask>()
         val seenKeys = HashSet<String>()
 
@@ -178,6 +204,7 @@ object CimaNowExtractors {
             }
         }
 
+        logExtInfo("loadAllLinks finished emitted=${totalEmitted.get()} tasks=${tasks.size}")
         totalEmitted.get() > 0
     }
 
@@ -287,11 +314,11 @@ object CimaNowExtractors {
         val gwOrigin = originOf(gwEntry).ifBlank { "https://rm.freex2line.online" }
         val vaultReferer = "$gwOrigin/2020/02/blog-post.html/"
 
-        // 1. Primary path: Turnstile Gateway Solver (Android stealth WebView / CI Chromium)
+        // Primary path: Stealth Turnstile Gateway Solver (Android WebView / CI Chromium)
         val tMint0 = System.currentTimeMillis()
         val wasTokenCached = CimaNowGatewaySolver.getCachedWatchingUrl(effectiveItemUrl) != null
         var mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
-        debugLogger?.invoke("mintWatchingUrl cached=$wasTokenCached ok=${!mintedUrl.isNullOrBlank()} ms=${System.currentTimeMillis() - tMint0}")
+        logExtInfo("mintWatchingUrl cached=$wasTokenCached ok=${!mintedUrl.isNullOrBlank()} ms=${System.currentTimeMillis() - tMint0}")
         if (!mintedUrl.isNullOrBlank()) {
             fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
                 unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
@@ -306,51 +333,6 @@ object CimaNowExtractors {
                         return unlocked
                     }
                 }
-            }
-        }
-
-        // 2. Direct legacy static HMAC fallback (never through slow public SOCKS5 proxies; capped at 16s)
-        val legacyMinted = if (mintedUrl.isNullOrBlank()) {
-            withTimeoutOrNull(16_000L) {
-                val directSession = CimaNowNetwork.newDirectSession()
-                val hop1 = directSession.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withTimeoutOrNull null
-                if (hop1.code !in 200..399) return@withTimeoutOrNull null
-                val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
-                    ?.takeIf { originOf(it) == gwOrigin }
-                    ?: "$gwOrigin/redirectingfree/"
-                val hop2 = directSession.getNoRedirect(hop2Url, gwEntry) ?: return@withTimeoutOrNull null
-                if (hop2.code !in 200..399) return@withTimeoutOrNull null
-                val vUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
-                    ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
-                    ?: vaultReferer
-                val (vCode, vaultHtml) = directSession.getText(vUrl, hop2Url) ?: return@withTimeoutOrNull null
-                if (vCode !in 200..299 || vaultHtml.length < 512) return@withTimeoutOrNull null
-                val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withTimeoutOrNull null
-                delay(10_400L)
-                val (mCode, mintedBody) = directSession.postForm(
-                    url = "${vUrl.trimEnd('/')}/get-link.php",
-                    rawFormBody = postBody,
-                    referer = vUrl,
-                    origin = gwOrigin,
-                    extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-                ) ?: return@withTimeoutOrNull null
-                if (mCode !in 200..299) return@withTimeoutOrNull null
-                val trimmed = mintedBody.trim()
-                val parsedUrl = if (trimmed.startsWith("{")) {
-                    runCatching { JSONObject(trimmed).optString("url").trim() }.getOrDefault("")
-                } else {
-                    trimmed
-                }
-                parsedUrl.takeIf { it.startsWith("http") && it.contains("token=") }
-            }
-        } else {
-            null
-        }
-
-        if (!legacyMinted.isNullOrBlank()) {
-            fetchAndDecodeWatchingUrl(legacyMinted, vaultReferer)?.let { unlocked ->
-                unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
-                return unlocked
             }
         }
         return null
@@ -392,7 +374,7 @@ object CimaNowExtractors {
                     .trim('/').substringAfterLast('/').removePrefix("embed-").removeSuffix(".html").trim()
                 "savefiles:$code"
             }
-            h.contains("vid-guard.") || h.contains("vgfplay.") || h.contains("listeamed.") || h.contains("bembed.") -> {
+            isVidGuardHost(h) -> {
                 val code = runCatching { URI(CimaNowNetwork.encodeUrl(url)).path }.getOrDefault("")
                     .trim('/').substringAfterLast('/').trim()
                 "vidguard:$code"
@@ -454,9 +436,8 @@ object CimaNowExtractors {
                     extractSaveFiles(url, task.referer, task.qualityHint, countingCallback)
                 }
 
-                // 8. VidGuard (`vid-guard.com`, `vgfplay.com`, `listeamed.net`, `bembed.net`)
-                host.contains("vid-guard.") || host.contains("vgfplay.") ||
-                    host.contains("listeamed.") || host.contains("bembed.") || host.contains("vidguard") -> {
+                // 8. VidGuard (`vid-guard.com`, `vgfplay.com`, `listeamed.net`, `bembed.net`, `embedv.net`)
+                isVidGuardHost(host) -> {
                     extractVidGuard(url, task.referer, countingCallback)
                 }
 
@@ -1322,26 +1303,69 @@ object CimaNowExtractors {
         }
     }
 
-    // ── Host 9: VidGuard (`vid-guard.com`, `vgfplay.com`, `listeamed.net`) ───
+    // ── Host 9: VidGuard (`vid-guard.com`, `vgfplay.com`, `listeamed.net`, `embedv.net`) ───
 
     private suspend fun extractVidGuard(
         url: String,
         referer: String?,
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val origin = originOf(url)
-        val code = runCatching { URI(CimaNowNetwork.encodeUrl(url)).path }.getOrDefault("")
-            .trim('/').substringAfterLast('/').trim()
-        val embedUrl = if (code.isNotBlank()) "$origin/e/$code" else url
-        val html = fetchText(embedUrl, mapOf("User-Agent" to DESKTOP_UA, "Referer" to CimaNowNetwork.encodeUrl(referer ?: "$origin/")))
-            ?: return@withContext
+        val fetched = fetchTextWithFinalUrl(
+            run {
+                val o = originOf(url)
+                val code = runCatching { URI(CimaNowNetwork.encodeUrl(url)).path }.getOrDefault("")
+                    .trim('/').substringAfterLast('/').trim()
+                if (code.isNotBlank()) "$o/e/$code" else url
+            },
+            mapOf("User-Agent" to DESKTOP_UA, "Referer" to CimaNowNetwork.encodeUrl(referer ?: "${originOf(url)}/")),
+        ) ?: return@withContext
 
-        // Look for plain or base64 stream JSON inside `window.svg` or script payload
-        val streamCandidate = Regex(""""stream"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)?.replace("\\/", "/")
-        if (!streamCandidate.isNullOrBlank()) {
-            val signed = signVidGuardStreamUrl(streamCandidate)
-            val headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to "$origin/", "Origin" to origin)
-            emitHlsVariantsOrMaster("VidGuard", signed, "$origin/", headers, Qualities.Unknown.value, callback)
+        val (finalUrl, html) = fetched
+        val activeOrigin = originOf(finalUrl).ifBlank { originOf(url) }
+
+        val svgObj = evalVidGuardSvgJson(html)
+        val streamCandidates = LinkedHashSet<String>()
+        if (svgObj != null) {
+            svgObj.optString("stream").trim().takeIf { it.startsWith("http") }?.let { streamCandidates.add(it) }
+            svgObj.optString("stream_backup").trim().takeIf { it.startsWith("http") }?.let { streamCandidates.add(it) }
+        }
+        Regex(""""stream"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)?.replace("\\/", "/")
+            ?.takeIf { it.startsWith("http") }?.let { streamCandidates.add(it) }
+
+        val headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to "$activeOrigin/", "Origin" to activeOrigin)
+        for (rawStream in streamCandidates) {
+            val signed = signVidGuardStreamUrl(rawStream)
+            emitHlsVariantsOrMaster("VidGuard", signed, "$activeOrigin/", headers, Qualities.Unknown.value, callback)
+        }
+    }
+
+    internal fun evalVidGuardSvgJson(html: String): JSONObject? {
+        Regex("""window\.svg\s*=\s*(\{[^\n;]+\})""").find(html)?.groupValues?.get(1)?.let {
+            CimaNowCrypto.safeJsonObject(it)?.let { obj -> return obj }
+        }
+        val aaScript = org.jsoup.Jsoup.parse(html).select("script")
+            .map { it.data() }
+            .firstOrNull { it.contains("ﾟωﾟ") || it.contains("\\uFF9F\\u03C9\\uFF9F") }
+            ?: return null
+
+        val cx = org.mozilla.javascript.Context.enter()
+        return try {
+            cx.isInterpretedMode = true
+            cx.languageVersion = org.mozilla.javascript.Context.VERSION_ES6
+            val scope = cx.initSafeStandardObjects()
+            val harness = """
+                var window = this;
+                var self = this;
+                var document = { currentScript: {}, createElement: function(){ return {}; } };
+                $aaScript
+                JSON.stringify(window.svg || {});
+            """.trimIndent()
+            val outStr = org.mozilla.javascript.Context.toString(cx.evaluateString(scope, harness, "vg_aa", 1, null))
+            CimaNowCrypto.safeJsonObject(outStr)
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { org.mozilla.javascript.Context.exit() }
         }
     }
 

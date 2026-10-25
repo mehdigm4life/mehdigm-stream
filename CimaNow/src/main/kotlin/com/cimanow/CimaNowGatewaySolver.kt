@@ -1,14 +1,19 @@
 package com.cimanow
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -32,23 +37,64 @@ import java.util.concurrent.TimeUnit
 /**
  * Stealth Turnstile Gateway Solver for `rm.freex2line.online/loadon/?link=...` -> `/watching/?token=...`.
  *
- * Design guarantees:
+ * Android real-device guarantees (`WebView 150+`, MIUI / MediaTek / PowerVR / Adreno):
  *  1. Zero `window.*` globals, zero `#cs-link-sink` / `#cs-payload` DOM mutations, and zero
- *     `XMLHttpRequest` / `fetch` monkey-patches (defeating `s_0` and `js-confuser` `s_10..14` traps).
- *  2. Real Android `MotionEvent` touch dispatch (`event.isTrusted === true`) with CSS-to-View density
- *     scaling after centering `#downloadbtn` / Turnstile widget inside the viewport.
- *  3. Hard 28-second timeout + guaranteed `Main`-thread `WebView` teardown so `loadLinks` can never hang.
- *  4. 15-minute in-memory token cache per canonical item URL so re-entering the player is instant (< 0.3s).
+ *     `Element` / `Node` / `XMLHttpRequest` / `fetch` monkey-patches (defeating Stage A `_isHijacked()`
+ *     and Stage B `js-confuser` integrity checks).
+ *  2. On-screen `PassThroughWebViewContainer` (`translationX = 0f, translationY = 0f` at `index = 0`
+ *     behind player UI with `dispatchTouchEvent = false` for user touches) so `getGlobalVisibleRect`
+ *     is `true` and Chromium's `BeginMainFrame` (`requestAnimationFrame` 10s countdown + invisible
+ *     Turnstile widget) runs unthrottled at 60Hz without intercepting user input.
+ *  3. Native suppression of Android WebView's `X-Requested-With: com.lagradost.cloudstream3` header via
+ *     `WebSettingsCompat` + Chromium `AwSettings` reflection (preventing `freex2line.online` WAF 403).
+ *  4. Detached JS-disabled `onCreateWindow` popup sink so `openads.js` receives a non-null `WindowProxy`
+ *     on popunder taps #1/#2 (advancing its click counter to tap #3's main-frame navigation) with zero
+ *     ad network traffic and zero extra GPU surfaces.
+ *  5. Exact `(wv.width / window.innerWidth, wv.height / window.innerHeight)` CSS-to-View coordinate
+ *     mapping with full touchscreen `TOOL_TYPE_FINGER` `MotionEvent` dispatch (`event.isTrusted === true`).
  */
 object CimaNowGatewaySolver {
 
+    private const val TAG = "CimaNowGW"
     private const val TOKEN_TTL_MS = 15 * 60 * 1000L
-    private const val WEBVIEW_TIMEOUT_MS = 28_000L
+    private const val ATTEMPT_1_TIMEOUT_MS = 38_000L
+    private const val ATTEMPT_2_TIMEOUT_MS = 26_000L
 
     private data class CachedToken(val mintedWatchingUrl: String, val expiresAtMs: Long)
 
+    private data class CssTapTarget(
+        val cssX: Float,
+        val cssY: Float,
+        val viewportW: Float,
+        val viewportH: Float,
+    )
+
+    private class PassThroughWebViewContainer(context: Context) : FrameLayout(context) {
+        @Volatile
+        var allowSyntheticTouch: Boolean = false
+
+        override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+            if (!allowSyntheticTouch) return false
+            return super.dispatchTouchEvent(ev)
+        }
+    }
+
     private val tokenCache = ConcurrentHashMap<String, CachedToken>()
     private val solverMutex = Mutex()
+
+    private fun logInfo(msg: String) {
+        CimaNowExtractors.debugLogger?.invoke("[GW] $msg")
+        if (Build.VERSION.SDK_INT > 0) {
+            runCatching { Log.i(TAG, msg) }
+        }
+    }
+
+    private fun logWarn(msg: String) {
+        CimaNowExtractors.debugLogger?.invoke("[GW][WARN] $msg")
+        if (Build.VERSION.SDK_INT > 0) {
+            runCatching { Log.w(TAG, msg) }
+        }
+    }
 
     private fun cacheKey(itemUrl: String): String =
         runCatching { URLDecoder.decode(itemUrl, "UTF-8") }
@@ -70,6 +116,116 @@ object CimaNowGatewaySolver {
         tokenCache.remove(cacheKey(itemUrl))
     }
 
+    internal fun cleanWebViewUserAgent(rawUa: String): String {
+        return rawUa
+            .replace("; wv)", ")")
+            .replace(Regex("""Version/\d+\.\d+\s*"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .ifBlank { CimaNowNetwork.MOBILE_UA }
+    }
+
+    internal fun unwrapHrefLi(url: String): String? {
+        val clean = url.trim()
+        return when {
+            clean.startsWith("https://href.li/?", ignoreCase = true) -> clean.substring("https://href.li/?".length).trim()
+            clean.startsWith("http://href.li/?", ignoreCase = true) -> clean.substring("http://href.li/?".length).trim()
+            else -> null
+        }?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+    }
+
+    internal fun normalizeMintedWatchingUrl(raw: String?): String? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val unwrapped = unwrapHrefLi(trimmed) ?: trimmed
+        return unwrapped.takeIf {
+            it.startsWith("http") && it.contains("/watching/") && it.contains("token=")
+        }
+    }
+
+    private fun hostOnly(url: String?): String =
+        runCatching { URI(CimaNowNetwork.encodeUrl(url.orEmpty())).host?.lowercase().orEmpty() }.getOrDefault("")
+
+    private fun isAllowedGatewayNavigation(url: String): Boolean {
+        val host = hostOnly(url)
+        if (host.isEmpty()) return true
+        return host.contains("freex2line.") ||
+            host.contains("cimanow") ||
+            host.contains("cloudflare.") ||
+            host.contains("href.li") ||
+            host.contains("google") ||
+            host.contains("gstatic.")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    internal fun suppressXRequestedWithHeader(settings: WebSettings): String {
+        val modes = ArrayList<String>(2)
+        runCatching {
+            val featureCls = Class.forName("androidx.webkit.WebViewFeature")
+            val supported = featureCls
+                .getMethod("isFeatureSupported", String::class.java)
+                .invoke(null, "REQUESTED_WITH_HEADER_ALLOW_LIST") as? Boolean
+            if (supported == true) {
+                val compatCls = Class.forName("androidx.webkit.WebSettingsCompat")
+                compatCls
+                    .getMethod("setRequestedWithHeaderOriginAllowList", WebSettings::class.java, Set::class.java)
+                    .invoke(null, settings, emptySet<String>())
+                modes.add("WebSettingsCompat")
+            }
+        }
+        runCatching {
+            var awSettingsObj: Any? = null
+            var cls: Class<*>? = settings.javaClass
+            while (cls != null && cls != Any::class.java && awSettingsObj == null) {
+                for (m in cls.declaredMethods) {
+                    if (m.parameterTypes.isEmpty() && m.returnType.name.endsWith("AwSettings")) {
+                        m.isAccessible = true
+                        awSettingsObj = m.invoke(settings)
+                        if (awSettingsObj != null) break
+                    }
+                }
+                if (awSettingsObj == null) {
+                    for (f in cls.declaredFields) {
+                        if (f.type.name.endsWith("AwSettings") || f.name == "mAwSettings") {
+                            f.isAccessible = true
+                            awSettingsObj = f.get(settings)
+                            if (awSettingsObj != null) break
+                        }
+                    }
+                }
+                cls = cls.superclass
+            }
+            if (awSettingsObj != null) {
+                val setter = awSettingsObj.javaClass.methods.firstOrNull {
+                    it.name == "setRequestedWithHeaderOriginAllowList" && it.parameterTypes.size == 1
+                } ?: awSettingsObj.javaClass.declaredMethods.firstOrNull {
+                    it.name == "setRequestedWithHeaderOriginAllowList" && it.parameterTypes.size == 1
+                }?.also { it.isAccessible = true }
+                if (setter != null) {
+                    setter.invoke(awSettingsObj, emptySet<String>())
+                    modes.add("AwSettings")
+                }
+            }
+        }
+        return if (modes.isEmpty()) "default" else modes.joinToString("+")
+    }
+
+    private suspend fun clearGatewayCookiesOnMain(gwOrigin: String) {
+        if (Build.VERSION.SDK_INT <= 0) return
+        withContext(Dispatchers.Main) {
+            runCatching {
+                val cm = CookieManager.getInstance()
+                val existing = cm.getCookie(gwOrigin).orEmpty()
+                for (part in existing.split(';')) {
+                    val name = part.substringBefore('=').trim()
+                    if (name.isNotEmpty()) {
+                        cm.setCookie(gwOrigin, "$name=; Max-Age=0; Path=/")
+                    }
+                }
+                cm.flush()
+            }
+        }
+    }
+
     suspend fun mintWatchingUrl(shineUrl: String, itemUrl: String): String? {
         getCachedWatchingUrl(itemUrl)?.let { return it }
 
@@ -80,84 +236,83 @@ object CimaNowGatewaySolver {
                 ?: return@withLock null
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
-                mintViaAndroidWebView(cleanShine, itemUrl)
-                    ?: mintViaAndroidWebView(cleanShine, itemUrl)
+                mintViaAndroidWebView(cleanShine, itemUrl, ATTEMPT_1_TIMEOUT_MS, attempt = 1)
+                    ?: run {
+                        val gwOrigin = runCatching {
+                            val u = URI(CimaNowNetwork.encodeUrl(cleanShine))
+                            "${u.scheme}://${u.host}"
+                        }.getOrDefault("https://rm.freex2line.online")
+                        clearGatewayCookiesOnMain(gwOrigin)
+                        mintViaAndroidWebView(cleanShine, itemUrl, ATTEMPT_2_TIMEOUT_MS, attempt = 2)
+                    }
             } else if (Build.VERSION.SDK_INT == 0) {
                 mintViaHeadlessChromiumCli(cleanShine, itemUrl)
                     ?: mintViaHeadlessChromiumCli(cleanShine, itemUrl)
             } else {
+                logWarn("CommonActivity.activity is null (SDK=${Build.VERSION.SDK_INT})")
                 null
             }
 
-            if (!minted.isNullOrBlank() && isMintedWatchingUrl(minted)) {
-                tokenCache[cacheKey(itemUrl)] = CachedToken(minted, System.currentTimeMillis() + TOKEN_TTL_MS)
-                minted
+            val normalized = normalizeMintedWatchingUrl(minted)
+            if (normalized != null) {
+                tokenCache[cacheKey(itemUrl)] = CachedToken(normalized, System.currentTimeMillis() + TOKEN_TTL_MS)
+                normalized
             } else {
                 null
             }
         }
     }
 
-    private fun isMintedWatchingUrl(url: String?): Boolean {
-        val u = url?.trim() ?: return false
-        return u.startsWith("http") && u.contains("/watching/") && u.contains("token=")
-    }
-
-    private fun unwrapHrefLi(url: String): String? {
-        val clean = url.trim()
-        return when {
-            clean.startsWith("https://href.li/?", ignoreCase = true) -> clean.substring("https://href.li/?".length).trim()
-            clean.startsWith("http://href.li/?", ignoreCase = true) -> clean.substring("http://href.li/?".length).trim()
-            else -> null
-        }?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-    }
-
-    private fun isAllowedGatewayNavigation(url: String): Boolean {
-        val host = runCatching { URI(CimaNowNetwork.encodeUrl(url)).host?.lowercase().orEmpty() }.getOrDefault("")
-        if (host.isEmpty()) return true
-        return host.contains("freex2line.") ||
-            host.contains("cimanow") ||
-            host.contains("cloudflare.") ||
-            host.contains("href.li") ||
-            host.contains("google") ||
-            host.contains("gstatic.")
-    }
-
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
-    private suspend fun mintViaAndroidWebView(shineUrl: String, itemUrl: String): String? {
+    private suspend fun mintViaAndroidWebView(
+        shineUrl: String,
+        itemUrl: String,
+        timeoutMs: Long,
+        attempt: Int,
+    ): String? {
         val activity = CommonActivity.activity ?: return null
+        if (activity.isFinishing || activity.isDestroyed) return null
+
         val deferred = CompletableDeferred<String?>()
+        var containerRef: PassThroughWebViewContainer? = null
         var webViewRef: WebView? = null
+        val popupWebViews = ArrayList<WebView>(3)
 
         return try {
             withContext(Dispatchers.Main) {
                 val root = activity.findViewById<ViewGroup>(android.R.id.content)
                     ?: run {
+                        logWarn("android.R.id.content not found on attempt #$attempt")
                         deferred.complete(null)
                         return@withContext
                     }
 
-                val wv = WebView(activity)
-                webViewRef = wv
+                val container = PassThroughWebViewContainer(activity).apply {
+                    visibility = View.VISIBLE
+                    translationX = 0f
+                    translationY = 0f
+                    isFocusable = false
+                    isFocusableInTouchMode = false
+                    isClickable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                }
+                containerRef = container
 
-                // Keep View.VISIBLE with MATCH_PARENT geometry translated off-screen so user touches
-                // never hit WebView, while direct wv.dispatchTouchEvent(MotionEvent) operates in local
-                // coordinates and requestAnimationFrame / layout checks run unthrottled.
-                wv.alpha = 0.01f
-                wv.visibility = View.VISIBLE
-                wv.translationX = 10_000f
-                wv.translationY = 10_000f
-                wv.isFocusable = false
-                wv.isFocusableInTouchMode = false
-                wv.isClickable = false
+                val wv = WebView(activity).apply {
+                    alpha = 0.01f
+                    visibility = View.VISIBLE
+                    translationX = 0f
+                    translationY = 0f
+                    isFocusable = false
+                    isFocusableInTouchMode = false
+                    isClickable = false
+                }
+                webViewRef = wv
 
                 val rawDefaultUa = runCatching { WebSettings.getDefaultUserAgent(activity) }
                     .getOrDefault(CimaNowNetwork.MOBILE_UA)
-                val cleanChromeUa = rawDefaultUa
-                    .replace("; wv)", ")")
-                    .replace(Regex("""Version/\d+\.\d+\s*"""), "")
-                    .trim()
-                    .ifBlank { CimaNowNetwork.MOBILE_UA }
+                val cleanChromeUa = cleanWebViewUserAgent(rawDefaultUa)
+                val xrwMode = suppressXRequestedWithHeader(wv.settings)
 
                 wv.settings.apply {
                     javaScriptEnabled = true
@@ -165,25 +320,72 @@ object CimaNowGatewaySolver {
                     @Suppress("DEPRECATION")
                     databaseEnabled = true
                     useWideViewPort = true
-                    loadWithOverviewMode = true
+                    loadWithOverviewMode = false
                     loadsImagesAutomatically = true
                     blockNetworkImage = false
                     mediaPlaybackRequiresUserGesture = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     cacheMode = WebSettings.LOAD_DEFAULT
                     setSupportMultipleWindows(true)
-                    javaScriptCanOpenWindowsAutomatically = false
+                    javaScriptCanOpenWindowsAutomatically = true
                     userAgentString = cleanChromeUa
                 }
 
-                // Swallow target="_blank" popups/logos so they never hijack the main WebView
+                logInfo("Attempt #$attempt init WebView (xrw=$xrwMode, ua=${cleanChromeUa.take(78)})")
+
+                // Give openads.js a real non-null WindowProxy on popunder taps #1 & #2 while aborting
+                // all ad loads immediately and capturing /watching/?token=... if opened in a new window.
                 wv.webChromeClient = object : WebChromeClient() {
                     override fun onCreateWindow(
                         view: WebView?,
                         isDialog: Boolean,
                         isUserGesture: Boolean,
                         resultMsg: android.os.Message?,
-                    ): Boolean = false
+                    ): Boolean {
+                        val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                        val popupWv = runCatching { WebView(activity) }.getOrNull() ?: return false
+                        popupWebViews.add(popupWv)
+                        popupWv.settings.apply {
+                            javaScriptEnabled = false
+                            loadsImagesAutomatically = false
+                            blockNetworkImage = true
+                        }
+                        popupWv.webViewClient = object : WebViewClient() {
+                            private fun interceptPopup(u: String?): Boolean {
+                                val minted = normalizeMintedWatchingUrl(u)
+                                if (minted != null) {
+                                    logInfo("Attempt #$attempt captured watching URL via popup!")
+                                    if (!deferred.isCompleted) deferred.complete(minted)
+                                } else if (!u.isNullOrBlank() && u != "about:blank") {
+                                    logInfo("Attempt #$attempt swallowed popunder: ${hostOnly(u)}")
+                                }
+                                runCatching { popupWv.stopLoading() }
+                                view?.postDelayed({
+                                    runCatching {
+                                        popupWebViews.remove(popupWv)
+                                        popupWv.destroy()
+                                    }
+                                }, 250L)
+                                return true
+                            }
+
+                            override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean =
+                                interceptPopup(req?.url?.toString())
+
+                            @Suppress("DEPRECATION")
+                            override fun shouldOverrideUrlLoading(v: WebView?, url: String?): Boolean =
+                                interceptPopup(url)
+
+                            override fun onPageStarted(v: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                if (!url.isNullOrBlank() && url != "about:blank") {
+                                    interceptPopup(url)
+                                }
+                            }
+                        }
+                        transport.webView = popupWv
+                        resultMsg.sendToTarget()
+                        return true
+                    }
                 }
 
                 runCatching {
@@ -193,15 +395,17 @@ object CimaNowGatewaySolver {
                 }
 
                 wv.webViewClient = object : WebViewClient() {
-                    private fun interceptUrl(view: WebView?, url: String?): Boolean {
+                    private fun interceptMainUrl(view: WebView?, url: String?): Boolean {
                         val target = url?.trim().orEmpty()
                         if (target.isEmpty()) return false
-                        if (isMintedWatchingUrl(target)) {
-                            if (!deferred.isCompleted) deferred.complete(target)
+                        normalizeMintedWatchingUrl(target)?.let { minted ->
+                            logInfo("Attempt #$attempt captured minted watching URL on main frame!")
+                            if (!deferred.isCompleted) deferred.complete(minted)
                             runCatching { view?.stopLoading() }
                             return true
                         }
                         if (target.startsWith("http") && !isAllowedGatewayNavigation(target)) {
+                            logInfo("Attempt #$attempt blocked external redirect: ${hostOnly(target)}")
                             return true
                         }
                         return false
@@ -209,116 +413,173 @@ object CimaNowGatewaySolver {
 
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         if (request != null && !request.isForMainFrame) return false
-                        return interceptUrl(view, request?.url?.toString())
+                        return interceptMainUrl(view, request?.url?.toString())
                     }
 
                     @Suppress("DEPRECATION")
                     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                        return interceptUrl(view, url)
+                        return interceptMainUrl(view, url)
                     }
 
                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                         val target = url?.trim().orEmpty()
-                        if (isMintedWatchingUrl(target)) {
-                            if (!deferred.isCompleted) deferred.complete(target)
+                        normalizeMintedWatchingUrl(target)?.let { minted ->
+                            logInfo("Attempt #$attempt onPageStarted captured minted watching URL!")
+                            if (!deferred.isCompleted) deferred.complete(minted)
                             runCatching { view?.stopLoading() }
+                            return
+                        }
+                        if (target.startsWith("http")) {
+                            logInfo("Attempt #$attempt nav -> ${target.substringBefore('?').take(85)}")
+                        }
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: WebResourceResponse?,
+                    ) {
+                        if (request?.isForMainFrame == true) {
+                            logWarn("Attempt #$attempt HTTP ${errorResponse?.statusCode} on ${request.url.toString().take(90)}")
+                        }
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?,
+                    ) {
+                        if (request?.isForMainFrame == true && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            logWarn("Attempt #$attempt net error ${error?.errorCode} (${error?.description}) on ${request.url.toString().take(90)}")
                         }
                     }
                 }
 
-                val params = FrameLayout.LayoutParams(
+                val matchParent = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
-                root.addView(wv, params)
+                container.addView(wv, matchParent)
+                if (root.childCount > 0) {
+                    root.addView(container, 0, matchParent)
+                } else {
+                    root.addView(container, matchParent)
+                }
+
                 wv.loadUrl(
                     CimaNowNetwork.encodeUrl(shineUrl),
                     mapOf("Referer" to CimaNowNetwork.encodeUrl(itemUrl)),
                 )
             }
 
-            withTimeoutOrNull(WEBVIEW_TIMEOUT_MS) {
+            withTimeoutOrNull(timeoutMs) {
                 val startedMs = SystemClock.uptimeMillis()
                 var firstBtnSeenMs = 0L
                 var lastTsTapMs = 0L
                 var lastBtnTapMs = 0L
                 var tsTapCount = 0
+                var btnTapCount = 0
 
-                // Let initial gateway redirects + non-interactive Turnstile run undisturbed first
-                delay(3_500L)
+                // Let initial /loadon/ -> href.li -> /redirectingfree/ -> /blog-post.html/ load cleanly
+                delay(2_800L)
 
                 while (!deferred.isCompleted) {
-                    delay(500L)
+                    delay(550L)
                     if (deferred.isCompleted) break
 
                     val nowMs = SystemClock.uptimeMillis()
                     val elapsedMs = nowMs - startedMs
-                    // Once blog-post.html (#downloadbtn) appears, give Stage B 7.0s undisturbed so Turnstile solves cleanly
-                    if (firstBtnSeenMs > 0L && nowMs - firstBtnSeenMs < 7_000L) continue
-                    val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 11_000L)
+                    // Once blog-post.html (#downloadbtn) mounts, leave Stage B & invisible Turnstile
+                    // completely undisturbed for 6.5s while the 10-second countdown runs.
+                    if (firstBtnSeenMs > 0L && nowMs - firstBtnSeenMs < 6_500L) continue
+
+                    val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 11_500L)
                     val allowTsTap = if (firstBtnSeenMs == 0L) {
-                        elapsedMs >= 4_500L
+                        elapsedMs >= 5_500L
                     } else {
-                        nowMs - firstBtnSeenMs >= 7_500L
+                        nowMs - firstBtnSeenMs >= 8_500L
                     }
+
                     val probeResult = withContext(Dispatchers.Main) {
                         val wv = webViewRef ?: return@withContext ""
-                        wv.url?.let { cur ->
-                            if (isMintedWatchingUrl(cur)) {
-                                if (!deferred.isCompleted) deferred.complete(cur)
-                                return@withContext "DONE"
-                            }
+                        normalizeMintedWatchingUrl(wv.url)?.let { cur ->
+                            if (!deferred.isCompleted) deferred.complete(cur)
+                            return@withContext "DONE"
                         }
                         evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(allowBtnForce, allowTsTap))
                     }
 
                     if (deferred.isCompleted || probeResult == "DONE") break
+
+                    if (probeResult == "ERR:WAF" || probeResult == "ERR:BROWSER") {
+                        logWarn("Attempt #$attempt gateway rejected browser ($probeResult) at ${elapsedMs}ms")
+                        deferred.complete(null)
+                        break
+                    }
+
                     if (firstBtnSeenMs == 0L && probeResult.contains("HASBTN")) {
                         firstBtnSeenMs = SystemClock.uptimeMillis()
+                        logInfo("Attempt #$attempt Stage B #downloadbtn detected at ${elapsedMs}ms (wv=${webViewRef?.width}x${webViewRef?.height})")
                     }
 
                     when {
                         probeResult.startsWith("URL:") -> {
-                            val u = probeResult.removePrefix("URL:").trim()
-                            if (isMintedWatchingUrl(u)) {
-                                deferred.complete(u)
-                                break
+                            normalizeMintedWatchingUrl(probeResult.removePrefix("URL:"))?.let { minted ->
+                                logInfo("Attempt #$attempt probe extracted watching URL at ${elapsedMs}ms")
+                                deferred.complete(minted)
                             }
+                            if (deferred.isCompleted) break
                         }
                         probeResult.startsWith("BTN:") -> {
                             if (firstBtnSeenMs == 0L) firstBtnSeenMs = nowMs
-                            if (nowMs - lastBtnTapMs >= 1_800L) {
+                            if (nowMs - lastBtnTapMs >= 650L) {
                                 lastBtnTapMs = nowMs
-                                val coords = parseCssCoords(probeResult.removePrefix("BTN:"))
-                                if (coords != null) {
-                                    dispatchTrustedTap(webViewRef, coords.first, coords.second)
+                                val target = parseCssTapTarget(probeResult.removePrefix("BTN:"))
+                                if (target != null) {
+                                    btnTapCount++
+                                    logInfo("Attempt #$attempt tap #downloadbtn #$btnTapCount css=(${target.cssX.toInt()},${target.cssY.toInt()}) vp=${target.viewportW.toInt()}x${target.viewportH.toInt()}")
+                                    dispatchTrustedTap(containerRef, webViewRef, target)
                                 }
                             }
                         }
                         probeResult.startsWith("TS:") -> {
                             val payload = probeResult.removePrefix("TS:").removeSuffix(":HASBTN")
-                            if (nowMs - lastTsTapMs >= 5_000L) {
+                            if (nowMs - lastTsTapMs >= 4_200L) {
                                 lastTsTapMs = nowMs
                                 val sides = payload.split('|')
-                                val primary = sides.getOrNull(tsTapCount % sides.size)?.let { parseCssCoords(it) }
+                                val chosen = sides.getOrNull(tsTapCount % sides.size)?.let { parseCssTapTarget(it) }
                                 tsTapCount++
-                                if (primary != null) {
-                                    dispatchTrustedTap(webViewRef, primary.first, primary.second)
+                                if (chosen != null) {
+                                    logInfo("Attempt #$attempt tap Turnstile #$tsTapCount css=(${chosen.cssX.toInt()},${chosen.cssY.toInt()}) vp=${chosen.viewportW.toInt()}x${chosen.viewportH.toInt()}")
+                                    dispatchTrustedTap(containerRef, webViewRef, chosen)
                                 }
                             }
                         }
                     }
                 }
                 deferred.await()
+            }.also { res ->
+                if (res == null && !deferred.isCompleted) {
+                    logWarn("Attempt #$attempt timed out after ${timeoutMs}ms (lastUrl=${webViewRef?.url?.take(85)})")
+                }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            logWarn("Attempt #$attempt exception: ${t.javaClass.simpleName}: ${t.message}")
             null
         } finally {
             withContext(NonCancellable + Dispatchers.Main) {
                 runCatching { CookieManager.getInstance().flush() }
+                for (pwv in popupWebViews) {
+                    runCatching {
+                        pwv.stopLoading()
+                        pwv.destroy()
+                    }
+                }
+                popupWebViews.clear()
                 webViewRef?.let { wv ->
                     runCatching {
                         wv.stopLoading()
+                        wv.webChromeClient = null
                         wv.webViewClient = WebViewClient()
                         wv.loadUrl("about:blank")
                         (wv.parent as? ViewGroup)?.removeView(wv)
@@ -326,7 +587,14 @@ object CimaNowGatewaySolver {
                         wv.destroy()
                     }
                 }
+                containerRef?.let { c ->
+                    runCatching {
+                        (c.parent as? ViewGroup)?.removeView(c)
+                        c.removeAllViews()
+                    }
+                }
                 webViewRef = null
+                containerRef = null
             }
         }
     }
@@ -339,6 +607,8 @@ object CimaNowGatewaySolver {
                 try {
                     var loc = String(location.href || '');
                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
+                    var iw = Math.round(window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0);
+                    var ih = Math.round(window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0);
                     var btn = document.getElementById('downloadbtn');
                     var h = btn ? String(btn.getAttribute('href') || '') : '';
                     if (btn) {
@@ -353,46 +623,65 @@ object CimaNowGatewaySolver {
                             btn.scrollIntoView({block: 'center', inline: 'center'});
                             var br = btn.getBoundingClientRect();
                             if (br.width > 4 && br.height > 4) {
-                                return 'BTN:' + Math.round(br.left + br.width / 2) + ',' + Math.round(br.top + br.height / 2);
+                                return 'BTN:' + Math.round(br.left + br.width / 2) + ',' + Math.round(br.top + br.height / 2) + ',' + iw + ',' + ih;
                             }
+                        }
+                    } else {
+                        var btxt = String((document.body && document.body.innerText) || '');
+                        if (btxt.indexOf('unable to access freex2line') !== -1 || btxt.indexOf('Sorry, you have been blocked') !== -1) {
+                            return 'ERR:WAF';
+                        }
+                        if (btxt.indexOf('استخدم متصفح اخر') !== -1) {
+                            return 'ERR:BROWSER';
                         }
                     }
                     if ($tsTapFlag && h !== '#watch-ready') {
-                        var candidates = [
-                            '.cf-turnstile',
-                            '[data-sitekey]',
-                            '#challenge-stage > div',
-                            'html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div',
-                            'iframe[src*="challenges.cloudflare.com"]'
-                        ];
-                        var box = null;
-                        for (var ci = 0; ci < candidates.length; ci++) {
-                            var el = document.querySelector(candidates[ci]);
-                            if (el) {
-                                var r0 = el.getBoundingClientRect();
-                                if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
-                            }
-                        }
-                        if (!box) {
-                            var divs = document.querySelectorAll('div');
-                            for (var di = 0; di < divs.length; di++) {
-                                var dr = divs[di].getBoundingClientRect();
-                                if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
-                                    box = divs[di];
-                                    break;
+                        var inp = document.querySelector('input[name="cf-turnstile-response"]');
+                        var tokReady = inp && inp.value && inp.value.length > 20;
+                        if (!tokReady) {
+                            var candidates = [
+                                '.cf-turnstile',
+                                '[data-sitekey]',
+                                '#challenge-stage > div',
+                                'html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div',
+                                'iframe[src*="challenges.cloudflare.com"]'
+                            ];
+                            var box = null;
+                            for (var ci = 0; ci < candidates.length; ci++) {
+                                var el = document.querySelector(candidates[ci]);
+                                if (el) {
+                                    var r0 = el.getBoundingClientRect();
+                                    if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
                                 }
                             }
-                        }
-                        if (box) {
-                            box.scrollIntoView({block: 'center', inline: 'center'});
-                            var tr = box.getBoundingClientRect();
-                            if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
-                                var cy = Math.round(tr.top + tr.height / 2);
-                                var lx = Math.round(tr.left + 28);
-                                var rx = Math.round(tr.right - 28);
-                                var isRtl = (navigator.language || '').toLowerCase().indexOf('ar') === 0;
-                                var pair = isRtl ? (rx + ',' + cy + '|' + lx + ',' + cy) : (lx + ',' + cy + '|' + rx + ',' + cy);
-                                return 'TS:' + pair + (btn ? ':HASBTN' : '');
+                            if (!box && inp) {
+                                var p = inp.parentElement;
+                                while (p && p !== document.body) {
+                                    var pr = p.getBoundingClientRect();
+                                    if (pr.width >= 180 && pr.height >= 40 && pr.height <= 140) { box = p; break; }
+                                    p = p.parentElement;
+                                }
+                            }
+                            if (!box) {
+                                var divs = document.querySelectorAll('div');
+                                for (var di = 0; di < divs.length; di++) {
+                                    var dr = divs[di].getBoundingClientRect();
+                                    if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
+                                        box = divs[di];
+                                        break;
+                                    }
+                                }
+                            }
+                            if (box) {
+                                box.scrollIntoView({block: 'center', inline: 'center'});
+                                var tr = box.getBoundingClientRect();
+                                if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
+                                    var cy = Math.round(tr.top + tr.height / 2);
+                                    var lx = Math.round(tr.left + 28);
+                                    var rx = Math.round(tr.right - 28);
+                                    var pair = lx + ',' + cy + ',' + iw + ',' + ih + '|' + rx + ',' + cy + ',' + iw + ',' + ih;
+                                    return 'TS:' + pair + (btn ? ':HASBTN' : '');
+                                }
                             }
                         }
                     }
@@ -403,37 +692,96 @@ object CimaNowGatewaySolver {
         """.trimIndent()
     }
 
-    private fun parseCssCoords(s: String): Pair<Float, Float>? {
+    private fun parseCssTapTarget(s: String): CssTapTarget? {
         val parts = s.split(',')
         if (parts.size < 2) return null
         val x = parts[0].trim().toFloatOrNull() ?: return null
         val y = parts[1].trim().toFloatOrNull() ?: return null
-        return x to y
+        val iw = parts.getOrNull(2)?.trim()?.toFloatOrNull() ?: 0f
+        val ih = parts.getOrNull(3)?.trim()?.toFloatOrNull() ?: 0f
+        return CssTapTarget(x, y, iw, ih)
     }
 
-    private suspend fun dispatchTrustedTap(wv: WebView?, cssX: Float, cssY: Float) {
+    private fun computeViewTapPoint(wv: WebView, target: CssTapTarget): Pair<Float, Float> {
+        val density = wv.resources.displayMetrics.density.coerceAtLeast(1f)
+        val scaleX = if (target.viewportW > 0f && wv.width > 0) {
+            wv.width.toFloat() / target.viewportW
+        } else {
+            density
+        }
+        val scaleY = if (target.viewportH > 0f && wv.height > 0) {
+            wv.height.toFloat() / target.viewportH
+        } else {
+            density
+        }
+        val maxX = (wv.width - 2).coerceAtLeast(4).toFloat()
+        val maxY = (wv.height - 2).coerceAtLeast(4).toFloat()
+        val realX = (target.cssX * scaleX).coerceIn(2f, maxX)
+        val realY = (target.cssY * scaleY).coerceIn(2f, maxY)
+        return realX to realY
+    }
+
+    private suspend fun dispatchTrustedTap(
+        container: PassThroughWebViewContainer?,
+        wv: WebView?,
+        target: CssTapTarget,
+    ) {
         if (wv == null) return
         val downAt = SystemClock.uptimeMillis()
+        val props = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+        )
         withContext(Dispatchers.Main) {
             runCatching {
-                val density = wv.resources.displayMetrics.density.coerceAtLeast(1f)
-                val realX = (cssX * density).coerceIn(2f, (wv.width - 2).coerceAtLeast(4).toFloat())
-                val realY = (cssY * density).coerceIn(2f, (wv.height - 2).coerceAtLeast(4).toFloat())
-                val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, realX, realY, 0)
-                wv.dispatchTouchEvent(down)
-                down.recycle()
+                val (rx, ry) = computeViewTapPoint(wv, target)
+                val coords = arrayOf(
+                    MotionEvent.PointerCoords().apply {
+                        x = rx
+                        y = ry
+                        pressure = 0.68f
+                        size = 0.12f
+                    },
+                )
+                val down = MotionEvent.obtain(
+                    downAt, downAt, MotionEvent.ACTION_DOWN, 1, props, coords,
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
+                )
+                container?.allowSyntheticTouch = true
+                try {
+                    wv.dispatchTouchEvent(down)
+                } finally {
+                    container?.allowSyntheticTouch = false
+                    down.recycle()
+                }
             }
         }
-        delay(55L)
+        delay(60L)
         withContext(Dispatchers.Main) {
             runCatching {
-                val density = wv.resources.displayMetrics.density.coerceAtLeast(1f)
-                val realX = (cssX * density).coerceIn(2f, (wv.width - 2).coerceAtLeast(4).toFloat())
-                val realY = (cssY * density).coerceIn(2f, (wv.height - 2).coerceAtLeast(4).toFloat())
+                val (rx, ry) = computeViewTapPoint(wv, target)
+                val coords = arrayOf(
+                    MotionEvent.PointerCoords().apply {
+                        x = rx
+                        y = ry
+                        pressure = 0.68f
+                        size = 0.12f
+                    },
+                )
                 val upAt = SystemClock.uptimeMillis()
-                val up = MotionEvent.obtain(downAt, upAt, MotionEvent.ACTION_UP, realX, realY, 0)
-                wv.dispatchTouchEvent(up)
-                up.recycle()
+                val up = MotionEvent.obtain(
+                    downAt, upAt, MotionEvent.ACTION_UP, 1, props, coords,
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
+                )
+                container?.allowSyntheticTouch = true
+                try {
+                    wv.dispatchTouchEvent(up)
+                } finally {
+                    container?.allowSyntheticTouch = false
+                    up.recycle()
+                }
             }
         }
     }
@@ -480,7 +828,7 @@ object CimaNowGatewaySolver {
                 const profDir = '/tmp/cn_chr_' + process.pid + '_' + port;
                 const args = [
                     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                    '--no-first-run', '--no-default-browser-check',
+                    '--no-first-run', '--no-default-browser-check', '--disable-gpu',
                     '--user-data-dir=' + profDir,
                     '--disable-blink-features=AutomationControlled',
                     '--window-size=412,915',
@@ -562,17 +910,14 @@ object CimaNowGatewaySolver {
                         if (minted) {
                             return cleanup({ url: minted, diag });
                         }
-                        // Let initial redirect + non-interactive Turnstile run undisturbed for first 4.5s
                         if (ms < 4500) continue;
-                        // Once blog-post.html (#downloadbtn) appears, give Stage B 7.0s undisturbed before probing/tapping
-                        if (firstBtnMs > 0 && ms - firstBtnMs < 7000) continue;
-                        const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 11000);
-                        const allowTsTap = firstBtnMs === 0 ? (ms >= 4500) : (ms - firstBtnMs >= 7500);
+                        if (firstBtnMs > 0 && ms - firstBtnMs < 6500) continue;
+                        const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 11500);
+                        const allowTsTap = firstBtnMs === 0 ? (ms >= 5500) : (ms - firstBtnMs >= 8500);
                         const probe = await send('Runtime.evaluate', {
                             expression: `(function(){
                                 try {
                                     var loc = String(location.href || '');
-                                    var ttl = String(document.title || '').slice(0, 28);
                                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
                                     var btn = document.getElementById('downloadbtn');
                                     var h = btn ? String(btn.getAttribute('href') || '') : '';
@@ -619,8 +964,7 @@ object CimaNowGatewaySolver {
                                             var tr = box.getBoundingClientRect();
                                             if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
                                                 var cy = Math.round(tr.top + tr.height/2);
-                                                var isRtl = (navigator.language || '').toLowerCase().indexOf('ar') === 0;
-                                                var tx = isRtl ? Math.round(tr.right - 28) : Math.round(tr.left + 28);
+                                                var tx = Math.round(tr.left + 28);
                                                 return 'TS:' + tx + ',' + cy + (btn ? ':HASBTN' : '');
                                             }
                                         }
@@ -637,11 +981,11 @@ object CimaNowGatewaySolver {
                         if (ms % 6000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
                             return cleanup({ url: pv.slice(4), diag });
-                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 2000) {
+                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 650) {
                             lastBtnClick = ms;
                             const [bx, by] = pv.slice(4).split(',').map(Number);
                             if (bx > 0 && by > 0) await tap(bx, by);
-                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 5000) {
+                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 4200) {
                             lastTsClick = ms;
                             const clean = pv.slice(3).replace(':HASBTN', '');
                             const [tx, ty] = clean.split(',').map(Number);
@@ -664,7 +1008,7 @@ object CimaNowGatewaySolver {
                 }
                 val jsonText = if (outFile.exists()) outFile.readText(Charsets.UTF_8).trim() else ""
                 val obj = CimaNowCrypto.safeJsonObject(jsonText)
-                val minted = obj?.optString("url")?.trim()?.takeIf { isMintedWatchingUrl(it) }
+                val minted = normalizeMintedWatchingUrl(obj?.optString("url"))
                 if (minted == null) {
                     CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(260)}")
                 }

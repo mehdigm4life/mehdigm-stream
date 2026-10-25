@@ -11,6 +11,7 @@ import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -37,7 +38,6 @@ class CimaNowLiveE2ETest {
                 "<x-n style='order:10!important;display:block!important;box-sizing:content-box!important;width:200px!important;height:30px!important;padding:5px 6px!important;margin:0px 4px!important;'></x-n>" +
                 "<x-n style='order:30!important;display:none!important;width:300px!important;height:90px!important;'></x-n>" +
                 "</x-grid>"
-        // item(order=10): outerW = 200+12+8=220, outerH = 30+10=40; item(order=20): outerW = 200+4=204, outerH = 40; availW = 403-24=379 -> 2 rows: 20 + (40+40) + 6 = 106
         assertEquals(106, CimaNowCrypto.computeFlexHeight(gridHtml))
 
         // 3. FNV-1a base36 `core.php` signatures (V12 & V13)
@@ -52,12 +52,9 @@ class CimaNowLiveE2ETest {
         assertTrue(sigV13.isNotBlank())
 
         // 4. `__cnBootFrame` V12 (`data-cnk`/`data-cna`) & V13 (`data-cnb`/`data-cni`) iframe decryption
-        val sampleIframeV12 =
-            """<iframe id="cn_fr_02bd5628" src="about:blank" data-cnk="633637376630323664653663303836346663363863613432" data-cna="12.86.98.105.46.66.72.123.104.112.210.148.253.231.252.208.196.247.169.181.70.22.127.108.53.20.11.126.54.223.203.202.170.226.156"></iframe>"""
         val v12Fixed =
             """<iframe id="cn_fr_02bd5628" src="about:blank" data-cnk="633637376630323664653663303836346663363863613432" data-cna="12.86.98.105.46.66.72.123.104.112.210.148.253.231.252.208.196.247.169.181.70.22.127.108.53.20.11.126.54.223.203.194.170.226.156"></iframe>"""
         assertEquals("https://cimanow.upns.online/#otni3k", CimaNowCrypto.decodeCnBootFrame(v12Fixed))
-        assertNotNull(sampleIframeV12)
 
         val coreTok = "myCoreSecretToken64HexValue"
         val infoAttr = "f91a"
@@ -114,7 +111,6 @@ class CimaNowLiveE2ETest {
                 }
             })();
         """.trimIndent()
-        val mockS2B64 = CimaNowCrypto.b64EncodeNoWrap(mockS2.toByteArray(Charsets.UTF_8)) + "A".repeat(600 - minOf(599, mockS2.length))
         val realS2B64 = CimaNowCrypto.b64EncodeNoWrap((mockS2 + "\n//" + "x".repeat(600)).toByteArray(Charsets.UTF_8))
         val mockRawWatchHtml = """
             <html><head>
@@ -123,14 +119,11 @@ class CimaNowLiveE2ETest {
             </script>
             </head><body></body></html>
         """.trimIndent()
-        assertNotNull(mockS2B64)
         val handle = CimaNowCrypto.unlockWatchingVault(mockRawWatchHtml)
         assertNotNull("Expected Rhino unlockWatchingVault to succeed", handle)
         assertEquals("tok123", handle!!.decoded.coreToken)
         assertEquals("https://ok.ru/videoembed/999?t=tok123", handle.decoded.initialEmbedUrl)
-        // Must preserve ALL 3 real tabs (without skipping every second element on removeAttribute!) and exclude 00 canary
         assertEquals(listOf("Upnshare", "Filemoon", "VK"), handle.decoded.serverTabs.map { it.name })
-        // Must preserve ALL 3 downloads and strip href.li/?
         assertEquals(
             listOf("https://vk.com/doc1_1", "https://cimanow.upns.online/#abc", "https://bysetayico.com/download/xyz"),
             handle.decoded.downloads.map { it.url },
@@ -141,7 +134,32 @@ class CimaNowLiveE2ETest {
             handle.decodeCoreIframe("""<iframe src="javascript:void(0);" data-cnb="https://vid.example/e/1"></iframe>"""),
         )
 
-        // 6. `#related` recommendation card parsing (must skip `<img alt="logo" src="...-لوجو.png">`)
+        // 6. Android WebView UA cleaning (`; wv)` and `Version/4.0` stripped cleanly) + gateway URL helpers
+        val xiaomiWvUa =
+            "Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.63 Mobile Safari/537.36"
+        val cleanedUa = CimaNowGatewaySolver.cleanWebViewUserAgent(xiaomiWvUa)
+        assertFalse(cleanedUa.contains("; wv"))
+        assertFalse(cleanedUa.contains("Version/"))
+        assertTrue(cleanedUa.contains("M2006C3MG") && cleanedUa.contains("Chrome/150.0.7871.63 Mobile"))
+
+        assertEquals(
+            "https://cimanow.cc/movie/watching/?token=abc123",
+            CimaNowGatewaySolver.normalizeMintedWatchingUrl("https://href.li/?https://cimanow.cc/movie/watching/?token=abc123"),
+        )
+        assertNull(CimaNowGatewaySolver.normalizeMintedWatchingUrl("https://fugitivequilt.com/popunder"))
+
+        // 7. VidGuard AAEncode Rhino decryption (`ﾟωﾟﾉ=`)
+        val vgHtml = """
+            <html><body><script>
+            var ﾟωﾟﾉ = 'svg';
+            window[ﾟωﾟﾉ] = {"stream":"https:\/\/embedv.net\/hls2\/01\/0001\/master.m3u8?t=abc&sig=deadbeef"};
+            </script></body></html>
+        """.trimIndent()
+        val svgJson = CimaNowExtractors.evalVidGuardSvgJson(vgHtml)
+        assertNotNull(svgJson)
+        assertEquals("https://embedv.net/hls2/01/0001/master.m3u8?t=abc&sig=deadbeef", svgJson!!.optString("stream"))
+
+        // 8. `#related` recommendation card parsing (must skip `<img alt="logo" src="...-لوجو.png">`)
         val relatedHtml = """
             <section id="related">
               <a href="https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-tenzing-2026-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/">
@@ -158,53 +176,11 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
-    fun testDiagnoseAndroidGatewayAndBeekeeper(): Unit = runBlocking {
-        assumeTrue("Set CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
-        val api = CimaNow()
-        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
-        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
-        assertNotNull("Expected MovieLoadResponse for Beekeeper 2024", bkLoad)
-        println("[DIAG][Beekeeper] title='${bkLoad!!.name}' year=${bkLoad.year} dataUrl=${bkLoad.dataUrl}")
-        val dataObj = CimaNowCrypto.safeJsonObject(bkLoad.dataUrl)
-        val itemUrl = dataObj?.optString("itemUrl") ?: beekeeperUrl
-        val shineUrl = dataObj?.optString("shineUrl").orEmpty()
-        println("[DIAG][Beekeeper] itemUrl=$itemUrl shineUrl=$shineUrl")
-        assertTrue("Expected non-blank shineUrl on Beekeeper 2024", shineUrl.isNotBlank())
-
-        val scriptText = javaClass.classLoader!!.getResourceAsStream("diag_android_gw.js")!!
-            .bufferedReader(Charsets.UTF_8).readText()
-        val tmpScript = java.io.File.createTempFile("diag_gw_", ".js")
-        val tmpOut = java.io.File.createTempFile("diag_gw_out_", ".json")
-        try {
-            tmpScript.writeText(scriptText, Charsets.UTF_8)
-            val proc = ProcessBuilder("node", tmpScript.absolutePath, shineUrl, itemUrl, tmpOut.absolutePath)
-                .redirectErrorStream(true)
-                .redirectOutput(java.io.File("/dev/null"))
-                .start()
-            proc.waitFor(110L, java.util.concurrent.TimeUnit.SECONDS)
-            val repStr = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
-            println("[DIAG][RawReport]\n$repStr")
-        } finally {
-            tmpScript.delete()
-            tmpOut.delete()
-        }
-
-        CimaNowExtractors.debugLogger = { println("  [DIAG][Extractor] $it") }
-        val bkLinks = CopyOnWriteArrayList<ExtractorLink>()
-        val okBk = api.loadLinks(bkLoad.dataUrl, false, {}, { bkLinks.add(it) })
-        println("[DIAG][BeekeeperLinks] ok=$okBk count=${bkLinks.size} providers=${bkLinks.map { it.source }.distinct()}")
-        for (l in bkLinks.take(15)) {
-            println("  -> [${l.source}] ${l.name} q=${l.quality} url=${l.url.take(100)}")
-        }
-        assertTrue("Expected Beekeeper loadLinks=true", okBk && bkLinks.isNotEmpty())
-        Unit
-    }
-
-    @Test
     fun testFullLiveEndToEndSuite(): Unit = runBlocking {
-        assumeTrue("Skipped during diag", System.getenv("CIMANOW_FULL_E2E") == "1")
+        assumeTrue("Skipping live E2E test unless CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
 
         val api = CimaNow()
+        CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
 
         // ── 1. Verify Catalogs & Pagination ──────────────────────────────────
         val shelvesToCheck = listOf(
@@ -234,7 +210,25 @@ class CimaNowLiveE2ETest {
         assertNotNull(lupinSearch)
         assertTrue("Expected Lupin search results", lupinSearch!!.items.isNotEmpty())
 
-        // ── 3. Verify `load()` + `loadLinks()` on Live Movie ─────────────────
+        // ── 3. Verify User-Reported `The Beekeeper (2024)` Movie End-to-End ──
+        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
+        assertNotNull("Expected MovieLoadResponse for The Beekeeper (2024)", bkLoad)
+        val bkLinks = CopyOnWriteArrayList<ExtractorLink>()
+        val okBk = api.loadLinks(bkLoad!!.dataUrl, false, {}, { bkLinks.add(it) })
+        val bkProviders = bkLinks.map { it.source }.distinct()
+        println("[E2E][Beekeeper 2024] ok=$okBk links=${bkLinks.size} providers=$bkProviders")
+        for (lnk in bkLinks) {
+            println("  -> [${lnk.source}] ${lnk.name} q=${lnk.quality} type=${lnk.type} url=${lnk.url.take(100)}")
+        }
+        assertTrue("Expected loadLinks=true on The Beekeeper (2024)", okBk)
+        assertTrue("Expected >= 4 extracted links on The Beekeeper (2024), got ${bkLinks.size}", bkLinks.size >= 4)
+        assertTrue("Expected >= 2 distinct providers on The Beekeeper (2024), got $bkProviders", bkProviders.size >= 2)
+        val bkPlayable = bkLinks.any { probePlayableStream(it) }
+        println("  [BeekeeperStreamProbe] anyPlayable=$bkPlayable")
+        assertTrue("Expected live playable stream (200/206) on The Beekeeper (2024)", bkPlayable)
+
+        // ── 4. Verify Latest Live Movie + Instant Cache Reload (< 9s) ────────
         val liveMovieCard = fmP1.first()
         val movieLoad = api.load(liveMovieCard.url) as? MovieLoadResponse
         assertNotNull("Expected MovieLoadResponse for ${liveMovieCard.name}", movieLoad)
@@ -244,7 +238,6 @@ class CimaNowLiveE2ETest {
         )
         assertFalse(movieLoad.posterUrl.isNullOrBlank())
 
-        CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
         val movieLinks = CopyOnWriteArrayList<ExtractorLink>()
         val movieSubs = CopyOnWriteArrayList<SubtitleFile>()
         val okMovie = api.loadLinks(movieLoad.dataUrl, false, { movieSubs.add(it) }, { movieLinks.add(it) })
@@ -265,7 +258,6 @@ class CimaNowLiveE2ETest {
         }
         assertTrue("Expected >= 2 live playable movie providers returning 200/206 media, got $verifiedMovieProviders", verifiedMovieProviders >= 2)
 
-        // Verify instant unlocked-cache reload (< 8s, zero second 10s gateway wait!)
         val tCache0 = System.currentTimeMillis()
         val cachedLinks = CopyOnWriteArrayList<ExtractorLink>()
         val okCached = api.loadLinks(movieLoad.dataUrl, false, {}, { cachedLinks.add(it) })
@@ -274,7 +266,7 @@ class CimaNowLiveE2ETest {
         assertTrue("Expected cached loadLinks=true", okCached && cachedLinks.size >= 4)
         assertTrue("Expected cached reload under 9000ms (no gateway countdown), got ${cacheReloadMs}ms", cacheReloadMs < 9_000L)
 
-        // ── 4. Verify `load()` + `loadLinks()` on Live Series Episode ────────
+        // ── 5. Verify `load()` + `loadLinks()` on Live Series Episode ────────
         val lupinSelaryUrl = "https://cimanow.cc/selary/%d9%85%d8%b3%d9%84%d8%b3%d9%84-lupin/"
         val lupinLoad = api.load(lupinSelaryUrl) as? TvSeriesLoadResponse
         assertNotNull("Expected TvSeriesLoadResponse for Lupin /selary/", lupinLoad)
