@@ -18,8 +18,16 @@ function getJson(u) {
   });
 }
 
-async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
-  const profDir = '/tmp/cn_diag5d_' + process.pid + '_' + port;
+function slimHtml(html) {
+  // Replace huge obfuscated scripts (>10KB) we already unpacked so we keep ALL small/medium scripts (<10KB) + full HTML!
+  return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, m => {
+    if (m.length > 10000) return `<!-- LARGE_SCRIPT_${m.length} -->`;
+    return m;
+  });
+}
+
+async function runScenario(name, port, winSize, setupCdpFn, captureHtmlBodies) {
+  const profDir = '/tmp/cn_diag5e_' + process.pid + '_' + port;
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -35,8 +43,8 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
 
   let getLinkStatus = 0;
   let getLinkBody = '';
-  let getLinkPostData = '';
-  const gzipScripts = [];
+  const docReqs = [];
+  const pagesGz = [];
 
   try {
     let targets = null;
@@ -51,7 +59,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
 
     let id = 1;
     const pending = new Map();
-    const scriptIds = [];
+    const smallScripts = [];
     let glReqId = '';
 
     ws.onmessage = ev => {
@@ -63,21 +71,22 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
       if (m.method === 'Debugger.scriptParsed') {
         const u = m.params.url || '';
         const len = m.params.length || 0;
-        // Capture ONLY the 55KB-57KB get-link / browser-check script!
-        if (len >= 40000 && len <= 70000 && (!u || u.includes('blog-post'))) {
-          scriptIds.push({ id: m.params.scriptId, url: u, len });
+        if (len > 40 && len <= 40000 && (!u || u.includes('freex2line'))) {
+          smallScripts.push({ id: m.params.scriptId, url: u, len });
         }
       }
       if (m.method === 'Network.requestWillBeSent') {
         const u = m.params.request.url || '';
-        if (u.includes('get-link.php')) {
-          glReqId = m.params.requestId;
-          getLinkPostData = (m.params.request.postData || '').slice(0, 300);
+        if (u.includes('get-link.php')) glReqId = m.params.requestId;
+        if (m.params.type === 'Document' && u.includes('freex2line')) {
+          docReqs.push({ reqId: m.params.requestId, url: u, reqHdrs: m.params.request.headers });
         }
       }
       if (m.method === 'Network.responseReceived') {
         const u = m.params.response.url || '';
         if (u.includes('get-link.php')) getLinkStatus = m.params.response.status;
+        const dr = docReqs.find(d => d.reqId === m.params.requestId);
+        if (dr) dr.status = m.params.response.status;
       }
     };
 
@@ -93,7 +102,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
 
     await send('Page.enable');
     await send('Network.enable');
-    if (captureMidScripts) {
+    if (captureHtmlBodies) {
       await send('Debugger.enable');
       await send('Debugger.setBreakpointsActive', { active: false });
     }
@@ -113,15 +122,29 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
       }
     }
 
-    if (captureMidScripts) {
-      // Only keep the inner Function script (or first one if only 1) so output stays < 25KB!
-      const chosen = scriptIds.slice(-1);
-      for (const s of chosen) {
+    const capturedSmallScripts = [];
+    if (captureHtmlBodies) {
+      for (const dr of docReqs) {
+        const rb = await send('Network.getResponseBody', { requestId: dr.reqId });
+        if (rb && rb.result && rb.result.body) {
+          const raw = rb.result.base64Encoded
+            ? Buffer.from(rb.result.body, 'base64').toString('utf8')
+            : rb.result.body;
+          const slim = slimHtml(raw);
+          pagesGz.push({
+            url: dr.url.slice(0, 100),
+            status: dr.status,
+            rawLen: raw.length,
+            slimGzB64: zlib.gzipSync(Buffer.from(slim, 'utf8')).toString('base64')
+          });
+        }
+      }
+      for (const s of smallScripts) {
         const sr = await send('Debugger.getScriptSource', { scriptId: s.id });
         const src = (sr && sr.result && sr.result.scriptSource) ? sr.result.scriptSource : '';
-        if (!src) continue;
-        gzipScripts.push({
-          url: s.url,
+        if (!src || src.length > 35000) continue;
+        capturedSmallScripts.push({
+          url: s.url.slice(0, 90),
           len: src.length,
           gzB64: zlib.gzipSync(Buffer.from(src, 'utf8')).toString('base64')
         });
@@ -131,11 +154,9 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
     const snap = await send('Runtime.evaluate', {
       expression: `(function(){
         var btn = document.getElementById('downloadbtn');
-        var inp = document.querySelector('input[name="cf-turnstile-response"]');
         return JSON.stringify({
           loc: location.href,
           btnHref: btn ? btn.getAttribute('href') : null,
-          tsLen: (inp && inp.value) ? inp.value.length : -1,
           bodyTxt: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 160)
         });
       })()`,
@@ -145,7 +166,15 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
       ? JSON.parse(snap.result.result.value)
       : {};
 
-    return { name, fullVer, getLinkStatus, getLinkPostData, getLinkBody: getLinkBody.slice(0, 180), finalState, gzipScripts };
+    return {
+      name,
+      getLinkStatus,
+      getLinkBody: getLinkBody.slice(0, 160),
+      docSummary: docReqs.map(d => ({ url: d.url.slice(0, 90), status: d.status, hdrs: d.reqHdrs })),
+      finalState,
+      pagesGz,
+      capturedSmallScripts
+    };
   } finally {
     try { proc.kill('SIGKILL'); } catch (e) {}
     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch (e) {}
@@ -155,11 +184,11 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
 (async () => {
   const out = {};
 
-  // 1. Capture ONLY the 55KB get-link / browser-check script!
-  out.t1_script3 = await runScenario('1_Capture55KB', 19330, '412,915', null, true);
+  // 1. Passing Desktop run: capture ALL document HTMLs + ALL small/medium scripts (<35KB)
+  out.u1_passHtml = await runScenario('1_PassHtml', 19340, '412,915', null, true);
 
-  // 2. Matched-version default Android WebView UA + Android WebView brands
-  out.t2_matchedWvDefault = await runScenario('2_MatchedWvDefault', 19331, '360,800', async (send, major, full) => {
+  // 2. Failing Android WebView run: capture ALL document HTMLs + ALL small/medium scripts (<35KB)
+  out.u2_failWvHtml = await runScenario('2_FailWvHtml', 19341, '360,800', async (send, major, full) => {
     await send('Emulation.setUserAgentOverride', {
       userAgent: `Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/${full} Mobile Safari/537.36`,
       platform: 'Linux armv81',
@@ -181,13 +210,12 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
         mobile: true
       }
     });
-  }, false);
+  }, true);
 
-  // 3. Test Emulation.setUserAgentOverride with IDENTICAL Linux Desktop UA (isolates whether CDP setUserAgentOverride itself is detected!)
-  out.t3_cdpSameDesktopUa = await runScenario('3_CdpSameDesktopUa', 19332, '412,915', async (send, major, full) => {
+  // 3. Test Android Chrome UA WITHOUT overriding navigator.platform (keeps Linux x86_64 matching WebGL/OS!)
+  out.u3_androidUaKeepPlatform = await runScenario('3_AndroidUaKeepPlatform', 19342, '360,800', async (send, major, full) => {
     await send('Emulation.setUserAgentOverride', {
-      userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
-      platform: 'Linux x86_64',
+      userAgent: `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Mobile Safari/537.36`,
       userAgentMetadata: {
         brands: [
           { brand: 'Not(A:Brand', version: '8' },
@@ -199,12 +227,11 @@ async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
           { brand: 'Chromium', version: full },
           { brand: 'Google Chrome', version: full }
         ],
-        platform: 'Linux',
-        platformVersion: '6.8.0',
-        architecture: 'x86',
-        model: '',
-        mobile: false,
-        bitness: '64'
+        platform: 'Android',
+        platformVersion: '14.0.0',
+        architecture: '',
+        model: 'K',
+        mobile: true
       }
     });
   }, false);
