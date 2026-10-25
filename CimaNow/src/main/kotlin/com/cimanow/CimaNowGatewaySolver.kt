@@ -490,12 +490,15 @@ object CimaNowGatewaySolver {
                     'about:blank'
                 ];
                 const xvfb = '/usr/bin/xvfb-run';
+                let procErr = '';
                 const proc = fs.existsSync(xvfb)
-                    ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: 'ignore', detached: true })
-                    : spawn(chromeBin, ['--headless=new', ...args], { stdio: 'ignore', detached: true });
+                    ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
+                    : spawn(chromeBin, ['--headless=new', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
+                if (proc.stderr) proc.stderr.on('data', c => { if (procErr.length < 500) procErr += c.toString('utf8'); });
                 function cleanup(out) {
                     try { fs.writeFileSync(outPath, JSON.stringify(out), 'utf8'); } catch(e) {}
-                    try { process.kill(-proc.pid, 'SIGKILL'); } catch(e) { try { proc.kill('SIGKILL'); } catch(e2) {} }
+                    try { if (proc.stderr) proc.stderr.destroy(); } catch(e) {}
+                    try { proc.kill('SIGKILL'); } catch(e) {}
                     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch(e) {}
                     process.exit(0);
                 }
@@ -509,11 +512,11 @@ object CimaNowGatewaySolver {
                 }
                 (async () => {
                     let targets = null;
-                    for (let i = 0; i < 30; i++) {
+                    for (let i = 0; i < 35; i++) {
                         try { targets = await getJson('http://127.0.0.1:' + port + '/json'); if (targets.length) break; } catch(e) {}
-                        await new Promise(r => setTimeout(r, 350));
+                        await new Promise(r => setTimeout(r, 400));
                     }
-                    if (!targets || !targets.length) return cleanup({ url: '' });
+                    if (!targets || !targets.length) return cleanup({ url: '', diag: ['no_targets', 'xvfb=' + fs.existsSync(xvfb), 'err=' + procErr] });
                     const t = targets.find(x => x.type === 'page') || targets[0];
                     const ws = new WebSocket(t.webSocketDebuggerUrl);
                     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });

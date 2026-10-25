@@ -323,6 +323,7 @@ object CimaNowExtractors {
                     ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
                     ?: vaultReferer
                 val (vCode, vaultHtml) = directSession.getText(vUrl, hop2Url) ?: return@withTimeoutOrNull null
+                debugLogger?.invoke("directVault vCode=$vCode len=${vaultHtml.length} head=${vaultHtml.take(180).replace('\n', ' ')}")
                 if (vCode !in 200..299 || vaultHtml.length < 512) return@withTimeoutOrNull null
                 val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withTimeoutOrNull null
                 delay(10_400L)
