@@ -74,13 +74,14 @@ object CimaNowGatewaySolver {
 
         return solverMutex.withLock {
             getCachedWatchingUrl(itemUrl)?.let { return@withLock it }
+            val cleanShine = unwrapHrefLi(shineUrl)
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
-                mintViaAndroidWebView(shineUrl, itemUrl)
-                    ?: mintViaAndroidWebView(shineUrl, itemUrl)
+                mintViaAndroidWebView(cleanShine, itemUrl)
+                    ?: mintViaAndroidWebView(cleanShine, itemUrl)
             } else if (Build.VERSION.SDK_INT == 0) {
-                mintViaHeadlessChromiumCli(shineUrl, itemUrl)
-                    ?: mintViaHeadlessChromiumCli(shineUrl, itemUrl)
+                mintViaHeadlessChromiumCli(cleanShine, itemUrl)
+                    ?: mintViaHeadlessChromiumCli(cleanShine, itemUrl)
             } else {
                 null
             }
@@ -462,7 +463,6 @@ object CimaNowGatewaySolver {
                     const send = (method, params = {}) => new Promise(r => { const cid = id++; pending.set(cid, r); ws.send(JSON.stringify({ id: cid, method, params })); });
                     await send('Page.enable');
                     await send('Network.enable');
-                    await send('Runtime.enable');
                     await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
                     let lastTsClick = 0, lastBtnClick = 0;
