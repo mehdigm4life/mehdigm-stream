@@ -1,6 +1,5 @@
 const { spawn } = require('child_process');
 const http = require('http');
-const https = require('https');
 const fs = require('fs');
 
 const shineUrl = process.argv[2];
@@ -28,33 +27,14 @@ function getJson(u) {
   });
 }
 
-function rawGet(u, headers) {
-  return new Promise(res => {
-    const req = https.get(u, { headers }, r => {
-      let body = '';
-      r.on('data', c => { if (body.length < 4000) body += c.toString('utf8'); });
-      r.on('end', () => {
-        res({
-          status: r.statusCode,
-          location: r.headers.location || '',
-          len: body.length,
-          head: body.replace(/\s+/g, ' ').slice(0, 380),
-        });
-      });
-    });
-    req.on('error', e => res({ err: e.message }));
-  });
-}
-
-async function runScenario(name, port, opts) {
-  const profDir = '/tmp/cn_sc_' + process.pid + '_' + port;
+async function runScenario(name, port, configureFn) {
+  const profDir = '/tmp/cn_m_' + process.pid + '_' + port;
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--user-data-dir=' + profDir,
     '--disable-blink-features=AutomationControlled',
-    '--window-size=' + (opts.winSize || '800,360'),
-    ...(opts.extraFlags || []),
+    '--window-size=412,915',
     '--remote-debugging-port=' + port,
     'about:blank',
   ];
@@ -67,14 +47,20 @@ async function runScenario(name, port, opts) {
   let finalMinted = '';
   let getLinkBody = '';
   try {
+    let verInfo = null;
     let targets = null;
     for (let i = 0; i < 30; i++) {
       try {
+        verInfo = await getJson('http://127.0.0.1:' + port + '/json/version');
         targets = await getJson('http://127.0.0.1:' + port + '/json');
         if (targets && targets.length) break;
       } catch (e) {}
       await new Promise(r => setTimeout(r, 350));
     }
+    const browserVerFull = (verInfo && verInfo.Browser ? verInfo.Browser.replace(/^Chrome\//, '') : '131.0.0.0');
+    const browserMajor = browserVerFull.split('.')[0];
+    logs.push(`browserVer=${browserVerFull}`);
+
     const t = targets && (targets.find(x => x.type === 'page') || targets[0]);
     if (!t) throw new Error('no_targets');
     const ws = new WebSocket(t.webSocketDebuggerUrl);
@@ -101,18 +87,10 @@ async function runScenario(name, port, opts) {
     await send('Page.enable');
     await send('Network.enable');
     await send('Target.setDiscoverTargets', { discover: true });
-    if (opts.mobileMetrics) {
-      await send('Emulation.setDeviceMetricsOverride', opts.mobileMetrics);
-      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-    }
-    if (opts.uaOverride) {
-      await send('Network.setUserAgentOverride', opts.uaOverride);
-    }
-    if (opts.extraHeaders) {
-      await send('Network.setExtraHTTPHeaders', { headers: opts.extraHeaders });
-    }
 
-    await send('Page.navigate', { url: opts.entryUrl || shineUrl, referrer: refererUrl });
+    const cfg = (await configureFn({ send, browserVerFull, browserMajor })) || {};
+
+    await send('Page.navigate', { url: cfg.entryUrl || shineUrl, referrer: refererUrl });
 
     let idx = 0;
     let firstBtnMs = 0;
@@ -121,114 +99,128 @@ async function runScenario(name, port, opts) {
     let getLinkReqId = '';
 
     const tap = async (x, y) => {
-      if (opts.useTouch) {
-        await send('Input.dispatchTouchEvent', {
-          type: 'touchStart',
-          touchPoints: [{ x: Math.round(x), y: Math.round(y), radiusX: 6, radiusY: 6, force: 0.68, id: 0 }],
-        });
-        await new Promise(r => setTimeout(r, 55));
-        await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      } else {
-        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
-        await new Promise(r => setTimeout(r, 55));
-        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
-      }
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
+      await new Promise(r => setTimeout(r, 60));
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
     };
 
-    for (let ms = 500; ms <= 25000; ms += 500) {
+    for (let ms = 500; ms <= 21000; ms += 500) {
       await new Promise(r => setTimeout(r, 500));
       while (idx < events.length) {
         const ev = events[idx++];
         if (ev.method === 'Page.windowOpen') {
-          logs.push(`t=${ms} WINDOW_OPEN url=${ev.params.url} name=${ev.params.windowName}`);
+          logs.push(`t=${ms} WIN_OPEN url=${ev.params.url} name=${ev.params.windowName}`);
           if (ev.params.url && ev.params.url.includes('/watching/') && ev.params.url.includes('token=')) {
             finalMinted = 'WINOPEN:' + ev.params.url;
           }
+        } else if (ev.method === 'Target.targetCreated') {
+          const ti = ev.params.targetInfo || {};
+          if (ti.type === 'page' && ti.url) {
+            logs.push(`t=${ms} NEW_TAB url=${ti.url}`);
+            if (ti.url.includes('/watching/') && ti.url.includes('token=')) {
+              finalMinted = 'NEWTAB:' + ti.url;
+            }
+          }
         } else if (ev.method === 'Page.frameNavigated' && !ev.params.frame.parentId) {
           const u = ev.params.frame.url || '';
-          logs.push(`t=${ms} MAIN_NAV url=${u}`);
+          logs.push(`t=${ms} MAIN_NAV url=${u.slice(0, 140)}`);
           if (u.includes('/watching/') && u.includes('token=')) {
             finalMinted = 'MAINNAV:' + u;
           }
         } else if (ev.method === 'Network.requestWillBeSent') {
           const u = ev.params.request.url || '';
-          if (u.includes('loadon') || u.includes('href.li') || u.includes('redirectingfree') || u.includes('blog-post.html') || u.includes('get-link.php') || u.includes('/watching/')) {
-            logs.push(`t=${ms} REQ ${ev.params.request.method} ${u.slice(0, 145)}`);
+          if (u.includes('href.li') || u.includes('redirectingfree') || u.includes('blog-post.html') || u.includes('get-link.php') || u.includes('/watching/')) {
+            logs.push(`t=${ms} REQ ${ev.params.request.method} ${u.slice(0, 130)}`);
           }
           if (u.includes('get-link.php')) getLinkReqId = ev.params.requestId;
           if (u.includes('/watching/') && u.includes('token=') && !finalMinted) {
-            logs.push(`t=${ms} WATCHING_REQ_SEEN=${u}`);
             finalMinted = 'NETREQ:' + u;
           }
         } else if (ev.method === 'Network.responseReceived') {
           const u = ev.params.response.url || '';
-          if (u.includes('loadon') || u.includes('href.li') || u.includes('redirectingfree') || u.includes('blog-post.html') || u.includes('get-link.php')) {
-            logs.push(`t=${ms} RES ${ev.params.response.status} ${u.slice(0, 145)}`);
+          if (u.includes('href.li') || u.includes('redirectingfree') || u.includes('blog-post.html') || u.includes('get-link.php')) {
+            logs.push(`t=${ms} RES ${ev.params.response.status} ${u.slice(0, 130)}`);
           }
-        } else if (ev.method === 'Network.loadingFailed') {
-          logs.push(`t=${ms} FAIL ${ev.params.errorText} ${ev.params.type}`);
         }
       }
 
-      if (getLinkReqId && !getLinkBody && ms >= 8000) {
+      if (getLinkReqId && !getLinkBody && ms >= 9500) {
         const rb = await send('Network.getResponseBody', { requestId: getLinkReqId });
         if (rb?.result?.body) {
           getLinkBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
-          logs.push(`t=${ms} GET_LINK_BODY(not-exiting!)=${getLinkBody.slice(0, 160)}`);
+          logs.push(`t=${ms} GL_BODY=${getLinkBody.slice(0, 130)}`);
         }
       }
 
       if (finalMinted) break;
-      if (ms < 3000) continue;
+
+      // Exact quiet window matching mintViaHeadlessChromiumCli!
+      if (ms < 4500) continue;
+      if (firstBtnMs > 0 && ms - firstBtnMs < 7000) continue;
+
+      const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 11000);
+      const allowTsTap = firstBtnMs === 0 ? (ms >= 4500) : (ms - firstBtnMs >= 7500);
 
       const probe = await send('Runtime.evaluate', {
         expression: `(function(){
           try {
             var loc = String(location.href || '');
-            var bodyTxt = String((document.body && document.body.innerText) || '').replace(/\\s+/g,' ').slice(0, 120);
-            var scripts = Array.from(document.querySelectorAll('script')).map(s => (s.src || s.textContent.slice(0, 80))).slice(0, 4);
+            if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
             var btn = document.getElementById('downloadbtn');
             var h = btn ? String(btn.getAttribute('href') || '') : '';
             var tgt = btn ? String(btn.getAttribute('target') || '') : '';
-            var inp = document.querySelector('input[name="cf-turnstile-response"]');
-            var tokLen = (inp && inp.value) ? inp.value.length : 0;
-            var tsEl = document.querySelector('.cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"]');
-            var tsRect = null;
-            if (tsEl) {
-              tsEl.scrollIntoView({block:'center', inline:'center'});
-              var tr = tsEl.getBoundingClientRect();
-              tsRect = { l: Math.round(tr.left), r: Math.round(tr.right), t: Math.round(tr.top), w: Math.round(tr.width), h: Math.round(tr.height) };
-            }
-            var btnRect = null;
-            if (btn && h === '#watch-ready') {
-              if (btn.hidden || getComputedStyle(btn).display === 'none') {
-                btn.removeAttribute('hidden');
-                btn.style.setProperty('display', 'inline-block', 'important');
+            var bodyTxt = String((document.body && document.body.innerText) || '').replace(/\\s+/g,' ').slice(0, 90);
+            if (btn) {
+              if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
+              if (h === '#watch-ready' || (${allowBtnForce} && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
+                if (btn.hidden || getComputedStyle(btn).display === 'none') {
+                  btn.removeAttribute('hidden');
+                  btn.style.setProperty('display', 'inline-block', 'important');
+                }
+                btn.scrollIntoView({block:'center', inline:'center'});
+                var br = btn.getBoundingClientRect();
+                if (br.width > 4 && br.height > 4) {
+                  return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2) + '|tgt=' + tgt + '|h=' + h;
+                }
               }
-              btn.scrollIntoView({block:'center', inline:'center'});
-              var br = btn.getBoundingClientRect();
-              btnRect = { x: Math.round(br.left + br.width / 2), y: Math.round(br.top + br.height / 2), w: Math.round(br.width), h: Math.round(br.height) };
             }
-            return JSON.stringify({ loc: loc.slice(0,85), hasBtn: !!btn, h, tgt, tokLen, tsRect, btnRect, bodyTxt, scripts });
-          } catch(e) { return JSON.stringify({ err: e.message }); }
+            if (${allowTsTap} && h !== '#watch-ready') {
+              var el = document.querySelector('.cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"]');
+              if (el) {
+                el.scrollIntoView({block:'center', inline:'center'});
+                var tr = el.getBoundingClientRect();
+                if (tr.width >= 40 && tr.height >= 25) {
+                  return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height/2) + (btn ? ':HASBTN' : '');
+                }
+              }
+            }
+            return 'WAIT:btn=' + (!!btn) + '|h=' + h + '|txt=' + bodyTxt;
+          } catch(e) { return 'ERR:' + e.message; }
         })()`,
         returnByValue: true,
       });
-      const st = JSON.parse(probe?.result?.result?.value || '{}');
-      if (!firstBtnMs && st.hasBtn) firstBtnMs = ms;
-      if (ms === 3500 || ms % 3000 === 0 || st.h === '#watch-ready') {
-        logs.push(`t=${ms} ST=${JSON.stringify(st)}`);
+      const pv = String(probe?.result?.result?.value || '');
+      if (!firstBtnMs && (pv.includes('btn=true') || pv.includes(':HASBTN') || pv.startsWith('BTN:'))) {
+        firstBtnMs = ms;
+        logs.push(`t=${ms} FIRST_BTN pv=${pv}`);
+      } else if (ms % 2500 === 0 || pv.startsWith('BTN:') || pv.startsWith('URL:') || pv.includes('متصفح')) {
+        logs.push(`t=${ms} PV=${pv}`);
       }
-      if (st.btnRect && st.btnRect.w > 4 && ms - lastBtnTap >= 1800) {
+      if (pv.startsWith('URL:')) {
+        finalMinted = 'PROBEURL:' + pv.slice(4);
+        break;
+      } else if (pv.startsWith('BTN:') && ms - lastBtnTap >= 1800) {
         lastBtnTap = ms;
-        logs.push(`t=${ms} TAP_BTN (${st.btnRect.x},${st.btnRect.y})`);
-        await tap(st.btnRect.x, st.btnRect.y);
-      } else if (st.tsRect && st.tokLen === 0 && firstBtnMs > 0 && ms - firstBtnMs >= 6500 && ms - lastTsTap >= 4500) {
+        const coordPart = pv.slice(4).split('|')[0];
+        const [bx, by] = coordPart.split(',').map(Number);
+        logs.push(`t=${ms} TAP_BTN (${bx},${by})`);
+        if (bx > 0 && by > 0) await tap(bx, by);
+      } else if (pv.startsWith('TS:') && ms - lastTsTap >= 5000) {
         lastTsTap = ms;
-        const tx = st.tsRect.l + 28;
-        const ty = st.tsRect.t + Math.round(st.tsRect.h / 2);
+        const coordPart = pv.slice(3).replace(':HASBTN', '');
+        const [tx, ty] = coordPart.split(',').map(Number);
         logs.push(`t=${ms} TAP_TS (${tx},${ty})`);
-        await tap(tx, ty);
+        if (tx > 0 && ty > 0) await tap(tx, ty);
       }
     }
     try { ws.close(); } catch (e) {}
@@ -238,34 +230,82 @@ async function runScenario(name, port, opts) {
     try { proc.kill('SIGKILL'); } catch (e) {}
     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch (e) {}
   }
-  return { name, finalMinted, getLinkBody: getLinkBody.slice(0, 140), logs };
+  return { name, finalMinted, getLinkBody, logs };
 }
 
 (async () => {
-  const mobUa = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.63 Mobile Safari/537.36';
-  const httpChecks = {};
-  httpChecks.loadonDesktop = await rawGet(shineUrl, { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36', Referer: refererUrl });
-  httpChecks.loadonMobileClean = await rawGet(shineUrl, { 'User-Agent': mobUa, Referer: refererUrl });
-  httpChecks.loadonWithXReqWith = await rawGet(shineUrl, { 'User-Agent': mobUa, Referer: refererUrl, 'X-Requested-With': 'com.lagradost.cloudstream3' });
-  httpChecks.blogWithXReqWith = await rawGet('https://rm.freex2line.online/2020/02/blog-post.html/', { 'User-Agent': mobUa, Referer: 'https://rm.freex2line.online/redirectingfree/', 'X-Requested-With': 'com.lagradost.cloudstream3' });
-
-  // Scenario A: Mobile 800x360 + Touch + ar-MA WITHOUT X-Requested-With (and NO Network.getResponseBody shortcut!)
-  const scA = await runScenario('MobileCleanNoXRW', 19421, {
-    winSize: '800,360',
-    extraFlags: ['--lang=ar-MA'],
-    mobileMetrics: { width: 800, height: 360, deviceScaleFactor: 2, mobile: true },
-    uaOverride: { userAgent: mobUa, acceptLanguage: 'ar-MA,ar;q=0.9', platform: 'Linux armv8l' },
-    useTouch: true,
+  const sc1 = await runScenario('1_DesktopNoShortcut', 19431, async () => ({}));
+  const sc2 = await runScenario('2_AndroidWvWithXRW', 19432, async ({ send, browserVerFull, browserMajor }) => {
+    await send('Network.setExtraHTTPHeaders', { headers: { 'X-Requested-With': 'com.lagradost.cloudstream3' } });
+    await send('Network.setUserAgentOverride', {
+      userAgent: `Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/${browserVerFull} Mobile Safari/537.36`,
+      platform: 'Linux armv8l',
+      userAgentMetadata: {
+        brands: [
+          { brand: 'Not/A)Brand', version: '8' },
+          { brand: 'Chromium', version: browserMajor },
+          { brand: 'Android WebView', version: browserMajor },
+        ],
+        fullVersionList: [
+          { brand: 'Not/A)Brand', version: '8.0.0.0' },
+          { brand: 'Chromium', version: browserVerFull },
+          { brand: 'Android WebView', version: browserVerFull },
+        ],
+        platform: 'Android',
+        platformVersion: '14.0.0',
+        architecture: '',
+        model: 'M2006C3MG',
+        mobile: true,
+      },
+    });
+  });
+  const sc3 = await runScenario('3_AndroidWvNoXRW', 19433, async ({ send, browserVerFull, browserMajor }) => {
+    await send('Network.setUserAgentOverride', {
+      userAgent: `Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/${browserVerFull} Mobile Safari/537.36`,
+      platform: 'Linux armv8l',
+      userAgentMetadata: {
+        brands: [
+          { brand: 'Not/A)Brand', version: '8' },
+          { brand: 'Chromium', version: browserMajor },
+          { brand: 'Android WebView', version: browserMajor },
+        ],
+        fullVersionList: [
+          { brand: 'Not/A)Brand', version: '8.0.0.0' },
+          { brand: 'Chromium', version: browserVerFull },
+          { brand: 'Android WebView', version: browserVerFull },
+        ],
+        platform: 'Android',
+        platformVersion: '14.0.0',
+        architecture: '',
+        model: 'M2006C3MG',
+        mobile: true,
+      },
+    });
+  });
+  const sc4 = await runScenario('4_CleanMobileChromeMatched', 19434, async ({ send, browserVerFull, browserMajor }) => {
+    await send('Network.setUserAgentOverride', {
+      userAgent: `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserMajor}.0.0.0 Mobile Safari/537.36`,
+      platform: 'Linux armv8l',
+      userAgentMetadata: {
+        brands: [
+          { brand: 'Not/A)Brand', version: '8' },
+          { brand: 'Chromium', version: browserMajor },
+          { brand: 'Google Chrome', version: browserMajor },
+        ],
+        fullVersionList: [
+          { brand: 'Not/A)Brand', version: '8.0.0.0' },
+          { brand: 'Chromium', version: browserVerFull },
+          { brand: 'Google Chrome', version: browserVerFull },
+        ],
+        platform: 'Android',
+        platformVersion: '14.0.0',
+        architecture: '',
+        model: 'M2006C3MG',
+        mobile: true,
+      },
+    });
   });
 
-  // Scenario B: Mobile 800x360 + Mouse events (like Android MotionEvent -> Blink GestureTap -> click) WITHOUT Emulation.setDeviceMetricsOverride
-  const scB = await runScenario('Window800x360Clean', 19422, {
-    winSize: '800,360',
-    extraFlags: ['--lang=ar-MA'],
-    uaOverride: { userAgent: mobUa, acceptLanguage: 'ar-MA,ar;q=0.9', platform: 'Linux armv8l' },
-    useTouch: false,
-  });
-
-  fs.writeFileSync(outPath, JSON.stringify({ httpChecks, scA, scB }, null, 2), 'utf8');
+  fs.writeFileSync(outPath, JSON.stringify({ sc1, sc2, sc3, sc4 }, null, 2), 'utf8');
   process.exit(0);
 })();

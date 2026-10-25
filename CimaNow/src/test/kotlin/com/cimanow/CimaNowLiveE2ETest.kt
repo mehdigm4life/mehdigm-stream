@@ -181,7 +181,7 @@ class CimaNowLiveE2ETest {
                 .redirectErrorStream(true)
                 .redirectOutput(java.io.File("/dev/null"))
                 .start()
-            proc.waitFor(75L, java.util.concurrent.TimeUnit.SECONDS)
+            proc.waitFor(110L, java.util.concurrent.TimeUnit.SECONDS)
             val repStr = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
             println("[DIAG][RawReport]\n$repStr")
         } finally {
