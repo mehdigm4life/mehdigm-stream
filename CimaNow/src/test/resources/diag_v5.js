@@ -19,8 +19,8 @@ function getJson(u) {
 }
 
 (async () => {
-  const port = 19375;
-  const profDir = '/tmp/cn_diag5i_' + process.pid;
+  const port = 19378;
+  const profDir = '/tmp/cn_diag5j_' + process.pid;
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -61,24 +61,28 @@ function getJson(u) {
         }
       }
     };
-    const send = (method, params = {}) => new Promise(r => {
-      const cid = id++;
-      pending.set(cid, r);
-      ws.send(JSON.stringify({ id: cid, method, params }));
-    });
+    const send = (method, params = {}, ms = 2500) => Promise.race([
+      new Promise(r => {
+        const cid = id++;
+        pending.set(cid, r);
+        ws.send(JSON.stringify({ id: cid, method, params }));
+      }),
+      new Promise(r => setTimeout(() => r(null), ms))
+    ]);
 
     await send('Page.enable');
     await send('Debugger.enable');
     await send('Debugger.setBreakpointsActive', { active: false });
     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
-    await new Promise(r => setTimeout(r, 7500));
+    await new Promise(r => setTimeout(r, 11000));
 
     let picked = null;
-    for (const c of candidates.slice(0, 1)) {
-      const sr = await send('Debugger.getScriptSource', { scriptId: c.id });
+    for (const c of [...candidates].reverse()) {
+      const sr = await send('Debugger.getScriptSource', { scriptId: c.id }, 2000);
       const src = (sr && sr.result && sr.result.scriptSource) ? sr.result.scriptSource : '';
       if (src) {
         picked = { len: src.length, brB64: zlib.brotliCompressSync(Buffer.from(src, 'utf8')).toString('base64') };
+        break;
       }
     }
 
