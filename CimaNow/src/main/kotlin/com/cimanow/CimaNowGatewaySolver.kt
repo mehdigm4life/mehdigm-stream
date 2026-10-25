@@ -974,25 +974,38 @@ object CimaNowGatewaySolver {
                                 """
                                 (function(){
                                     try {
-                                        var out = { iframes: [], dls: [], tabs: 0, clicked: -1, tabName: '' };
+                                        var iw = Math.round(window.innerWidth || 393);
+                                        var ih = Math.round(window.innerHeight || 873);
+                                        var out = { iframes: [], dls: [], tabs: 0, clicked: -1, tabName: '', tap: '' };
                                         var ifs = document.querySelectorAll('iframe');
                                         for (var i = 0; i < ifs.length; i++) {
-                                            var s = String(ifs[i].getAttribute('src') || ifs[i].src || '');
+                                            var s = String(ifs[i].src || '');
                                             if (s.indexOf('http') === 0 || s.indexOf('//') === 0) out.iframes.push(s);
                                         }
-                                        var as = document.querySelectorAll('#download a[href], ul.download a[href], a[href*="dl="], a[href*="cimanowtv"], a[href*="vk.com/doc"], a[href*="jetload"], a[href*="upns."], a[href*="byse"], a[href*="filemoon"], a[href*="savefiles"], a[href*="streamhls"], a[href*="uqload"]');
+                                        var as = document.querySelectorAll('#download a, ul.download a, li[aria-label="download"] a, li[aria-label="quality"] a, a[href*="cimanowtv"], a[href*="vk.com/doc"], a[href*="jetload"], a[href*="upns."], a[href*="byse"], a[href*="filemoon"], a[href*="savefiles"], a[href*="streamhls"], a[href*="uqload"]');
                                         for (var j = 0; j < as.length; j++) {
-                                            var hr = String(as[j].getAttribute('href') || '');
-                                            if (hr.indexOf('http') === 0 || hr.indexOf('//') === 0) {
+                                            var hr = String(as[j].href || '');
+                                            if ((hr.indexOf('http') === 0 || hr.indexOf('//') === 0) && hr.indexOf('javascript:') !== 0) {
                                                 out.dls.push({ u: hr, t: String(as[j].innerText || '').trim().slice(0, 80) });
                                             }
                                         }
-                                        var lis = document.querySelectorAll('#watch li[data-id], #watch li[data-index], ul#watch li');
+                                        var rawLis = document.querySelectorAll('#watch li[data-id], #watch li[data-index], ul#watch li');
+                                        var lis = [];
+                                        for (var k = 0; k < rawLis.length; k++) {
+                                            var did = String(rawLis[k].getAttribute('data-id') || '');
+                                            var dix = String(rawLis[k].getAttribute('data-index') || '');
+                                            if (did === '00' || dix === '00') continue;
+                                            lis.push(rawLis[k]);
+                                        }
                                         out.tabs = lis.length;
                                         if ($nextIdx < lis.length) {
                                             var li = lis[$nextIdx];
                                             out.tabName = String(li.innerText || ('Server ' + ($nextIdx + 1))).trim().slice(0, 40);
-                                            li.click();
+                                            try { li.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'}); } catch(e0) {}
+                                            var r = li.getBoundingClientRect();
+                                            if (r.width > 4 && r.height > 4) {
+                                                out.tap = Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2) + ',' + iw + ',' + ih;
+                                            }
                                             out.clicked = $nextIdx;
                                         }
                                         return JSON.stringify(out);
@@ -1007,6 +1020,7 @@ object CimaNowGatewaySolver {
                             totalTabs = obj.optInt("tabs", 0)
                             val clicked = obj.optInt("clicked", -1)
                             val tabName = obj.optString("tabName").ifBlank { "Watch" }
+                            val tapStr = obj.optString("tap")
                             val ifs: JSONArray? = obj.optJSONArray("iframes")
                             if (ifs != null) {
                                 for (i in 0 until ifs.length()) {
@@ -1038,6 +1052,9 @@ object CimaNowGatewaySolver {
                             }
                             if (clicked >= 0) {
                                 clickedTabUpTo = clicked
+                                parseCssTapTarget(tapStr)?.let { target ->
+                                    dispatchTrustedTap(containerRef, webViewRef, target)
+                                }
                             } else if (totalTabs > 0 && clickedTabUpTo >= totalTabs - 1 && (embeds.isNotEmpty() || downloads.isNotEmpty())) {
                                 delay(450L)
                                 for (ic in interceptedEmbeds) {

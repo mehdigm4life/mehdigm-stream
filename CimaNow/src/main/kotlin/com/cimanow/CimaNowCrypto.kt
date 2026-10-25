@@ -477,11 +477,55 @@ object CimaNowCrypto {
     private data class FlexItem(val order: Int, val domIdx: Int, val outerW: Int, val outerH: Int)
 
     fun computeFlexHeight(fxHtml: String): Int {
-        val containerMatch = Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]*display\s*:\s*flex[^'"]*)['"]""", RegexOption.IGNORE_CASE)
-            .find(fxHtml)
-            ?: Regex("""<x-fx\s+style=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(fxHtml)
-            ?: return 0
-        val fxStyle = containerMatch.groupValues[1]
+        val doc = Jsoup.parseBodyFragment(fxHtml)
+        val styleRules = LinkedHashMap<String, String>()
+        for (stEl in doc.select("style")) {
+            val cssText = stEl.data()
+            for (rm in Regex("""([^{}]+)\{([^}]*)\}""").findAll(cssText)) {
+                val selectors = rm.groupValues[1].split(',')
+                val body = rm.groupValues[2].trim()
+                for (rawSel in selectors) {
+                    val sel = rawSel.trim()
+                    if (sel.isNotEmpty()) {
+                        val prev = styleRules[sel]
+                        styleRules[sel] = if (prev.isNullOrEmpty()) body else "$prev;$body"
+                    }
+                }
+            }
+        }
+
+        fun effectiveStyle(el: Element): String {
+            val sb = StringBuilder()
+            fun appendCss(s: String?) {
+                if (!s.isNullOrBlank()) {
+                    if (sb.isNotEmpty() && !sb.endsWith(';')) sb.append(';')
+                    sb.append(s)
+                }
+            }
+            val tag = el.tagName().lowercase()
+            appendCss(styleRules[tag])
+            for (cls in el.classNames()) {
+                appendCss(styleRules[".$cls"])
+                appendCss(styleRules["$tag.$cls"])
+            }
+            val id = el.id()
+            if (id.isNotEmpty()) {
+                appendCss(styleRules["#$id"])
+                appendCss(styleRules["$tag#$id"])
+            }
+            appendCss(el.attr("style"))
+            return sb.toString()
+        }
+
+        val containerEl = doc.body().select("*").firstOrNull { el ->
+            if (el == doc.body() || el.tagName().equals("style", ignoreCase = true)) return@firstOrNull false
+            val st = effectiveStyle(el)
+            Regex("""display\s*:\s*(?:inline-)?flex""", RegexOption.IGNORE_CASE).containsMatchIn(st) ||
+                el.tagName().equals("x-fx", ignoreCase = true) ||
+                el.tagName().equals("x-grid", ignoreCase = true)
+        } ?: return 0
+
+        val fxStyle = effectiveStyle(containerEl)
 
         fun pxProp(style: String, prop: String): Int =
             Regex("""(?:^|;)\s*${Regex.escape(prop)}\s*:\s*(-?\d+)px""", RegexOption.IGNORE_CASE)
@@ -501,27 +545,30 @@ object CimaNowCrypto {
 
         val fxW = pxProp(fxStyle, "width")
         val (fxPadTotalV, fxPadTotalH) = boxShorthandPx(fxStyle, "padding")
-        val fxBorder = pxProp(fxStyle, "border")
-        val fxBorderBox = fxStyle.contains("box-sizing:border-box", ignoreCase = true)
-        val colGap = pxProp(fxStyle, "column-gap")
-        val rowGap = pxProp(fxStyle, "row-gap")
+        val fxBorder = pxProp(fxStyle, "border").takeIf { it != 0 } ?: pxProp(fxStyle, "border-width")
+        val fxBorderBox = Regex("""box-sizing\s*:\s*border-box""", RegexOption.IGNORE_CASE).containsMatchIn(fxStyle)
+        val (gapRowFallback, gapColFallback) = boxShorthandPx(fxStyle, "gap")
+        val colGap = Regex("""(?:^|;)\s*column-gap\s*:\s*(-?\d+)px""", RegexOption.IGNORE_CASE)
+            .find(fxStyle)?.groupValues?.get(1)?.toIntOrNull() ?: (gapColFallback / 2)
+        val rowGap = Regex("""(?:^|;)\s*row-gap\s*:\s*(-?\d+)px""", RegexOption.IGNORE_CASE)
+            .find(fxStyle)?.groupValues?.get(1)?.toIntOrNull() ?: (gapRowFallback / 2)
         val availW = if (fxBorderBox) fxW - fxPadTotalH - 2 * fxBorder else fxW
 
         val items = ArrayList<FlexItem>()
-        val childrenSlice = fxHtml.substring(containerMatch.range.last + 1)
         var domIdx = 0
-        for (m in Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]+)['"]""").findAll(childrenSlice)) {
-            val st = m.groupValues[1]
+        for (child in containerEl.children()) {
+            if (child.tagName().equals("style", ignoreCase = true)) continue
+            val st = effectiveStyle(child)
             domIdx++
-            if (st.contains("display:none", ignoreCase = true)) continue
+            if (Regex("""display\s*:\s*none""", RegexOption.IGNORE_CASE).containsMatchIn(st)) continue
             val order = Regex("""order\s*:\s*(-?\d+)""", RegexOption.IGNORE_CASE)
                 .find(st)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val borderBox = st.contains("box-sizing:border-box", ignoreCase = true)
+            val borderBox = Regex("""box-sizing\s*:\s*border-box""", RegexOption.IGNORE_CASE).containsMatchIn(st)
             val w = pxProp(st, "width")
             val h = pxProp(st, "height")
             val (padTotalV, padTotalH) = boxShorthandPx(st, "padding")
             val (marTotalV, marTotalH) = boxShorthandPx(st, "margin")
-            val bdr = pxProp(st, "border")
+            val bdr = pxProp(st, "border").takeIf { it != 0 } ?: pxProp(st, "border-width")
             val boxW = if (borderBox) w else w + padTotalH + 2 * bdr
             val boxH = if (borderBox) h else h + padTotalV + 2 * bdr
             items.add(FlexItem(order, domIdx, boxW + marTotalH, boxH + marTotalV))
@@ -726,6 +773,15 @@ object CimaNowCrypto {
             val s2Shim = """
                 var window = this, self = this, globalThis = this;
                 var __lastDecodedTk = '';
+                if (!Number.isSafeInteger) {
+                    Number.isSafeInteger = function(n) { return typeof n === 'number' && isFinite(n) && Math.floor(n) === n; };
+                }
+                if (!Math.imul) {
+                    Math.imul = function(a, b) {
+                        var ah = (a >>> 16) & 0xffff, al = a & 0xffff, bh = (b >>> 16) & 0xffff, bl = b & 0xffff;
+                        return ((al * bl) + (((ah * bl + al * bh) << 16) >>> 0) | 0);
+                    };
+                }
                 function setTimeout() { return 1; }
                 function setInterval() { return 1; }
                 function clearTimeout() {}
@@ -773,23 +829,36 @@ object CimaNowCrypto {
                         style: makeStyleObj(),
                         _ih: '',
                         _fh: 0,
+                        _isVaultRoot: false,
                         parentNode: { removeChild: function() {}, insertBefore: function() {} },
                         appendChild: function(c) { return c; },
                         removeChild: function(c) { return c; },
                         insertBefore: function(c) { return c; },
                         set innerHTML(v) {
                             this._ih = String(v);
-                            if (this._ih.indexOf('display:flex') !== -1 || this._ih.indexOf('<x-fx') !== -1) {
+                            if (this._ih.indexOf('display:flex') !== -1 || this._ih.indexOf('display: flex') !== -1 ||
+                                this._ih.indexOf('flex-wrap') !== -1 || this._ih.indexOf('<x-fx') !== -1 || this._ih.indexOf('<x-grid') !== -1) {
                                 this._fh = Number(__h.flexHeight(this._ih));
+                            }
+                            if (this._ih.length > 1000 && (this._ih.indexOf('id="watch"') !== -1 || this._ih.indexOf("id='watch'") !== -1 || this._ih.indexOf('vault_script') !== -1)) {
+                                this._isVaultRoot = true;
+                                __h.onDocWrite(this._ih);
                             }
                         },
                         get innerHTML() { return this._ih; },
                         get offsetHeight() { return this._fh; },
                         get clientHeight() { return this._fh; },
                         get scrollHeight() { return this._fh; },
-                        get firstChild() { return makeFlexChild(this._fh); },
+                        get firstChild() { return this._isVaultRoot ? null : makeFlexChild(this._fh); },
                         get firstElementChild() { return makeFlexChild(this._fh); },
+                        get lastChild() { return makeFlexChild(this._fh); },
+                        get lastElementChild() { return makeFlexChild(this._fh); },
+                        get children() { var c = makeFlexChild(this._fh); return [c, c]; },
+                        get childNodes() { var c = makeFlexChild(this._fh); return [c, c]; },
                         querySelector: function() { return makeFlexChild(this._fh); },
+                        querySelectorAll: function(sel) {
+                            return this._isVaultRoot ? document.querySelectorAll(sel) : [makeFlexChild(this._fh)];
+                        },
                         getElementsByTagName: function() { return []; },
                         getBoundingClientRect: function() { return { height: this._fh, width: 403, top: 0, bottom: this._fh, left: 0, right: 403 }; },
                         getAttribute: function(n) { return String(__h.getOuterAttr(this.id, String(n))); },
@@ -1264,8 +1333,37 @@ object CimaNowCrypto {
         return h.toULong().toString(36)
     }
 
+    fun calcCoreSigV14(token: String, id: String, index: String, salt: String = "cnV14Ultra"): String {
+        val sd = "$token|$index|$id|$salt"
+        var h = 2166136261u
+        for (i in sd.indices) {
+            val addend = (sd[i].code + ((i * 11) and 255)).toUInt()
+            h = h xor addend
+            h *= 16777619u
+        }
+        return h.toULong().toString(36)
+    }
+
     fun decodeCnBootFrame(fragmentHtml: String, coreToken: String = ""): String? {
         if (fragmentHtml.isBlank()) return null
+
+        // V14Ultra (`data-vx` keyed by `coreToken + '~cnV14Ultra'` with `p0::p1::realSrc`)
+        val vx = Regex("""data-vx=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .find(fragmentHtml)?.groupValues?.get(1)
+        if (!vx.isNullOrBlank() && coreToken.isNotBlank()) {
+            val ks = "$coreToken~cnV14Ultra"
+            val parts = vx.split('-')
+            val out = StringBuilder(parts.size)
+            for (j in parts.indices) {
+                val v = parts[j].toIntOrNull() ?: continue
+                val kCh = ks[j % ks.length].code
+                out.append((v xor kCh xor ((j * 23 + 7) and 255)).toChar())
+            }
+            val pts = out.toString().split("::")
+            if (pts.size >= 3) {
+                normalizeEmbedUrl(pts.drop(2).joinToString("::"))?.let { return it }
+            }
+        }
 
         // V13 (`data-cnb` + `data-cni` keyed by `coreToken + ':' + info`)
         val cnb = Regex("""data-cnb=["']([^"']+)["']""", RegexOption.IGNORE_CASE)

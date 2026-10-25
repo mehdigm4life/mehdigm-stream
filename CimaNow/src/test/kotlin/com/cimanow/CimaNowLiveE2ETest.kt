@@ -31,7 +31,7 @@ class CimaNowLiveE2ETest {
         assertEquals(610L, CimaNowCrypto.evalMathExpr(expr))
         assertEquals(280L, CimaNowCrypto.evalMathExpr("0xFF + 0b1010 + 0o17"))
 
-        // 2. Generalized Flexbox `<x-fx>` & `<x-grid>` height solver
+        // 2. Generalized Flexbox `<x-fx>` & `<x-grid>` height solver (both inline styles & V14Ultra `<style>` class rules)
         val gridHtml =
             "<x-grid style='display:flex!important;width:403px!important;box-sizing:border-box!important;padding:10px 12px!important;column-gap:12px!important;row-gap:6px!important;'>" +
                 "<x-n style='order:20!important;display:block!important;box-sizing:border-box!important;width:200px!important;height:40px!important;padding:4px 4px!important;margin:0px 2px!important;'></x-n>" +
@@ -40,7 +40,16 @@ class CimaNowLiveE2ETest {
                 "</x-grid>"
         assertEquals(106, CimaNowCrypto.computeFlexHeight(gridHtml))
 
-        // 3. FNV-1a base36 `core.php` signatures (V12 & V13)
+        val v14ClassGridHtml =
+            "<style>" +
+                ".cg_1 { display:flex!important;width:403px!important;box-sizing:border-box!important;padding:10px 12px!important;column-gap:12px!important;row-gap:6px!important; }" +
+                ".cs_a { order:20!important;display:block!important;box-sizing:border-box!important;width:200px!important;height:40px!important;padding:4px 4px!important;margin:0px 2px!important; }" +
+                ".cs_b { order:10!important;display:block!important;box-sizing:content-box!important;width:200px!important;height:30px!important;padding:5px 6px!important;margin:0px 4px!important; }" +
+                ".cs_c { order:30!important;display:none!important;width:300px!important;height:90px!important; }" +
+                "</style><x-grid class='cg_1'><x-n class='cs_a'></x-n><x-n class='cs_b'></x-n><x-n class='cs_c'></x-n></x-grid>"
+        assertEquals(106, CimaNowCrypto.computeFlexHeight(v14ClassGridHtml))
+
+        // 3. FNV-1a base36 `core.php` signatures (V12, V13, & V14Ultra)
         val sigV12 = CimaNowCrypto.calcCoreSig(
             "d224f3b047d641a53111e7a19b7091c688038510dbfeca943dbe964114b13c25",
             "139241",
@@ -50,8 +59,10 @@ class CimaNowLiveE2ETest {
         assertTrue(sigV12.isNotBlank())
         val sigV13 = CimaNowCrypto.calcCoreSigV13("tok123", "139950", "66", "cnV13Sig")
         assertTrue(sigV13.isNotBlank())
+        val sigV14 = CimaNowCrypto.calcCoreSigV14("tok123", "139950", "66", "cnV14Ultra")
+        assertTrue(sigV14.isNotBlank())
 
-        // 4. `__cnBootFrame` V12 (`data-cnk`/`data-cna`) & V13 (`data-cnb`/`data-cni`) iframe decryption
+        // 4. `__cnBootFrame` V12 (`data-cnk`/`data-cna`), V13 (`data-cnb`/`data-cni`), & V14Ultra (`data-vx`) iframe decryption
         val v12Fixed =
             """<iframe id="cn_fr_02bd5628" src="about:blank" data-cnk="633637376630323664653663303836346663363863613432" data-cna="12.86.98.105.46.66.72.123.104.112.210.148.253.231.252.208.196.247.169.181.70.22.127.108.53.20.11.126.54.223.203.194.170.226.156"></iframe>"""
         assertEquals("https://cimanow.upns.online/#otni3k", CimaNowCrypto.decodeCnBootFrame(v12Fixed))
@@ -65,6 +76,14 @@ class CimaNowLiveE2ETest {
         }
         val sampleIframeV13 = """<iframe src="javascript:void(0);" data-cnb="$cnbEncoded" data-cni="$infoAttr"></iframe>"""
         assertEquals(targetEmbed, CimaNowCrypto.decodeCnBootFrame(sampleIframeV13, coreTok))
+
+        val v14Payload = "cn::v14::$targetEmbed"
+        val ksV14 = "$coreTok~cnV14Ultra"
+        val vxEncoded = v14Payload.indices.joinToString("-") { j ->
+            (v14Payload[j].code xor ksV14[j % ksV14.length].code xor ((j * 23 + 7) and 255)).toString()
+        }
+        val sampleIframeV14 = """<iframe src="javascript:void(0);" data-vx="$vxEncoded"></iframe>"""
+        assertEquals(targetEmbed, CimaNowCrypto.decodeCnBootFrame(sampleIframeV14, coreTok))
 
         // 5. Full Rhino V13 `/watching/` sandbox (`unlockWatchingVault` + snapshot `querySelectorAll` + XHR signer + `__cnBootFrame*`)
         val mockS2 = """
@@ -190,74 +209,8 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
-    fun testInspectLiveWatchingVault(): Unit = runBlocking {
-        assumeTrue("Set CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
-        val api = CimaNow()
-        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
-        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
-        assertNotNull(bkLoad)
-        val bkData = CimaNowCrypto.safeJsonObject(bkLoad!!.dataUrl)
-        val itemUrl = bkData?.optString("itemUrl") ?: beekeeperUrl
-        val shineUrl = bkData?.optString("shineUrl").orEmpty()
-        val mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(shineUrl, itemUrl)
-        println("[WATCH_DIAG] mintedUrl=$mintedUrl")
-        assertNotNull("Expected mintedUrl", mintedUrl)
-
-        val watchPage = CimaNowNetwork.withStickySession { session ->
-            val pTag = session.proxySpec ?: "direct"
-            val r = session.getText(mintedUrl!!, "https://rm.freex2line.online/2020/02/blog-post.html/")
-            println("[WATCH_DIAG] [$pTag] code=${r?.first} len=${r?.second?.length}")
-            if (r == null || CimaNowNetwork.isCimaBlocked(r.first, r.second)) {
-                throw CimaNowNetwork.CimaBlockedException("blocked")
-            }
-            r.second
-        }
-        assertNotNull("Expected watchHtml", watchPage)
-        val html = watchPage!!
-        println("[WATCH_DIAG] htmlHead=${html.take(900)}")
-        val doc = org.jsoup.Jsoup.parse(html)
-        println("[WATCH_DIAG] title=${doc.title()} bodyChildren=${doc.body().children().map { "${it.tagName()}#${it.id()}.${it.className()}(attrs=${it.attributes().map { a -> "${a.key}:${a.value.length}" }})" }}")
-        doc.select("style").forEachIndexed { idx, st ->
-            println("[WATCH_DIAG] style[$idx] len=${st.data().length} head=${st.data().take(300)}")
-        }
-        doc.select("script").forEachIndexed { idx, sc ->
-            val attrSummary = sc.attributes().map { "${it.key}=${it.value.take(35)}(len=${it.value.length})" }
-            println("[WATCH_DIAG] script[$idx] id='${sc.id()}' src='${sc.attr("src")}' dataLen=${sc.data().length} attrs=$attrSummary")
-            if (sc.data().isNotEmpty()) {
-                println("[WATCH_DIAG] script[$idx] head=${sc.data().take(1200)}")
-                if (sc.data().length > 1200) {
-                    println("[WATCH_DIAG] script[$idx] mid=${sc.data().substring(sc.data().length / 2, minOf(sc.data().length, sc.data().length / 2 + 1200))}")
-                    println("[WATCH_DIAG] script[$idx] tail=${sc.data().takeLast(1200)}")
-                }
-            }
-        }
-        val kEl = doc.selectFirst("script[id^=k_]") ?: doc.select("script").firstOrNull { it.data().length in 60..16000 }
-        if (kEl != null) {
-            val kAttr = kEl.attributes().firstOrNull { it.value.length > 500 }?.value.orEmpty()
-            val baos = java.io.ByteArrayOutputStream()
-            java.util.zip.GZIPOutputStream(baos).use { gz ->
-                gz.write((kEl.outerHtml()).toByteArray(Charsets.UTF_8))
-            }
-            val kB64 = java.util.Base64.getEncoder().encodeToString(baos.toByteArray())
-            println("[WATCH_KEL_B64_LEN] ${kB64.length} rawAttrLen=${kAttr.length}")
-            var off = 0
-            var idx = 0
-            while (off < kB64.length) {
-                val end = minOf(kB64.length, off + 8000)
-                println("[WATCH_KEL_$idx] ${kB64.substring(off, end)}")
-                off = end
-                idx++
-            }
-        }
-        val mEl = doc.selectFirst("script[id^=m_]") ?: doc.select("script").firstOrNull { s -> s.attributes().any { it.value.length > 50000 } }
-        if (mEl != null) {
-            println("[WATCH_MEL] id=${mEl.id()} attrs=${mEl.attributes().map { "${it.key}:${it.value.length}:${it.value.take(40)}" }}")
-        }
-    }
-
-    @Test
     fun testFullLiveEndToEndSuite(): Unit = runBlocking {
-        assumeTrue("Skipping live E2E test unless CIMANOW_FULL_E2E=1", System.getenv("CIMANOW_FULL_E2E") == "1")
+        assumeTrue("Skipping live E2E test unless CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
 
         val api = CimaNow()
         CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
