@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -26,6 +27,385 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
           cache: 'gradle'
+
+      - name: Probe live OTP & programmatic inbox domains
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install -q requests cryptography
+          python3 - <<'PY'
+          import base64, hashlib, json, os, random, re, string, subprocess, time, uuid
+          from email.utils import parsedate_to_datetime
+          import requests
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import ec
+
+          logs = []
+          def log(msg):
+              print(msg, flush=True)
+              logs.append(str(msg))
+
+          API = "https://api.apks.lol/api/v4.7/app/"
+          APP_ID = "60129f949ea4ea03d6598c06"
+          APP_VER = "6a3e1c72b864f954c0ef8d54"
+          APP_BUILD = "1092"
+
+          sess = requests.Session()
+          clock_offset_ms = 0
+
+          def now_ms():
+              return int(time.time() * 1000) + clock_offset_ms
+
+          def update_clock(resp):
+              global clock_offset_ms
+              dt_hdr = resp.headers.get("Date")
+              if dt_hdr:
+                  dt = parsedate_to_datetime(dt_hdr)
+                  clock_offset_ms = int(dt.timestamp() * 1000) - int(time.time() * 1000)
+
+          def b64url(b):
+              return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
+
+          # 0. Sync clock via AST
+          r_ast = sess.get(
+              API + "b05a119684b640ea8589ec4134dadefa",
+              headers={
+                  "User-Agent": "okhttp/4.12.0",
+                  "Accept": "application/json",
+                  "x-b": APP_BUILD,
+                  "ai": APP_ID,
+                  "av": APP_VER,
+                  "x-t": "",
+                  "n": str(uuid.uuid4()),
+                  "t": str(now_ms()),
+              },
+              timeout=20,
+          )
+          update_clock(r_ast)
+          log(f"AST status={r_ast.status_code} clock_offset_ms={clock_offset_ms}")
+
+          def make_device():
+              uid = os.urandom(8).hex()
+              did = os.urandom(8).hex()
+              rasp = os.urandom(16).hex()
+              return {
+                  "_id": None,
+                  "name": "Galaxy S24 Ultra",
+                  "device_name": "e3q",
+                  "unique_id": uid,
+                  "system_version": "14",
+                  "brand": "samsung",
+                  "device_package": "com.extremeqr.proapps",
+                  "device_version": "1.0.6.5",
+                  "build_number": "1092",
+                  "manufacturer": "samsung",
+                  "model": "SM-S928B",
+                  "board": "pineapple",
+                  "display": "UP1A.231005.007.S928BXXS3AX19",
+                  "fingerprint": "samsung/e3qxxx/e3q:14/UP1A.231005.007/S928BXXS3AX19:user/release-keys",
+                  "hardware": "qcom",
+                  "host": "SWDD4A12",
+                  "product": "e3qxxx",
+                  "type": "user",
+                  "is_emulator": False,
+                  "total_memory": "256000000000",
+                  "total_ram": "12884901888",
+                  "tags": "release-keys",
+                  "security_patch": "2025-09-01",
+                  "device_id": did,
+                  "bootloader": "S928BXXS3AX19",
+                  "serial": "unknown",
+                  "sku": "SM-S928B",
+                  "odm_sku": "SM-S928B",
+                  "soc_manufacturer": "Qualcomm",
+                  "soc_model": "SM8650",
+                  "supported_abis": "arm64-v8a,armeabi-v7a,armeabi",
+                  "rasplab_install_id": rasp,
+              }
+
+          def try_signup(email, dev):
+              body_obj = {
+                  "name": "Mehdi",
+                  "isNameError": False,
+                  "nameError": None,
+                  "email": email,
+                  "isEmailError": False,
+                  "emailError": None,
+                  "pass": "MehdiPass2026!",
+                  "isPassError": False,
+                  "passError": None,
+                  "confirmPass": "MehdiPass2026!",
+                  "isConfirmPassError": False,
+                  "confirmPassError": None,
+                  "device": dev,
+                  "recheckEmail": False,
+              }
+              raw = json.dumps(body_obj, separators=(",", ":"))
+              r = sess.post(
+                  API + "983fd0915e2841ec914088970dc6f059",
+                  data=raw.encode("utf-8"),
+                  headers={
+                      "User-Agent": "okhttp/4.12.0",
+                      "Accept": "application/json",
+                      "Content-Type": "application/json; charset=UTF-8",
+                      "x-b": APP_BUILD,
+                      "ai": APP_ID,
+                      "av": APP_VER,
+                      "x-t": "",
+                      "n": str(uuid.uuid4()),
+                      "t": str(now_ms()),
+                  },
+                  timeout=25,
+              )
+              update_clock(r)
+              return r.status_code, r.text
+
+          # Gather candidate inboxes (email, poll_fn)
+          candidates = []
+          rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=9))
+
+          # 1. anonbox.net (CCC)
+          try:
+              ra = requests.get("https://anonbox.net/en/", timeout=10)
+              m_addr = re.search(r"<dd><p>([a-z0-9._-]+@[a-z0-9.-]+\.anonbox\.net)</p></dd>", ra.text, re.I)
+              m_url = re.search(r'<dd><p><a href="(https://anonbox\.net/[^"]+)"', ra.text, re.I)
+              if m_addr and m_url:
+                  addr = m_addr.group(1)
+                  poll_u = m_url.group(1)
+                  if not poll_u.endswith("/"):
+                      poll_u += "/"
+                  candidates.append(("anonbox", addr, lambda u=poll_u: requests.get(u, timeout=10).text))
+                  log(f"Prepared anonbox: {addr}")
+          except Exception as e:
+              log(f"anonbox init err: {e}")
+
+          # 2. developermail.com
+          try:
+              rd = requests.put("https://www.developermail.com/api/v1/mailbox", headers={"Accept": "application/json"}, timeout=10).json()
+              res = rd.get("result") or {}
+              mb_name, mb_tok = res.get("name"), res.get("token")
+              if mb_name and mb_tok:
+                  def poll_devmail(n=mb_name, t=mb_tok):
+                      ids = requests.get(f"https://www.developermail.com/api/v1/mailbox/{n}", headers={"X-MailboxToken": t}, timeout=10).json().get("result") or []
+                      if not ids:
+                          return ""
+                      msgs = requests.post(f"https://www.developermail.com/api/v1/mailbox/{n}/messages", json=ids, headers={"X-MailboxToken": t}, timeout=10).json().get("result") or []
+                      return json.dumps(msgs)
+                  candidates.append(("developermail", f"{mb_name}@developermail.com", poll_devmail))
+                  log(f"Prepared developermail: {mb_name}@developermail.com")
+          except Exception as e:
+              log(f"developermail init err: {e}")
+
+          # 3. tempmail.lol
+          try:
+              rt = requests.post("https://api.tempmail.lol/v2/inbox/create", json={}, timeout=10).json()
+              t_addr, t_tok = rt.get("address"), rt.get("token")
+              if t_addr and t_tok:
+                  candidates.append(("tempmail.lol", t_addr, lambda t=t_tok: requests.get(f"https://api.tempmail.lol/v2/inbox?token={t}", timeout=10).text))
+                  log(f"Prepared tempmail.lol: {t_addr}")
+          except Exception as e:
+              log(f"tempmail.lol init err: {e}")
+
+          # 4. dropmail.me
+          try:
+              rq = requests.get("https://dropmail.me/api/graphql/tmprobe2026?query=mutation%20%7BintroduceSession%20%7Bid%2C%20addresses%20%7Baddress%7D%7D%7D", timeout=10).json()
+              sdata = (rq.get("data") or {}).get("introduceSession") or {}
+              sid = sdata.get("id")
+              addrs = sdata.get("addresses") or []
+              if sid and addrs:
+                  d_addr = addrs[0]["address"]
+                  q_url = f"https://dropmail.me/api/graphql/tmprobe2026?query=query%20%7Bsession(id%3A%22{sid}%22)%7Bmails%7BrawSize%2CheaderSubject%2Ctext%2Chtml%7D%7D%7D"
+                  candidates.append(("dropmail.me", d_addr, lambda u=q_url: requests.get(u, timeout=10).text))
+                  log(f"Prepared dropmail.me: {d_addr}")
+          except Exception as e:
+              log(f"dropmail init err: {e}")
+
+          # 5. tempmail.plus
+          for dom in ["mailto.plus", "fexpost.com", "inpwa.com", "chitthi.in"]:
+              addr = f"mehdi{rand}@{dom}"
+              def poll_tmp(a=addr):
+                  j = requests.get(f"https://tempmail.plus/api/mails?email={a}&limit=10", timeout=10).json()
+                  ml = j.get("mail_list") or []
+                  if not ml:
+                      return ""
+                  mid = ml[0].get("mail_id")
+                  return requests.get(f"https://tempmail.plus/api/mails/{mid}?email={a}", timeout=10).text
+              candidates.append((f"tempmail.plus:{dom}", addr, poll_tmp))
+
+          # 6. maildrop.cc
+          md_user = f"mehdi{rand}"
+          def poll_maildrop(u=md_user):
+              q = {"query": f'query {{ inbox(mailbox:"{u}") {{ id subject headerfrom }} }}'}
+              r1 = requests.post("https://api.maildrop.cc/graphql", json=q, timeout=10).json()
+              ib = ((r1.get("data") or {}).get("inbox")) or []
+              if not ib:
+                  return ""
+              mid = ib[0]["id"]
+              q2 = {"query": f'query {{ message(mailbox:"{u}", id:"{mid}") {{ subject data html }} }}'}
+              return requests.post("https://api.maildrop.cc/graphql", json=q2, timeout=10).text
+          candidates.append(("maildrop.cc", f"{md_user}@maildrop.cc", poll_maildrop))
+
+          # 7. internxt
+          try:
+              ri = requests.get("https://api.internxt.com/temp-mail/create-email", timeout=10).json()
+              i_addr = ri.get("address") or ri.get("email")
+              i_tok = ri.get("token")
+              if i_addr:
+                  candidates.append(("internxt", i_addr, lambda a=i_addr, t=i_tok: requests.get(f"https://api.internxt.com/temp-mail/get-inbox?email={a}&token={t or ''}", timeout=10).text))
+                  log(f"Prepared internxt: {i_addr}")
+          except Exception as e:
+              log(f"internxt init err: {e}")
+
+          accepted = None
+          for label, email_addr, poll_fn in candidates:
+              dev = make_device()
+              code, txt = try_signup(email_addr, dev)
+              log(f"SignUp [{label}] {email_addr} -> HTTP {code}: {txt[:260]}")
+              try:
+                  j = json.loads(txt)
+                  if j.get("success") or j.get("status") == 1:
+                      accepted = (label, email_addr, poll_fn, dev, j.get("result"))
+                      break
+              except Exception:
+                  pass
+
+          if accepted:
+              label, email_addr, poll_fn, dev, pending_tk = accepted
+              log(f"SUCCESSFUL SIGNUP on {label}! Polling for OTP...")
+              # Decode JWT header/claims (without printing secret token raw)
+              parts = pending_tk.split(".")
+              if len(parts) >= 2:
+                  pad = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                  claims = json.loads(base64.urlsafe_b64decode(pad).decode("utf-8"))
+                  log(f"Pending JWT claims keys={list(claims.keys())} ia={claims.get('ia')} s={claims.get('s')}")
+
+              # Immediately test DeviceKeyChallenge + DeviceKeyEnroll with pending_tk!
+              priv = ec.generate_private_key(ec.SECP256R1())
+              pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+              pk_b64 = b64url(pub_der)
+
+              r_ch = sess.get(
+                  API + "c81d2e64a4d64d8faea7e1abf4cb8c13",
+                  headers={
+                      "User-Agent": "okhttp/4.12.0",
+                      "Accept": "application/json",
+                      "x-b": APP_BUILD,
+                      "ai": APP_ID,
+                      "av": APP_VER,
+                      "x-t": pending_tk,
+                      "n": str(uuid.uuid4()),
+                      "t": str(now_ms()),
+                  },
+                  timeout=20,
+              )
+              update_clock(r_ch)
+              log(f"Challenge with pending_tk -> HTTP {r_ch.status_code}: {r_ch.text[:300]}")
+
+              dk = None
+              if r_ch.status_code == 200:
+                  ch_res = (r_ch.json().get("result") or {})
+                  cid, ch = ch_res.get("cid"), ch_res.get("ch")
+                  if cid and ch:
+                      msg_bytes = f"{cid}\n{ch}\n{pk_b64}\nECDSA_SHA256_DER".encode("utf-8")
+                      sig_der = priv.sign(msg_bytes, ec.ECDSA(hashes.SHA256()))
+                      reg_raw = json.dumps({"cid": cid, "pk": pk_b64, "sig": b64url(sig_der), "alg": "ECDSA_SHA256_DER"}, separators=(",", ":"))
+                      r_reg = sess.post(
+                          API + "e4ad21d4b1fc41bca62d94bd972e93f6",
+                          data=reg_raw.encode("utf-8"),
+                          headers={
+                              "User-Agent": "okhttp/4.12.0",
+                              "Accept": "application/json",
+                              "Content-Type": "application/json; charset=UTF-8",
+                              "x-b": APP_BUILD,
+                              "ai": APP_ID,
+                              "av": APP_VER,
+                              "x-t": pending_tk,
+                              "n": str(uuid.uuid4()),
+                              "t": str(now_ms()),
+                          },
+                          timeout=20,
+                      )
+                      update_clock(r_reg)
+                      log(f"Enroll with pending_tk -> HTTP {r_reg.status_code}: {r_reg.text[:300]}")
+                      dk = (r_reg.json().get("result") or {}).get("dk")
+
+              otp_code = None
+              for attempt in range(12):
+                  time.sleep(3)
+                  try:
+                      inbox_txt = poll_fn()
+                      if inbox_txt:
+                          log(f"Inbox poll #{attempt+1} len={len(inbox_txt)} snippet={inbox_txt[:220]}")
+                          m_otp = re.search(r"\b(\d{6})\b", inbox_txt)
+                          if m_otp:
+                              otp_code = m_otp.group(1)
+                              log(f"FOUND OTP: {otp_code}")
+                              break
+                  except Exception as e:
+                      log(f"Poll err: {e}")
+
+              if otp_code and dk:
+                  act_raw = json.dumps({"otp": otp_code, "isOtpError": False, "otpError": None}, separators=(",", ":"))
+                  ts = str(now_ms())
+                  nn = str(uuid.uuid4())
+                  body_hash = hashlib.sha256(act_raw.encode("utf-8")).hexdigest()
+                  canon = "\n".join([
+                      "POST",
+                      "api.apks.lol",
+                      "/api/v4.7/app/ddcc39a604b14148b9a00112e2e1095f",
+                      "",
+                      APP_VER,
+                      APP_BUILD,
+                      pending_tk,
+                      "",
+                      "",
+                      ts,
+                      nn,
+                      body_hash,
+                      dk,
+                  ])
+                  ds = b64url(priv.sign(canon.encode("utf-8"), ec.ECDSA(hashes.SHA256())))
+                  r_act = sess.post(
+                      API + "ddcc39a604b14148b9a00112e2e1095f",
+                      data=act_raw.encode("utf-8"),
+                      headers={
+                          "User-Agent": "okhttp/4.12.0",
+                          "Accept": "application/json",
+                          "Content-Type": "application/json; charset=UTF-8",
+                          "x-b": APP_BUILD,
+                          "ai": APP_ID,
+                          "av": APP_VER,
+                          "x-t": pending_tk,
+                          "n": nn,
+                          "t": ts,
+                          "dk": dk,
+                          "ds": ds,
+                          "da": "ECDSA_SHA256_DER",
+                      },
+                      timeout=20,
+                  )
+                  update_clock(r_act)
+                  aj = r_act.json()
+                  log(f"Activate OTP -> HTTP {r_act.status_code} success={aj.get('success')} status={aj.get('status')} msg={aj.get('message')} res_is_jwt={str(aj.get('result','')).startswith('eyJ')}")
+
+          payload = {
+              "name": "TimeMovies OTP Probe",
+              "head_sha": os.environ["GITHUB_SHA"],
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {
+                  "title": "OTP & Inbox Probe",
+                  "summary": "```\n" + "\n".join(logs)[-60000:] + "\n```",
+              },
+          }
+          with open("/tmp/probe_cr.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f)
+          subprocess.run([
+              "gh", "api", "--method", "POST",
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",
+              "--input", "/tmp/probe_cr.json",
+          ], check=False)
+          PY
 
       - name: Configure Android SDK, test, and build TimeMovies plugin
         run: |
