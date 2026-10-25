@@ -287,8 +287,8 @@ class CimaNowLiveE2ETest {
                             logs.push('Tapping #downloadbtn at ' + JSON.stringify(state.btn));
                             await realTap(state.btn.x, state.btn.y);
                         }
-                        if (mintedAtSec >= 0 && sec - mintedAtSec >= 6) {
-                            logs.push('Minted URL ready for 6s, breaking loop');
+                        if (mintedUrl) {
+                            logs.push('Minted URL captured from get-link.php, breaking immediately!');
                             break;
                         }
                     }
@@ -316,7 +316,7 @@ class CimaNowLiveE2ETest {
             println("[DIAG] CDP mintedUrl=$mintedUrl renderedDomLen=$renderedDomLen cookies=${cdpJson.optJSONArray("cookies")}")
             var rawFileHtml = java.io.File("/tmp/raw_watch.html").takeIf { it.exists() }?.readText().orEmpty()
             val domFileHtml = java.io.File("/tmp/dom_watch.html").takeIf { it.exists() }?.readText().orEmpty()
-            if (rawFileHtml.length < 1000 && mintedUrl.startsWith("http")) {
+            if (rawFileHtml.length < 1000 || CimaNowNetwork.isCimaBlocked(200, rawFileHtml)) {
                 val fallbackPage = CimaNowNetwork.getPage(mintedUrl, "https://rm.freex2line.online/2020/02/blog-post.html/")
                 if (fallbackPage != null) rawFileHtml = fallbackPage.html
                 println("[DIAG] Fetched mintedUrl via CimaNowNetwork.getPage -> len=${rawFileHtml.length} finalUrl=${fallbackPage?.finalUrl}")
