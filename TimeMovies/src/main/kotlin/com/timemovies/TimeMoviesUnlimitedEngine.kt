@@ -123,6 +123,7 @@ object TimeMoviesUnlimitedEngine {
     // Engine 6: Web Multi-Mirror Movie Harvesters + Universal 50-Host Server Scraper
     private const val DEFAULT_REMOTE_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/extractor.php"
     private const val MAWDHOU3_SCRAPER_BASE = "https://mawdhou3.com/"
+    private const val SHAHID4U_SEED_URL = "https://shaaheid4u.net"
     private const val CIMAWBAS_BASE_URL = "https://vid.mycima.cc"
     private const val TOPCINEMA_BASE_URL = "https://topcinema.film"
     private const val CIMANOW_BASE_URL = "https://cimanow.cc"
@@ -509,6 +510,7 @@ object TimeMoviesUnlimitedEngine {
         "فيلم", "افلام", "مسلسل", "انمي", "كرتون", "مترجم", "مترجمه", "مدبلج", "مدبلجه",
         "اون", "لاين", "اونلاين", "كامل", "كامله", "حصري", "حصريا", "مشاهده", "تحميل",
         "بجوده", "جوده", "عاليه", "نسخه", "اصليه", "عربي", "بالعربي", "اجنبي", "اسيوي",
+        "الجزء", "جزء", "part", "chapter",
         "hd", "fhd", "uhd", "4k", "2160p", "1080p", "720p", "480p", "360p",
         "bluray", "webdl", "webrip", "brrip", "bdrip", "dvdrip", "hdrip", "hdtv",
         "hdcam", "cam", "ts", "hc", "subbed", "dubbed", "online",
@@ -953,7 +955,19 @@ object TimeMoviesUnlimitedEngine {
             addIfValid(noPunctEn)
         }
 
-        return queries.take(8)
+        // 4.Arabic spelling & sequel-root fallbacks (e.g. "ولاد رزق 3" -> "اولاد رزق 3" & "ولاد رزق" so SQL LIKE finds "فيلم اولاد رزق الجزء الثالث")
+        if (cleanAr.isNotEmpty()) {
+            val baseAr = cleanAr.substringBefore(':').substringBefore(" - ").trim()
+            if (baseAr.startsWith("ولاد ")) {
+                addIfValid("اولاد " + baseAr.removePrefix("ولاد "))
+            }
+            val rootNoTrailingNum = baseAr.replace(Regex("\\s+\\d+\\s*$"), "").trim()
+            if (rootNoTrailingNum.length >= 5 && rootNoTrailingNum.length < baseAr.length) {
+                addIfValid(rootNoTrailingNum)
+            }
+        }
+
+        return queries.take(9)
     }
 
     private fun parseServerArray(json: JSONObject?, backendLabel: String): List<UnlimitedServerEmbed> {
@@ -3161,6 +3175,140 @@ object TimeMoviesUnlimitedEngine {
         return out.values.toList()
     }
 
+    private fun resolveShahid4uMovieEmbeds(payload: TimeMoviesModels.LinkPayload): List<UnlimitedServerEmbed> {
+        if (!payload.isMovie || TimeMoviesPrefs.apiBaseUrlOverride != null) return emptyList()
+        val targetNorms = buildPrimaryTargetNorms(payload)
+        val prefixNorms = buildPrefixTargetNorms(payload, targetNorms)
+        val queries = buildSearchQueries(payload).take(6)
+        if (targetNorms.isEmpty() || queries.isEmpty()) return emptyList()
+
+        val cookies = LinkedHashMap<String, String>()
+        fun absorbSetCookies(headers: okhttp3.Headers) {
+            for (sc in headers.values("Set-Cookie")) {
+                val pair = sc.substringBefore(';').trim()
+                val eq = pair.indexOf('=')
+                if (eq > 0) cookies[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
+            }
+        }
+        fun cookieHeaderValue(): String = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+        fun getPageSticky(url: String, referer: String? = null): Pair<String, String>? = runCatching {
+            val rb = Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", BROWSER_UA)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+            if (!referer.isNullOrBlank()) rb.header("Referer", referer)
+            if (cookies.isNotEmpty()) rb.header("Cookie", cookieHeaderValue())
+            fastProbeClient.newCall(rb.build()).execute().use { resp ->
+                absorbSetCookies(resp.headers)
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.byteStream()?.use { readBoundedUtf8(it) } ?: return null
+                body to resp.request.url.toString()
+            }
+        }.getOrNull()
+
+        val noRedir = fastProbeClient.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        fun resolveMRedirect(mUrl: String, referer: String): String? = runCatching {
+            var cur = mUrl
+            for (hop in 0 until 4) {
+                val rb = Request.Builder()
+                    .url(cur)
+                    .get()
+                    .header("User-Agent", BROWSER_UA)
+                    .header("Referer", referer)
+                if (cookies.isNotEmpty()) rb.header("Cookie", cookieHeaderValue())
+                val nextLoc = noRedir.newCall(rb.build()).execute().use { resp ->
+                    absorbSetCookies(resp.headers)
+                    if (resp.code in 300..399) {
+                        resp.header("Location")?.let { resolveRelativeUrl(cur, it) }
+                    } else null
+                } ?: break
+                cur = nextLoc
+                if (!cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) {
+                    return cur
+                }
+            }
+            if (!cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) cur else null
+        }.getOrNull()
+
+        var activeOrigin = SHAHID4U_SEED_URL
+        var matchedFilmUrl: String? = null
+        var bestSim = 0.0
+
+        for (q in queries) {
+            val enc = URLEncoder.encode(q, "UTF-8")
+            val (html, finalUrl) = getPageSticky("$activeOrigin/search?s=$enc", "$activeOrigin/") ?: continue
+            activeOrigin = originOf(finalUrl)
+
+            val cardRegex = Regex("""<a[^>]+class=["'][^"']*show-card[^"']*["'][^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE)
+            for (m in cardRegex.findAll(html)) {
+                val fullTag = m.value
+                if (Regex("""(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|aria-hidden\s*=\s*["']true["'])""", RegexOption.IGNORE_CASE).containsMatchIn(fullTag)) {
+                    continue
+                }
+                val rawHref = Regex("""href=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(fullTag)?.groupValues?.getOrNull(1) ?: continue
+                val absUrl = resolveRelativeUrl(finalUrl, rawHref)
+                val decUrl = runCatching { URLDecoder.decode(absUrl, "UTF-8") }.getOrDefault(absUrl)
+                if (decUrl.contains("/episode/", true) || decUrl.contains("/series/", true) || decUrl.contains("/season/", true) || decUrl.contains("/m/")) {
+                    continue
+                }
+                val titleText = Regex("""class=["'][^"']*title[^"']*["'][^>]*>([\s\S]*?)</""", RegexOption.IGNORE_CASE)
+                    .find(m.groupValues[1])?.groupValues?.getOrNull(1)?.replace(Regex("<[^>]+>"), " ")?.trim()
+                    ?: decUrl.trimEnd('/').substringAfterLast('/').replace('-', ' ')
+                if (titleText.contains("مسلسل") || titleText.contains("حلقة")) continue
+
+                val views = extractTitleNormViews(titleText, stripSeasonSuffix = false)
+                if (areSequelNumbersIncompatible(targetNorms, views)) continue
+                var sim = views.maxOfOrNull { c -> targetNorms.maxOfOrNull { t -> computeTitleSimilarity(t, c) } ?: 0.0 } ?: 0.0
+                if (sim < 0.72 && prefixNorms.isNotEmpty()) {
+                    val pSim = views.maxOfOrNull { c -> prefixNorms.maxOfOrNull { p -> computeTitleSimilarity(p, c) } ?: 0.0 } ?: 0.0
+                    if (pSim >= 0.92) sim = maxOf(sim, pSim * 0.88)
+                }
+                if (sim > bestSim && sim >= 0.65) {
+                    bestSim = sim
+                    matchedFilmUrl = absUrl
+                }
+            }
+            if (bestSim >= 0.92) break
+        }
+
+        val filmUrl = matchedFilmUrl ?: return emptyList()
+        val dlUrl = when {
+            filmUrl.contains("/film/") -> filmUrl.replaceFirst("/film/", "/download/")
+            filmUrl.contains("/post/") -> filmUrl.replaceFirst("/post/", "/download/")
+            filmUrl.contains("/movie/") -> filmUrl.replaceFirst("/movie/", "/download/")
+            else -> return emptyList()
+        }
+
+        val (dlHtml, dlFinalUrl) = getPageSticky(dlUrl, filmUrl) ?: return emptyList()
+        val out = LinkedHashMap<String, UnlimitedServerEmbed>()
+        val btnRegex = Regex("""<a[^>]+class=["'][^"']*btn-down[^"']*["'][^>]*>([\s\S]*?)</a>""", RegexOption.IGNORE_CASE)
+        for (bm in btnRegex.findAll(dlHtml)) {
+            val tag = bm.value
+            if (Regex("""(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0)""", RegexOption.IGNORE_CASE).containsMatchIn(tag)) continue
+            val mHref = Regex("""href=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.getOrNull(1)?.trim() ?: continue
+            val textInside = bm.groupValues[1].replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+            if (textInside.contains("Server 1", ignoreCase = true)) continue
+
+            val absM = resolveRelativeUrl(dlFinalUrl, mHref)
+            val extUrl = resolveMRedirect(absM, dlFinalUrl) ?: continue
+            if (!extUrl.startsWith("http")) continue
+            out.putIfAbsent(
+                extUrl,
+                UnlimitedServerEmbed(
+                    name = "TimeMovies ♾️ Shahid4u - ${extractHostLabel(extUrl, out.size + 1)}",
+                    url = extUrl,
+                    sourceBackend = "TimeMovies ♾️ Shahid4u",
+                    referer = dlFinalUrl,
+                ),
+            )
+            if (out.size >= 6) break
+        }
+        return out.values.toList()
+    }
+
     private suspend fun extractOpportunisticCimaNowDirectMp4s(
         payload: TimeMoviesModels.LinkPayload,
         callback: (ExtractorLink) -> Unit,
@@ -3361,6 +3509,7 @@ object TimeMoviesUnlimitedEngine {
             if (needsStage2) {
                 val runCimawbas = payload.isMovie && totalLinks.get() < 3
                 val runTopCinema = payload.isMovie && totalLinks.get() < 2
+                val runShahid4u = payload.isMovie && totalLinks.get() < 3
                 val runStarDimaFallback = payload.isMovie && !payload.isAnime && totalLinks.get() == 0
                 val stage2Embeds = supervisorScope {
                     val egywatchDef = async(Dispatchers.IO) {
@@ -3372,6 +3521,12 @@ object TimeMoviesUnlimitedEngine {
                         withTimeoutOrNull(9_000L) {
                             runCatching { resolveDramaWorldEmbedsAndSubtitles(payload, dedupSubtitleCallback) }
                                 .getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                    val shahid4uDef = async(Dispatchers.IO) {
+                        if (!runShahid4u) emptyList()
+                        else withTimeoutOrNull(9_000L) {
+                            runCatching { resolveShahid4uMovieEmbeds(payload) }.getOrDefault(emptyList())
                         } ?: emptyList()
                     }
                     val cimawbasDef = async(Dispatchers.IO) {
@@ -3396,6 +3551,7 @@ object TimeMoviesUnlimitedEngine {
                     ArrayList<UnlimitedServerEmbed>().apply {
                         addAll(egywatchDef.await())
                         addAll(dramaWorldDef.await())
+                        addAll(shahid4uDef.await())
                         addAll(cimawbasDef.await())
                         addAll(topCinemaDef.await())
                         addAll(starDimaFallbackDef.await())
