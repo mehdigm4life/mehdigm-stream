@@ -3327,14 +3327,14 @@ object TimeMoviesUnlimitedEngine {
                 val primaryDef = async(Dispatchers.IO) {
                     runCatching { resolveUnlimitedEmbeds(payload) }.getOrDefault(emptyList())
                 }
-                val starDimaStage1Def = if (payload.isAnime) {
-                    async(Dispatchers.IO) {
+                val starDimaStage1Def = async(Dispatchers.IO) {
+                    if (!payload.isAnime) {
+                        emptyList()
+                    } else {
                         withTimeoutOrNull(8_000L) {
                             runCatching { resolveStarDimaEmbeds(payload) }.getOrDefault(emptyList())
                         } ?: emptyList()
                     }
-                } else {
-                    null
                 }
                 val cimaNowDef = async(Dispatchers.IO) {
                     withTimeoutOrNull(7_000L) {
@@ -3342,9 +3342,9 @@ object TimeMoviesUnlimitedEngine {
                     } ?: 0
                 }
 
-                val stage1Embeds = buildList {
+                val stage1Embeds = ArrayList<UnlimitedServerEmbed>().apply {
                     addAll(primaryDef.await())
-                    starDimaStage1Def?.await()?.let { addAll(it) }
+                    addAll(starDimaStage1Def.await())
                 }
                 dispatchBatch(stage1Embeds, perServerTimeoutMs = 13_000L)
                 cimaNowDef.await()
@@ -3354,7 +3354,9 @@ object TimeMoviesUnlimitedEngine {
             // Triggered automatically whenever Stage 1 yielded < 2 links OR when a Movie still needs progressive MP4 download mirrors!
             val needsStage2 = totalLinks.get() < 2 || (payload.isMovie && (!hasDirectMp4.get() || totalLinks.get() < 4))
             if (needsStage2) {
-                val needStarDimaFallback = payload.isMovie && !payload.isAnime && totalLinks.get() == 0
+                val runCimawbas = payload.isMovie && totalLinks.get() < 3
+                val runTopCinema = payload.isMovie && totalLinks.get() < 2
+                val runStarDimaFallback = payload.isMovie && !payload.isAnime && totalLinks.get() == 0
                 val stage2Embeds = supervisorScope {
                     val egywatchDef = async(Dispatchers.IO) {
                         withTimeoutOrNull(9_000L) {
@@ -3367,34 +3369,31 @@ object TimeMoviesUnlimitedEngine {
                                 .getOrDefault(emptyList())
                         } ?: emptyList()
                     }
-                    val cimawbasDef = if (payload.isMovie && totalLinks.get() < 3) {
-                        async(Dispatchers.IO) {
-                            withTimeoutOrNull(8_000L) {
-                                runCatching { resolveCimawbasMovieEmbeds(payload) }.getOrDefault(emptyList())
-                            } ?: emptyList()
-                        }
-                    } else null
-                    val topCinemaDef = if (payload.isMovie && totalLinks.get() < 2) {
-                        async(Dispatchers.IO) {
-                            withTimeoutOrNull(8_000L) {
-                                runCatching { resolveTopCinemaMovieEmbeds(payload) }.getOrDefault(emptyList())
-                            } ?: emptyList()
-                        }
-                    } else null
-                    val starDimaFallbackDef = if (needStarDimaFallback) {
-                        async(Dispatchers.IO) {
-                            withTimeoutOrNull(8_000L) {
-                                runCatching { resolveStarDimaEmbeds(payload) }.getOrDefault(emptyList())
-                            } ?: emptyList()
-                        }
-                    } else null
+                    val cimawbasDef = async(Dispatchers.IO) {
+                        if (!runCimawbas) emptyList()
+                        else withTimeoutOrNull(8_000L) {
+                            runCatching { resolveCimawbasMovieEmbeds(payload) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                    val topCinemaDef = async(Dispatchers.IO) {
+                        if (!runTopCinema) emptyList()
+                        else withTimeoutOrNull(8_000L) {
+                            runCatching { resolveTopCinemaMovieEmbeds(payload) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
+                    val starDimaFallbackDef = async(Dispatchers.IO) {
+                        if (!runStarDimaFallback) emptyList()
+                        else withTimeoutOrNull(8_000L) {
+                            runCatching { resolveStarDimaEmbeds(payload) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                    }
 
-                    buildList {
+                    ArrayList<UnlimitedServerEmbed>().apply {
                         addAll(egywatchDef.await())
                         addAll(dramaWorldDef.await())
-                        cimawbasDef?.await()?.let { addAll(it) }
-                        topCinemaDef?.await()?.let { addAll(it) }
-                        starDimaFallbackDef?.await()?.let { addAll(it) }
+                        addAll(cimawbasDef.await())
+                        addAll(topCinemaDef.await())
+                        addAll(starDimaFallbackDef.await())
                     }
                 }
                 dispatchBatch(stage2Embeds, perServerTimeoutMs = 12_000L)
