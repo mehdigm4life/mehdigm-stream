@@ -160,6 +160,8 @@ class CimaNowLiveE2ETest {
                     const pending = new Map();
                     const logs = [];
                     let mintedUrl = '';
+                    let getLinkReqId = '';
+                    let getLinkBody = '';
                     let watchReqId = '';
                     let rawWatchNetworkBody = '';
                     let watchHtml = '';
@@ -172,6 +174,7 @@ class CimaNowLiveE2ETest {
                             if (u.includes('get-link') || u.includes('/watching/')) {
                                 logs.push('NET_REQ ' + m.params.request.method + ' ' + u + ' post=' + (m.params.request.postData || '').slice(0, 180));
                             }
+                            if (u.includes('get-link.php')) getLinkReqId = m.params.requestId;
                             if (u.includes('/watching/') && u.includes('token=')) {
                                 mintedUrl = u;
                                 watchReqId = m.params.requestId;
@@ -230,23 +233,36 @@ class CimaNowLiveE2ETest {
                             break;
                         }
 
-                        // Check if Turnstile iframe needs a tap or #downloadbtn is ready for a tap!
+                        if (getLinkReqId && !getLinkBody) {
+                            const glb = await send('Network.getResponseBody', { requestId: getLinkReqId });
+                            if (glb && glb.result && glb.result.body) {
+                                getLinkBody = glb.result.base64Encoded ? Buffer.from(glb.result.body, 'base64').toString('utf8') : glb.result.body;
+                                logs.push('GET_LINK_BODY=' + getLinkBody.slice(0, 300));
+                            }
+                        }
+
+                        // Scroll into viewport first, then read centered coordinates for real trusted tap!
                         const state = await evalJs(`(function(){
                             var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                            if (ts && ts.getBoundingClientRect().width > 20) ts.scrollIntoView({block: 'center'});
                             var tsRect = ts ? ts.getBoundingClientRect() : null;
                             var btn = document.getElementById('downloadbtn');
+                            var btnHref = btn ? (btn.getAttribute('href') || '') : '';
                             var btnVis = btn && !btn.hidden && getComputedStyle(btn).display !== 'none';
+                            if (btnVis) btn.scrollIntoView({block: 'center'});
                             var btnRect = btnVis ? btn.getBoundingClientRect() : null;
                             return {
-                                ts: tsRect && tsRect.width > 10 ? { x: Math.round(tsRect.left + 28), y: Math.round(tsRect.top + tsRect.height / 2), w: tsRect.width, h: tsRect.height } : null,
-                                btn: btnRect && btnRect.width > 10 ? { x: Math.round(btnRect.left + btnRect.width / 2), y: Math.round(btnRect.top + btnRect.height / 2) } : null
+                                btnHref: btnHref,
+                                btnVis: !!btnVis,
+                                ts: tsRect && tsRect.width > 20 && tsRect.top >= 0 ? { x: Math.round(tsRect.left + 28), y: Math.round(tsRect.top + tsRect.height / 2) } : null,
+                                btn: btnRect && btnRect.width > 10 && btnRect.top >= 0 ? { x: Math.round(btnRect.left + btnRect.width / 2), y: Math.round(btnRect.top + btnRect.height / 2) } : null
                             };
                         })()`);
+                        if (sec >= 9) logs.push('t=' + sec + ' state=' + JSON.stringify(state));
                         if (state && state.ts) {
-                            logs.push('Tapping Turnstile at ' + JSON.stringify(state.ts));
                             await realTap(state.ts.x, state.ts.y);
                         }
-                        if (state && state.btn && sec >= 11) {
+                        if (state && state.btn && (state.btnHref === '#watch-ready' || sec >= 11)) {
                             logs.push('Tapping #downloadbtn at ' + JSON.stringify(state.btn));
                             await realTap(state.btn.x, state.btn.y);
                         }
@@ -255,7 +271,7 @@ class CimaNowLiveE2ETest {
                     const cookiesRes = await send('Network.getAllCookies');
                     const cookies = (cookiesRes.result && cookiesRes.result.cookies) || [];
                     chrome.kill('SIGKILL');
-                    console.log(JSON.stringify({ logs, mintedUrl, renderedDomLen: watchHtml.length, renderedDomSample: watchHtml.slice(0, 3000), cookies: cookies.map(c => ({ name: c.name, domain: c.domain })) }));
+                    console.log(JSON.stringify({ logs, mintedUrl, renderedDomLen: watchHtml.length, renderedDomSample: watchHtml.slice(0, 3000), cookies: cookies.map(c => ({ name: c.name, value: c.value, domain: c.domain })), getLinkBody }));
                     process.exit(0);
                 })().catch(e => { console.log(JSON.stringify({ err: String(e) })); chrome.kill('SIGKILL'); process.exit(0); });
             """.trimIndent()
@@ -302,6 +318,28 @@ class CimaNowLiveE2ETest {
                 println("[DIAG] DOM_WATCH iframes=$iframes")
                 println("[DIAG] DOM_WATCH tabs=$tabs")
                 println("[DIAG] DOM_WATCH dls=$dls")
+            }
+
+            // Sync Chrome cookies into StickyHttpSession and test core.php + extractors if decoded != null!
+            val cookiesArr = cdpJson.optJSONArray("cookies")
+            if (cookiesArr != null) {
+                for (ci in 0 until cookiesArr.length()) {
+                    val co = cookiesArr.getJSONObject(ci)
+                    val dom = co.optString("domain").trimStart('.')
+                    if (dom.isNotBlank()) {
+                        session.cookieStore.seedCookies("https://$dom/", mapOf(co.optString("name") to co.optString("value")))
+                    }
+                }
+            }
+            if (rawFileHtml.length > 500) {
+                val decoded = CimaNowCrypto.decodeWatchingVault(rawFileHtml)
+                if (decoded != null && mintedUrl.startsWith("http")) {
+                    val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
+                    for (tab in decoded.serverTabs.take(6)) {
+                        val emb = CimaNowExtractors.fetchServerEmbedUrl(session, watchOrigin, mintedUrl, tab, decoded.coreToken, decoded.sigSalt)
+                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> embed=$emb")
+                    }
+                }
             }
 
             // Also test fetching mintedUrl via StickyHttpSession if mintedUrl was captured!
