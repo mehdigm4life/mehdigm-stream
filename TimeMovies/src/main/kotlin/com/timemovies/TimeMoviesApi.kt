@@ -1427,7 +1427,10 @@ object TimeMoviesApi {
             norm.contains("limit") ||
             norm.contains("device") ||
             norm.contains("plan") ||
-            norm.contains("vip")
+            norm.contains("vip") ||
+            norm.contains("entitled") ||
+            norm.contains("suspend") ||
+            norm.contains("ban")
     }
 
     private fun executeSingleGrantAttempt(

@@ -626,9 +626,13 @@ object TimeMoviesModels {
         } else {
             null
         }
+        val denialObj = obj.optJSONObject("denial") ?: obj.optJSONObject("error")
+        val resolvedReason = obj.optNonBlank("reason")
+            ?: denialObj?.optNonBlank("reason")
+            ?: denialObj?.optNonBlank("code")
         return MediaGrantPayload(
             ok = obj.optBoolean("ok", false),
-            reason = obj.optNonBlank("reason"),
+            reason = resolvedReason,
             grant = obj.optNonBlank("grant"),
             target = obj.optIntOrNull("target"),
             charged = obj.optBoolean("charged", false),
