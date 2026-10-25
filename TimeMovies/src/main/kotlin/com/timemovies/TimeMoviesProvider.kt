@@ -330,6 +330,7 @@ class TimeMovies : MainAPI() {
             .map { "https://www.youtube.com/watch?v=${it.key}" }
 
         val tvType = classifyTvType(details.isMovie, details.genresEn, details.genresAr)
+        val isAnimeWork = tvType == TvType.Anime || tvType == TvType.AnimeMovie
 
         if (details.isMovie) {
             val linkData = LinkPayload(
@@ -337,6 +338,9 @@ class TimeMovies : MainAPI() {
                 fileCode = details.fileCode.orEmpty(),
                 isMovie = true,
                 title = details.titleEn.ifBlank { title },
+                titleAr = details.titleAr?.takeIf { it.isNotBlank() },
+                year = details.releaseYear,
+                isAnime = isAnimeWork,
             ).toJson()
 
             newMovieLoadResponse(
@@ -371,6 +375,9 @@ class TimeMovies : MainAPI() {
                             seasonId = season.id,
                             seasonNum = ep.seasonNum,
                             episodeNum = ep.episodeNum,
+                            titleAr = details.titleAr?.takeIf { it.isNotBlank() },
+                            year = details.releaseYear,
+                            isAnime = isAnimeWork,
                         ).toJson()
 
                         val epTitle = when {
@@ -426,30 +433,52 @@ class TimeMovies : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         val initialPayload = LinkPayload.fromJson(data) ?: return false
+        val unlimitedActive = TimeMoviesUnlimitedEngine.isRuntimeActive()
+        val hasCachedStream = TimeMoviesGrantCache.getValidEntry(initialPayload, verifyNetworkLiveness = false) != null
 
-        if (!TimeMoviesApi.hasUsableAuth()) {
+        if (!TimeMoviesApi.hasUsableAuth() && !unlimitedActive && !hasCachedStream) {
             TimeMoviesPlugin.notifyUserAr("يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية")
             return false
         }
 
-        val resolvedPayload = if (initialPayload.fileCode.isNotBlank()) {
+        val needsMetadataEnrichment = initialPayload.fileCode.isBlank() ||
+            (unlimitedActive && (initialPayload.titleAr.isNullOrBlank() || initialPayload.year == null))
+
+        val resolvedPayload = if (!needsMetadataEnrichment) {
             initialPayload
         } else {
             val fresh = TimeMoviesApi.getWorkDetails(initialPayload.workId)
-            val freshCode = if (initialPayload.isMovie) {
-                fresh?.fileCode.orEmpty()
+            if (fresh == null) {
+                initialPayload
             } else {
-                val allEps = fresh?.seasons?.flatMap { s -> s.episodes.map { s to it } }.orEmpty()
-                val matched = allEps.firstOrNull { (_, ep) -> ep.id == initialPayload.episodeId }
-                    ?: allEps.firstOrNull { (_, ep) ->
-                        ep.seasonNum == initialPayload.seasonNum && ep.episodeNum == initialPayload.episodeNum
-                    }
-                matched?.second?.fileCode.orEmpty()
+                val freshCode = if (initialPayload.fileCode.isNotBlank()) {
+                    initialPayload.fileCode
+                } else if (initialPayload.isMovie) {
+                    fresh.fileCode.orEmpty()
+                } else {
+                    val allEps = fresh.seasons.flatMap { s -> s.episodes.map { s to it } }
+                    val matched = allEps.firstOrNull { (_, ep) -> ep.id == initialPayload.episodeId }
+                        ?: allEps.firstOrNull { (_, ep) ->
+                            ep.seasonNum == initialPayload.seasonNum && ep.episodeNum == initialPayload.episodeNum
+                        }
+                    matched?.second?.fileCode.orEmpty()
+                }
+                val detectedTvType = classifyTvType(fresh.isMovie, fresh.genresEn, fresh.genresAr)
+                val freshIsAnime = initialPayload.isAnime ||
+                    detectedTvType == TvType.Anime ||
+                    detectedTvType == TvType.AnimeMovie
+
+                initialPayload.copy(
+                    fileCode = freshCode,
+                    title = fresh.titleEn.ifBlank { initialPayload.title },
+                    titleAr = initialPayload.titleAr ?: fresh.titleAr?.takeIf { it.isNotBlank() },
+                    year = initialPayload.year ?: fresh.releaseYear,
+                    isAnime = freshIsAnime,
+                )
             }
-            initialPayload.copy(fileCode = freshCode)
         }
 
-        if (resolvedPayload.fileCode.isBlank()) {
+        if (resolvedPayload.fileCode.isBlank() && !unlimitedActive && !hasCachedStream) {
             TimeMoviesPlugin.notifyUserAr("تعذر العثور على رمز ملف التشغيل لهذا العمل — يرجى تحديث الصفحة")
             return false
         }

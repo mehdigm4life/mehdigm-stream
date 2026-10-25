@@ -116,6 +116,7 @@ object TimeMoviesPool {
         val resolvedProfileId: String? = null,
         val resolvedMaturity: Int? = null,
         val quotaExhaustedUntilMs: Long = 0L,
+        val downloadQuotaExhaustedUntilMs: Long = 0L,
         val authFailedUntilMs: Long = 0L,
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
@@ -124,6 +125,7 @@ object TimeMoviesPool {
             if (!resolvedProfileId.isNullOrBlank()) put("pid", resolvedProfileId)
             if (resolvedMaturity != null) put("mat", resolvedMaturity)
             if (quotaExhaustedUntilMs > 0L) put("qExp", quotaExhaustedUntilMs)
+            if (downloadQuotaExhaustedUntilMs > 0L) put("dqExp", downloadQuotaExhaustedUntilMs)
             if (authFailedUntilMs > 0L) put("aExp", authFailedUntilMs)
         }
 
@@ -134,6 +136,7 @@ object TimeMoviesPool {
                 resolvedProfileId = o.optString("pid", "").trim().ifEmpty { null },
                 resolvedMaturity = if (o.has("mat")) o.optInt("mat", 5) else null,
                 quotaExhaustedUntilMs = o.optLong("qExp", 0L),
+                downloadQuotaExhaustedUntilMs = o.optLong("dqExp", 0L),
                 authFailedUntilMs = o.optLong("aExp", 0L),
             )
         }
@@ -154,10 +157,19 @@ object TimeMoviesPool {
             } else {
                 ""
             }
+        val userId: String?
+            get() = extractJwtUserId(effectiveToken)
 
         fun isAuthHealthy(nowMs: Long): Boolean = runtime.authFailedUntilMs <= nowMs
-        fun isMediaQuotaHealthy(nowMs: Long): Boolean =
-            isAuthHealthy(nowMs) && runtime.quotaExhaustedUntilMs <= nowMs
+
+        fun isMediaQuotaHealthy(nowMs: Long, action: String = "watch"): Boolean {
+            if (!isAuthHealthy(nowMs)) return false
+            return if (action == "download" || action == "season_download") {
+                runtime.downloadQuotaExhaustedUntilMs <= nowMs
+            } else {
+                runtime.quotaExhaustedUntilMs <= nowMs
+            }
+        }
     }
 
     private fun parseBundleLines(rawText: String?): List<PoolAccountBundle> {
@@ -206,9 +218,33 @@ object TimeMoviesPool {
         }
     }
 
-    fun markSlotQuotaExhausted(slotId: String, nowMs: Long = System.currentTimeMillis()) {
-        updateSlotRuntime(slotId) { it.copy(quotaExhaustedUntilMs = nowMs + QUOTA_COOLDOWN_MS) }
+    fun markSlotQuotaExhausted(
+        slotId: String,
+        action: String = "watch",
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        updateSlotRuntime(slotId) { st ->
+            if (action == "download" || action == "season_download") {
+                st.copy(downloadQuotaExhaustedUntilMs = nowMs + QUOTA_COOLDOWN_MS)
+            } else {
+                st.copy(quotaExhaustedUntilMs = nowMs + QUOTA_COOLDOWN_MS)
+            }
+        }
         roundRobinCursor.incrementAndGet()
+    }
+
+    fun markUserIdQuotaExhausted(
+        userId: String?,
+        action: String = "watch",
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        if (userId.isNullOrBlank()) return
+        val slots = loadAllSlots(allowNetworkFetch = false)
+        for (slot in slots) {
+            if (slot.userId == userId) {
+                markSlotQuotaExhausted(slot.slotId, action = action, nowMs = nowMs)
+            }
+        }
     }
 
     fun markSlotAuthFailed(slotId: String, nowMs: Long = System.currentTimeMillis()) {
@@ -226,10 +262,24 @@ object TimeMoviesPool {
         synchronized(overlayLock) {
             val map = loadRuntimeOverlayMap()
             val cleaned = map.mapValues { (_, st) ->
-                st.copy(quotaExhaustedUntilMs = 0L, authFailedUntilMs = 0L)
+                st.copy(
+                    quotaExhaustedUntilMs = 0L,
+                    downloadQuotaExhaustedUntilMs = 0L,
+                    authFailedUntilMs = 0L,
+                )
             }
             saveRuntimeOverlayMap(cleaned)
         }
+    }
+
+    fun extractJwtUserId(token: String?): String? {
+        val claims = TimeMoviesPrefs.decodeJwtClaims(token) ?: return null
+        return claims.optString("_id", "").trim().takeIf { it.isNotEmpty() }
+    }
+
+    fun extractJwtEmail(token: String?): String? {
+        val claims = TimeMoviesPrefs.decodeJwtClaims(token) ?: return null
+        return claims.optString("e", "").trim().lowercase().takeIf { it.isNotEmpty() }
     }
 
     private fun remotePoolUrls(): List<String> {
@@ -358,26 +408,148 @@ object TimeMoviesPool {
 
     /**
      * Candidate pool slots for `POST /api/v4.7/app/media/grant` (`watch` / `download`),
-     * automatically skipping accounts whose daily free quota is currently exhausted.
+     * automatically skipping accounts whose daily free quota for that action is currently exhausted
+     * or whose `_id` matches `excludeUserId` (e.g., personal session that already exhausted quota).
      */
-    fun getMediaCandidateSlots(nowMs: Long = System.currentTimeMillis()): List<EffectivePoolSlot> {
+    fun getMediaCandidateSlots(
+        nowMs: Long = System.currentTimeMillis(),
+        action: String = "watch",
+        excludeUserId: String? = null,
+    ): List<EffectivePoolSlot> {
         var all = loadAllSlots(allowNetworkFetch = true)
+            .filter { excludeUserId.isNullOrBlank() || it.userId != excludeUserId }
         if (all.isEmpty()) return emptyList()
 
-        val quotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs) })
+        val quotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs, action) })
         if (quotaHealthy.isNotEmpty()) return quotaHealthy
 
         // All known pool accounts hit quota — check OTA `pool.enc` once in case new accounts were added
         refreshRemotePool(force = true)
         all = loadAllSlots(allowNetworkFetch = false)
-        val freshQuotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs) })
+            .filter { excludeUserId.isNullOrBlank() || it.userId != excludeUserId }
+        val freshQuotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs, action) })
         if (freshQuotaHealthy.isNotEmpty()) return freshQuotaHealthy
 
         // Fallback: try auth-healthy slot whose quota cooldown is closest to expiring (in case server UTC day rolled over)
         return all
             .filter { it.isAuthHealthy(nowMs) }
-            .sortedBy { it.runtime.quotaExhaustedUntilMs }
+            .sortedBy {
+                if (action == "download" || action == "season_download") {
+                    it.runtime.downloadQuotaExhaustedUntilMs
+                } else {
+                    it.runtime.quotaExhaustedUntilMs
+                }
+            }
             .take(1)
+    }
+
+    /**
+     * Automatically seals and archives the currently activated personal session into the device's
+     * Local Unlimited Vault (`localPoolBundlesRaw`), deduplicating by user `_id` so signing out or
+     * registering additional accounts never discards previously activated accounts.
+     */
+    fun autoArchiveCurrentPersonalSession(): Boolean = runCatching {
+        val tk = TimeMoviesPrefs.authToken?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val claims = TimeMoviesPrefs.decodeJwtClaims(tk)
+        if (claims != null && (
+                (claims.has("ia") && !claims.optBoolean("ia", true)) ||
+                    (claims.has("is_active") && !claims.optBoolean("is_active", true))
+            )
+        ) {
+            return false
+        }
+
+        val vDev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+        val kp = TimeMoviesPrefs.getOrCreateDeviceKeyPair()
+        val scope = TimeMoviesPrefs.computeTokenScope(tk, vDev.deviceId)
+        val slotId = TimeMoviesCrypto.sha256Hex("$scope|${kp.publicKeySpkiB64Url}").take(16)
+        val email = TimeMoviesPrefs.userEmail?.takeIf { it.isNotBlank() }
+            ?: extractJwtEmail(tk)
+        val label = email ?: "Vault #${slotId.take(4)}"
+        val incomingUserId = extractJwtUserId(tk)
+
+        val newBundle = PoolAccountBundle(
+            slotId = slotId,
+            label = label,
+            authToken = tk,
+            deviceKeyId = TimeMoviesPrefs.getDeviceKeyIdForScope(scope) ?: TimeMoviesPrefs.deviceKeyId,
+            keyPair = kp,
+            virtualDevice = vDev,
+            profileId = TimeMoviesPrefs.profileId,
+            profileName = TimeMoviesPrefs.profileName,
+            profileMaturity = TimeMoviesPrefs.profileMaturity,
+        )
+
+        val existing = parseBundleLines(TimeMoviesPrefs.localPoolBundlesRaw)
+        val merged = ArrayList<PoolAccountBundle>(existing.size + 1)
+        merged.add(newBundle)
+        for (old in existing) {
+            if (old.slotId == newBundle.slotId) continue
+            val oldUid = extractJwtUserId(old.authToken)
+            if (!incomingUserId.isNullOrBlank() && oldUid == incomingUserId) continue
+            merged.add(old)
+        }
+        TimeMoviesPrefs.localPoolBundlesRaw = merged.joinToString("\n") { it.seal() }
+        true
+    }.getOrDefault(false)
+
+    /**
+     * Generates a fresh Gmail dot/plus alias (`m.ehdi@gmail.com`, `me.hdi@gmail.com`, `@googlemail.com`,
+     * `mehdi+tm2@gmail.com`) delivering OTP codes to the exact same Gmail inbox while remaining distinct
+     * from all emails already stored in personal preferences or the local pool vault.
+     */
+    fun generateNextGmailAlias(explicitEmail: String? = null): String? {
+        val rawSource = explicitEmail?.trim()?.takeIf { it.isNotEmpty() }
+            ?: TimeMoviesPrefs.userEmail?.trim()?.takeIf { it.isNotEmpty() }
+            ?: extractJwtEmail(TimeMoviesPrefs.authToken)
+            ?: parseBundleLines(TimeMoviesPrefs.localPoolBundlesRaw)
+                .firstNotNullOfOrNull { b ->
+                    b.label.takeIf { it.contains("@") } ?: extractJwtEmail(b.authToken)
+                }
+            ?: return null
+
+        val lower = rawSource.lowercase()
+        val atIdx = lower.indexOf('@')
+        if (atIdx <= 0) return null
+        val rawLocal = lower.substring(0, atIdx)
+        val rawDomain = lower.substring(atIdx + 1)
+        if (rawDomain != "gmail.com" && rawDomain != "googlemail.com") return null
+
+        val cleanLocal = rawLocal.substringBefore('+').replace(".", "")
+        if (cleanLocal.length < 2) return null
+
+        val usedEmails = HashSet<String>()
+        usedEmails.add(lower)
+        TimeMoviesPrefs.userEmail?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { usedEmails.add(it) }
+        TimeMoviesPrefs.pendingOtpEmail?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { usedEmails.add(it) }
+        for (b in parseBundleLines(TimeMoviesPrefs.localPoolBundlesRaw)) {
+            if (b.label.contains("@")) usedEmails.add(b.label.trim().lowercase())
+            extractJwtEmail(b.authToken)?.let { usedEmails.add(it) }
+        }
+
+        val gapCount = (cleanLocal.length - 1).coerceAtMost(12)
+        val maxMask = (1 shl gapCount) - 1
+        for (domain in listOf("gmail.com", "googlemail.com")) {
+            for (mask in 1..maxMask) {
+                // Skip adjacent dots (`..`) which Gmail & RFC 5321 forbid!
+                if ((mask and (mask shl 1)) != 0) continue
+                val sb = StringBuilder(cleanLocal.length + gapCount)
+                for (i in cleanLocal.indices) {
+                    sb.append(cleanLocal[i])
+                    if (i < gapCount && ((mask shr i) and 1) == 1) {
+                        sb.append('.')
+                    }
+                }
+                val candidate = "$sb@$domain"
+                if (candidate !in usedEmails) return candidate
+            }
+        }
+
+        for (idx in 2..999) {
+            val plusCandidate = "$cleanLocal+tm$idx@gmail.com"
+            if (plusCandidate !in usedEmails) return plusCandidate
+        }
+        return null
     }
 
     /**

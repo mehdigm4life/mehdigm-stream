@@ -24,6 +24,7 @@ import java.net.Socket
 import java.net.URI
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -37,14 +38,17 @@ class TimeMoviesUnitTest {
 
     @Before
     fun setUp() {
+        System.setProperty("kotlinx.coroutines.debug", "off")
         TimeMoviesPrefs.resetAllForTests()
         TimeMoviesApi.resetRuntimeStateForTests()
+        TimeMoviesUnlimitedEngine.clearCachesForTests()
     }
 
     @After
     fun tearDown() {
         TimeMoviesPrefs.resetAllForTests()
         TimeMoviesApi.resetRuntimeStateForTests()
+        TimeMoviesUnlimitedEngine.clearCachesForTests()
     }
 
     // ---- Pure `java.net.ServerSocket` HTTP/1.1 Test Server (works on Android SDK + JVM) ----
@@ -1199,5 +1203,290 @@ class TimeMoviesUnitTest {
                 assertFalse(body.contains("Cannot POST", ignoreCase = true))
             }
         }
+    }
+
+    @Test
+    fun testPersistentGrantCacheAndZeroCreditReplayAcrossExhaustion() = runBlocking {
+        val grantCalls = AtomicInteger(0)
+        val forceExhausted = AtomicBoolean(false)
+
+        MiniHttpServer { req ->
+            when {
+                req.path.endsWith("/9a3b7c1d4e6f8024a5c1d8e9f0b23456") ->
+                    MiniResponse(200, "application/json", """{"status":200,"result":{"key_id":"dk_cache"}}""")
+
+                req.path.endsWith("/546635c490224ed1a74961d8e06198d1") ->
+                    MiniResponse(200, "application/json", """{"status":200,"result":{"ausp":{"_id":"p_cache","n":"Mehdi","mr":5}}}""")
+
+                req.path.endsWith("/media/grant") -> {
+                    grantCalls.incrementAndGet()
+                    if (forceExhausted.get()) {
+                        MiniResponse(
+                            200,
+                            "application/json",
+                            """{"status":200,"result":{"ok":false,"reason":"quota_exhausted","charged":false}}""",
+                        )
+                    } else {
+                        MiniResponse(
+                            200,
+                            "application/json",
+                            """{"status":200,"result":{"ok":true,"charged":true,"media":{"src":"__BASE__/hls/tok999/movie.mp4/master.m3u8"}}}"""
+                                .replace("__BASE__", "http://${req.header("host")}"),
+                        )
+                    }
+                }
+
+                req.path == "/hls/tok999/movie.mp4/master.m3u8" -> {
+                    val hostOrigin = "http://${req.header("host")}"
+                    val m3u8 = """
+                        #EXTM3U
+                        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="$hostOrigin/hls/tok999/movie.mp4/index-a1.m3u8"
+                        #EXT-X-STREAM-INF:BANDWIDTH=3500000,RESOLUTION=1920x1080,AUDIO="aud"
+                        $hostOrigin/hls/tok999/movie.mp4/index-f1-v1.m3u8
+                        #EXT-X-STREAM-INF:BANDWIDTH=1800000,RESOLUTION=1280x720,AUDIO="aud"
+                        $hostOrigin/hls/tok999/movie.mp4/index-f2-v1.m3u8
+                    """.trimIndent()
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
+                }
+
+                req.path.startsWith("/hls/tok999/movie.mp4/index-") ->
+                    MiniResponse(200, "application/vnd.apple.mpegurl", "#EXTM3U\n#EXTINF:4.0,\nseg0.ts")
+
+                req.path == "/pd/tok999/movie.mp4" ->
+                    MiniResponse(206, "video/mp4", "FAKE_MP4_HEADER_BYTES")
+
+                else -> MiniResponse(404, "application/json", """{"status":404}""")
+            }
+        }.use { server ->
+            TimeMoviesPrefs.apiBaseUrlOverride = "${server.baseOrigin}/api/v4.7/app/"
+            TimeMoviesPrefs.forceUnlimitedInMockTests = true
+            // Point unlimited cloud override to non-matching endpoint so only native + cache is tested here
+            TimeMoviesPrefs.unlimitedCloudApiOverride = "${server.baseOrigin}/empty_cloud"
+
+            val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+            val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256"}""".toByteArray())
+            val bodyJwt = JSONObject().put("_id", "u_cache").put("e", "mehdi@gmail.com").put("d", dev.deviceId).put("ia", true).toString()
+            TimeMoviesPrefs.authToken = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(bodyJwt.toByteArray())}.sig"
+
+            val payload = TimeMoviesModels.LinkPayload(
+                workId = "wk_cached_1",
+                fileCode = "fc_cached_1",
+                isMovie = true,
+                title = "Inception",
+                year = 2010,
+            )
+
+            // 1st open: must burn ONLY 1 grant (`watch`) — NOT 2 — and derive Kaltura `/pd/` MP4 at 0 extra quota!
+            val firstLinks = ArrayList<ExtractorLink>()
+            val ok1 = TimeMoviesExtractors.extractAllLinks(payload, {}, { firstLinks.add(it) })
+            assertTrue(ok1)
+            assertEquals("Single-grant conservation must issue only 1 media/grant call", 1, grantCalls.get())
+            assertTrue(firstLinks.any { it.type == ExtractorLinkType.M3U8 && it.name.contains("1080p") })
+            assertTrue("Must derive zero-quota Kaltura /pd/ progressive MP4", firstLinks.any { it.type == ExtractorLinkType.VIDEO && it.url.endsWith("/pd/tok999/movie.mp4") })
+
+            // Now exhaust quota on the server and replay — must hit `TimeMoviesGrantCache` at 0 network grants!
+            forceExhausted.set(true)
+            val replayLinks = ArrayList<ExtractorLink>()
+            val ok2 = TimeMoviesExtractors.extractAllLinks(payload, {}, { replayLinks.add(it) })
+            assertTrue("Cached stream must succeed even when account is quota_exhausted", ok2)
+            assertEquals("Replay from GrantCache must burn 0 additional grants", 1, grantCalls.get())
+            assertTrue(replayLinks.any { it.type == ExtractorLinkType.M3U8 && it.name.contains("1080p") })
+            assertTrue(replayLinks.any { it.type == ExtractorLinkType.VIDEO && it.url.endsWith("/pd/tok999/movie.mp4") })
+            assertEquals(null, TimeMoviesApi.lastMediaRefusalReason)
+        }
+    }
+
+    @Test
+    fun testAutoVaultArchivingAcrossSignOutRotationAndGmailAliasGenerator() {
+        val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256"}""".toByteArray())
+        val dev1 = TimeMoviesPrefs.getOrCreateVirtualDevice()
+        val jwt1 = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(JSONObject().put("_id", "u_v1").put("e", "mehdigm@gmail.com").put("d", dev1.deviceId).put("ia", true).toString().toByteArray())}.s1"
+        TimeMoviesPrefs.authToken = jwt1
+        TimeMoviesPrefs.userEmail = "mehdigm@gmail.com"
+        assertTrue(TimeMoviesPool.autoArchiveCurrentPersonalSession())
+        assertEquals(1, TimeMoviesPool.countConfiguredSlots(false))
+
+        // Generate fresh Gmail alias delivering to the exact same Gmail inbox
+        val alias1 = TimeMoviesPool.generateNextGmailAlias()
+        assertNotNull(alias1)
+        assertNotEquals("mehdigm@gmail.com", alias1)
+        assertEquals("mehdigm", alias1!!.substringBefore('@').substringBefore('+').replace(".", ""))
+        assertFalse("Must never contain adjacent dots", alias1.contains(".."))
+
+        // Rotate virtual device (simulating creating Account #2) — Account #1 must stay archived!
+        val dev2 = TimeMoviesPrefs.rotateVirtualDeviceIdentity()
+        assertNotEquals(dev1.deviceId, dev2.deviceId)
+        assertEquals("Account #1 must remain in Local Vault after device rotation", 1, TimeMoviesPool.countConfiguredSlots(false))
+
+        val jwt2 = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(JSONObject().put("_id", "u_v2").put("e", alias1).put("d", dev2.deviceId).put("ia", true).toString().toByteArray())}.s2"
+        TimeMoviesPrefs.authToken = jwt2
+        TimeMoviesPrefs.userEmail = alias1
+
+        // Sign out — Account #2 must also be auto-archived into Local Vault (total = 2)!
+        TimeMoviesPrefs.signOut()
+        assertFalse(TimeMoviesPrefs.isSignedIn)
+        assertEquals("Both activated accounts must survive signOut in Local Vault", 2, TimeMoviesPool.countConfiguredSlots(false))
+
+        // Per-action quota tracking: exhausting `watch` on slot 1 must NOT block `download` on slot 1!
+        val slots = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false)
+        val slot0 = slots[0]
+        TimeMoviesPool.markSlotQuotaExhausted(slot0.slotId, action = "watch")
+        val updated0 = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false).first { it.slotId == slot0.slotId }
+        val now = System.currentTimeMillis()
+        assertFalse(updated0.isMediaQuotaHealthy(now, "watch"))
+        assertTrue("Download quota must remain healthy when only watch quota exhausted", updated0.isMediaQuotaHealthy(now, "download"))
+    }
+
+    @Test
+    fun testPermanentQuotaExhaustedBypassViaEncryptedUnlimitedEngine() = runBlocking {
+        MiniHttpServer { req ->
+            val hostOrigin = "http://${req.header("host")}"
+            when {
+                req.path.endsWith("/9a3b7c1d4e6f8024a5c1d8e9f0b23456") ->
+                    MiniResponse(200, "application/json", """{"status":200,"result":{"key_id":"dk_q0"}}""")
+
+                req.path.endsWith("/546635c490224ed1a74961d8e06198d1") ->
+                    MiniResponse(200, "application/json", """{"status":200,"result":{"ausp":{"_id":"p_q0","n":"Mehdi","mr":5}}}""")
+
+                req.path.endsWith("/media/grant") ->
+                    MiniResponse(
+                        200,
+                        "application/json",
+                        """{"status":200,"result":{"ok":false,"reason":"quota_exhausted","charged":false}}""",
+                    )
+
+                req.path == "/v1.3/api/search" -> {
+                    val cfId = req.header("cloudflare-id").orEmpty()
+                    assertTrue("Must attach firebase_id RSA+GCM token", !req.header("firebase_id").isNullOrBlank())
+                    val plain = """{"results":[{"id":501,"type":"movie","name":"Gladiator II","arabic_title":"المجالد 2","year":"2024"}]}"""
+                    MiniResponse(200, "application/json", TimeMoviesUnlimitedEngine.encryptCloudDayPayloadForTest(plain, cfId, rawCipherOnly = false))
+                }
+
+                req.path == "/v1.3/api/movie/501/servers" -> {
+                    val cfId = req.header("cloudflare-id").orEmpty()
+                    val plain = """{"servers":[{"name":"VidTube","link":"$hostOrigin/embed/vidtube501"},{"name":"Mp4Direct","link":"$hostOrigin/cdn/gladiator2_1080p.mp4"}]}"""
+                    MiniResponse(200, "text/plain", TimeMoviesUnlimitedEngine.encryptCloudDayPayloadForTest(plain, cfId, rawCipherOnly = true))
+                }
+
+                req.path.startsWith("/extractor.php") -> {
+                    val json = """
+                        {
+                          "links": [
+                            {"url": "$hostOrigin/unlimited_hls/master.m3u8", "quality": "auto", "type": "hls"},
+                            {"url": "$hostOrigin/cdn/gladiator2_720p.mp4", "quality": "720p", "type": "mp4"}
+                          ],
+                          "subtitles": [
+                            {"url": "$hostOrigin/subs/gladiator2_ar.vtt", "label": "Arabic"}
+                          ]
+                        }
+                    """.trimIndent()
+                    MiniResponse(200, "application/json", json)
+                }
+
+                req.path == "/unlimited_hls/master.m3u8" -> {
+                    val m3u8 = """
+                        #EXTM3U
+                        #EXT-X-STREAM-INF:BANDWIDTH=4200000,RESOLUTION=1920x1080
+                        $hostOrigin/unlimited_hls/v1080.m3u8
+                        #EXT-X-STREAM-INF:BANDWIDTH=2100000,RESOLUTION=1280x720
+                        $hostOrigin/unlimited_hls/v720.m3u8
+                    """.trimIndent()
+                    MiniResponse(200, "application/vnd.apple.mpegurl", m3u8)
+                }
+
+                else -> MiniResponse(404, "application/json", """{"status":404}""")
+            }
+        }.use { server ->
+            TimeMoviesPrefs.apiBaseUrlOverride = "${server.baseOrigin}/api/v4.7/app/"
+            TimeMoviesPrefs.unlimitedCloudApiOverride = "${server.baseOrigin}/v1.3/api"
+            TimeMoviesPrefs.unlimitedExtractorOverride = "${server.baseOrigin}/extractor.php"
+
+            val dev = TimeMoviesPrefs.getOrCreateVirtualDevice()
+            val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256"}""".toByteArray())
+            val bodyJwt = JSONObject().put("_id", "u_exhausted").put("e", "zero@gmail.com").put("d", dev.deviceId).put("fq", 0).put("dcr", 0).put("ia", true).toString()
+            TimeMoviesPrefs.authToken = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(bodyJwt.toByteArray())}.sig"
+
+            val dataJson = TimeMoviesModels.LinkPayload(
+                workId = "wk_glad2",
+                fileCode = "fc_glad2",
+                isMovie = true,
+                title = "Gladiator II",
+                titleAr = "المجالد 2",
+                year = 2024,
+            ).toJson()
+
+            val links = Collections.synchronizedList(ArrayList<ExtractorLink>())
+            val subs = Collections.synchronizedList(ArrayList<SubtitleFile>())
+            val ok = TimeMovies().loadLinks(
+                data = dataJson,
+                isCasting = false,
+                subtitleCallback = { subs.add(it) },
+                callback = { links.add(it) },
+            )
+
+            assertTrue("loadLinks must succeed permanently even when TimeMovies returns quota_exhausted", ok)
+            assertEquals("Refusal reason must be cleared when Unlimited links succeed", null, TimeMoviesApi.lastMediaRefusalReason)
+            assertTrue("Must emit 1080p HLS Watch link", links.any { it.type == ExtractorLinkType.M3U8 && it.quality == 1080 })
+            assertTrue("Must emit 720p HLS Watch link", links.any { it.type == ExtractorLinkType.M3U8 && it.quality == 720 })
+            assertTrue("Must emit 1080p Direct MP4 Download link", links.any { it.type == ExtractorLinkType.VIDEO && it.quality == 1080 })
+            assertTrue("Must emit 720p Direct MP4 Download link", links.any { it.type == ExtractorLinkType.VIDEO && it.quality == 720 })
+            assertTrue("Must emit Arabic subtitle track", subs.any { it.url.endsWith("/subs/gladiator2_ar.vtt") })
+        }
+    }
+
+    @Test(timeout = 90_000L)
+    fun testLiveUnlimitedEngineMovieAndAnimeZeroQuotaWatchAndDownloadWhenOnline() = runBlocking {
+        // Check online connectivity via CimaCloud dynamic worker first
+        val online = runCatching {
+            val req = okhttp3.Request.Builder()
+                .url("https://config-backup2.animegateshorts.workers.dev/")
+                .get()
+                .build()
+            TimeMoviesApi.plainClient.newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+        if (!online) return@runBlocking
+
+        // 1. Live Movie test (`Venom: The Last Dance` 2024) with ZERO TimeMovies accounts/credits
+        val moviePayload = TimeMoviesModels.LinkPayload(
+            workId = "live_wk_venom3",
+            fileCode = "",
+            isMovie = true,
+            title = "Venom: The Last Dance",
+            year = 2024,
+            isAnime = false,
+        )
+        val movieLinks = Collections.synchronizedList(ArrayList<ExtractorLink>())
+        val movieSubs = Collections.synchronizedList(ArrayList<SubtitleFile>())
+        val movieCount = TimeMoviesUnlimitedEngine.extractUnlimitedLinks(
+            payload = moviePayload,
+            subtitleCallback = { movieSubs.add(it) },
+            callback = { movieLinks.add(it) },
+        )
+        println("LIVE_UNLIMITED_MOVIE links=$movieCount hls=${movieLinks.count { it.type == ExtractorLinkType.M3U8 }} mp4=${movieLinks.count { it.type == ExtractorLinkType.VIDEO }} subs=${movieSubs.size}")
+        assertTrue("Live Unlimited Movie must return playable Watch/Download links (got $movieCount)", movieCount > 0)
+        assertTrue(
+            "Live Unlimited Movie must include at least one HLS stream or Direct MP4 download",
+            movieLinks.any { it.type == ExtractorLinkType.M3U8 || it.type == ExtractorLinkType.VIDEO },
+        )
+
+        // 2. Live Anime Series Episode test (`Solo Leveling` S01E01) via AnimeDay v3.8 + CimaCloud v1.3
+        val animePayload = TimeMoviesModels.LinkPayload(
+            workId = "live_wk_solo",
+            fileCode = "",
+            isMovie = false,
+            title = "Solo Leveling",
+            seasonNum = 1,
+            episodeNum = 1,
+            year = 2024,
+            isAnime = true,
+        )
+        val animeLinks = Collections.synchronizedList(ArrayList<ExtractorLink>())
+        val animeCount = TimeMoviesUnlimitedEngine.extractUnlimitedLinks(
+            payload = animePayload,
+            subtitleCallback = {},
+            callback = { animeLinks.add(it) },
+        )
+        println("LIVE_UNLIMITED_ANIME links=$animeCount hls=${animeLinks.count { it.type == ExtractorLinkType.M3U8 }} mp4=${animeLinks.count { it.type == ExtractorLinkType.VIDEO }}")
+        assertTrue("Live Unlimited Anime S01E01 must return playable Watch/Download links (got $animeCount)", animeCount > 0)
     }
 }

@@ -130,7 +130,7 @@ class TimeMoviesPlugin : Plugin() {
         }
 
         val headerTitle = TextView(ctx).apply {
-            text = "🎬 إعدادات TimeMovies (v3)"
+            text = "🎬 إعدادات TimeMovies (v5 — Unlimited)"
             setTextColor(Color.WHITE)
             textSize = 18.5f
             typeface = Typeface.DEFAULT_BOLD
@@ -138,7 +138,7 @@ class TimeMoviesPlugin : Plugin() {
         root.addView(headerTitle)
 
         val subHeader = TextView(ctx).apply {
-            text = "التشغيل التلقائي المدمج (Pool)، إدارة الحساب الشخصي/VIP، وتجاوز حظر الأجهزة"
+            text = "تخطي انتهاء الرصيد نهائياً (مشاهدة وتحميل Unlimited)، مخزن الحسابات الذكي، وتجاوز حظر الأجهزة"
             setTextColor(Color.parseColor("#9AA0B4"))
             textSize = 12.5f
             setPadding(0, dp(ctx, 4), 0, dp(ctx, 14))
@@ -146,7 +146,7 @@ class TimeMoviesPlugin : Plugin() {
         root.addView(subHeader)
 
         val poolCount = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
-        val hasActiveAccess = TimeMoviesPrefs.isSignedIn || poolCount > 0
+        val hasActiveAccess = TimeMoviesPrefs.isSignedIn || poolCount > 0 || TimeMoviesPrefs.unlimitedBypassEnabled
 
         val statusCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -161,8 +161,11 @@ class TimeMoviesPlugin : Plugin() {
 
         val statusBadge = TextView(ctx).apply {
             text = when {
+                TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.unlimitedBypassEnabled ->
+                    "✅ متصل بحسابك الشخصي + وضع المشاهدة والتحميل بلا حدود ♾️"
                 TimeMoviesPrefs.isSignedIn -> "✅ متصل بحسابك الشخصي في TimeMovies"
-                poolCount > 0 -> "✅ التشغيل التلقائي مفعّل ($poolCount حساب مدمج نشط)"
+                poolCount > 0 -> "✅ التشغيل التلقائي مفعّل ($poolCount حساب محفوظ + وضع بلا حدود ♾️)"
+                TimeMoviesPrefs.unlimitedBypassEnabled -> "♾️ وضع المشاهدة والتحميل بلا حدود مفعّل"
                 else -> "⚠️ لم يتم تسجيل الدخول بعد"
             }
             setTextColor(
@@ -185,9 +188,9 @@ class TimeMoviesPlugin : Plugin() {
         if (!TimeMoviesPrefs.isSignedIn) {
             val hintText = TextView(ctx).apply {
                 text = if (poolCount > 0) {
-                    "الإضافة تعمل تلقائياً عبر الحسابات المدمجة (مع تبديل تلقائي عند انتهاء الحصة اليومية). يمكنك اختيارياً تسجيل الدخول بحسابك الشخصي أو VIP أدناه."
+                    "الإضافة تعمل تلقائياً عبر الحسابات المحفوظة مع محرك Unlimited اللانهائي لتخطي انتهاء الرصيد نهائياً في المشاهدة والتحميل."
                 } else {
-                    "يتطلب خادم TimeMovies الرسمي (v4.7) حساباً مفعّلاً لتصفح المكتبة وتشغيل الروابط. تتضمن الإضافة نظام جهاز افتراضي معزول لتجاوز حظر الأجهزة تلقائياً."
+                    "لتصفح مكتبة TimeMovies الرسمية سجّل الدخول أو أنشئ حساباً مجانياً أدناه — وحتى بعد انتهاء رصيدك اليومي ستستمر المشاهدة والتحميل المباشر بلا حدود ♾️."
                 }
                 setTextColor(Color.parseColor("#9AA0B4"))
                 textSize = 12f
@@ -197,34 +200,59 @@ class TimeMoviesPlugin : Plugin() {
         }
         root.addView(statusCard)
 
-        val langRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = roundedBg(Color.parseColor("#1B1D26"), Color.parseColor("#2D3244"), 12, ctx)
-            setPadding(dp(ctx, 14), dp(ctx, 10), dp(ctx, 14), dp(ctx, 10))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                topMargin = dp(ctx, 14)
+        fun makeSwitchRow(titleText: String, initialChecked: Boolean, onToggle: (Boolean) -> Unit): LinearLayout {
+            return LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = roundedBg(Color.parseColor("#1B1D26"), Color.parseColor("#2D3244"), 12, ctx)
+                setPadding(dp(ctx, 14), dp(ctx, 10), dp(ctx, 14), dp(ctx, 10))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(ctx, 10)
+                }
+                val lbl = TextView(ctx).apply {
+                    text = titleText
+                    setTextColor(Color.WHITE)
+                    textSize = 13.2f
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                val sw = Switch(ctx).apply {
+                    isChecked = initialChecked
+                    setOnCheckedChangeListener { _, checked -> onToggle(checked) }
+                }
+                addView(lbl)
+                addView(sw)
             }
         }
 
-        val langLabel = TextView(ctx).apply {
-            text = "تفضيل العناوين والملصقات العربية عند توفرها"
-            setTextColor(Color.WHITE)
-            textSize = 13.5f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val langSwitch = Switch(ctx).apply {
-            isChecked = TimeMoviesPrefs.preferArabic
-            setOnCheckedChangeListener { _, checked ->
+        root.addView(
+            makeSwitchRow(
+                titleText = "♾️ تخطي انتهاء الرصيد نهائياً (مشاهدة وتحميل بلا حدود Unlimited)",
+                initialChecked = TimeMoviesPrefs.unlimitedBypassEnabled,
+            ) { checked ->
+                TimeMoviesPrefs.unlimitedBypassEnabled = checked
+            }
+        )
+
+        root.addView(
+            makeSwitchRow(
+                titleText = "⚡ دمج تحميل MP4 المباشر والسيرفرات اللانهائية دائماً (توفير رصيد التحميل)",
+                initialChecked = TimeMoviesPrefs.alwaysIncludeUnlimitedServers,
+            ) { checked ->
+                TimeMoviesPrefs.alwaysIncludeUnlimitedServers = checked
+            }
+        )
+
+        root.addView(
+            makeSwitchRow(
+                titleText = "تفضيل العناوين والملصقات العربية عند توفرها",
+                initialChecked = TimeMoviesPrefs.preferArabic,
+            ) { checked ->
                 TimeMoviesPrefs.preferArabic = checked
             }
-        }
-        langRow.addView(langLabel)
-        langRow.addView(langSwitch)
-        root.addView(langRow)
+        )
 
         lateinit var dialog: AlertDialog
 
@@ -326,6 +354,18 @@ class TimeMoviesPlugin : Plugin() {
             root.addView(
                 makeActionButton(
                     ctx = ctx,
+                    label = "➕ مضاعفة الرصيد بحساب إضافي بنفس بريدك Gmail",
+                    bgColor = Color.parseColor("#059669"),
+                ) {
+                    val suggestedAlias = TimeMoviesPool.generateNextGmailAlias()
+                    dialog.dismiss()
+                    showSignUpDialog(ctx, prefilledEmail = suggestedAlias, isAliasMultiplier = true)
+                }
+            )
+
+            root.addView(
+                makeActionButton(
+                    ctx = ctx,
                     label = "🔄 مزامنة الجلسة ومفتاح التشفير (ECDSA P-256)",
                     bgColor = Color.parseColor("#374151"),
                 ) {
@@ -336,6 +376,7 @@ class TimeMoviesPlugin : Plugin() {
                         val tk = TimeMoviesPrefs.authToken.orEmpty()
                         TimeMoviesApi.ensureDeviceKeyEnrolled(tk)
                         val prof = TimeMoviesApi.syncAppDataAndSelectMainProfile()
+                        TimeMoviesPool.autoArchiveCurrentPersonalSession()
                         runOnUi(ctx) {
                             toast(
                                 ctx,
@@ -356,7 +397,7 @@ class TimeMoviesPlugin : Plugin() {
                     bgColor = Color.parseColor("#DC2626"),
                 ) {
                     TimeMoviesPrefs.signOut()
-                    toast(ctx, "تم تسجيل الخروج من الحساب الشخصي")
+                    toast(ctx, "تم تسجيل الخروج من الواجهة (مع حفظ الحساب في مخزن التبديل اللانهائي)")
                     dialog.dismiss()
                 }
             )
@@ -365,7 +406,7 @@ class TimeMoviesPlugin : Plugin() {
         root.addView(
             makeActionButton(
                 ctx = ctx,
-                label = "⚡ إدارة / مزامنة الحسابات التلقائية المدمجة (Pool)",
+                label = "⚡ إدارة مخزن الحسابات والذاكرة الذكية (Vault / Pool)",
                 bgColor = Color.parseColor("#1E293B"),
             ) {
                 dialog.dismiss()
@@ -405,8 +446,10 @@ class TimeMoviesPlugin : Plugin() {
         }
 
         val countNow = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
+        val cachedNow = TimeMoviesGrantCache.countCachedItems()
         val infoView = TextView(ctx).apply {
-            text = "عدد الحسابات التلقائية المتاحة حالياً: $countNow\n" +
+            text = "عدد الحسابات المحفوظة في المخزن حالياً: $countNow\n" +
+                "عدد الروابط المحفوظة بدون خصم رصيد (10 ساعات): $cachedNow\n" +
                 "يمكنك مزامنة الحزم المنشورة في المستودع أو لصق أسطر tm3pool:v1:... إضافية أدناه:"
             textSize = 13f
             setPadding(0, 0, 0, dp(ctx, 8))
@@ -421,9 +464,9 @@ class TimeMoviesPlugin : Plugin() {
         container.addView(bundleInput)
 
         AlertDialog.Builder(ctx)
-            .setTitle("⚡ الحسابات التلقائية المدمجة (Pool)")
+            .setTitle("⚡ مخزن الحسابات والروابط الذكي (Vault / Pool)")
             .setView(container)
-            .setPositiveButton("🔄 مزامنة من المستودع") { _, _ ->
+            .setPositiveButton("🔄 مزامنة وتصفير المؤقت") { _, _ ->
                 toast(ctx, "جاري جلب أحدث حسابات Pool وتصفير مؤقت الحصة...")
                 ioExecutor.execute {
                     val raw = bundleInput.text?.toString()?.trim().orEmpty()
@@ -441,7 +484,8 @@ class TimeMoviesPlugin : Plugin() {
             .setNeutralButton("➕ حفظ السطر الملصوق") { _, _ ->
                 val raw = bundleInput.text?.toString()?.trim().orEmpty()
                 if (raw.isBlank()) {
-                    toast(ctx, "الرجاء لصق سطر يبدأ بـ tm3pool:v1:...")
+                    TimeMoviesGrantCache.clearAll()
+                    toast(ctx, "🗑️ تم مسح الذاكرة المؤقتة للروابط المحفوظة بنجاح")
                     return@setNeutralButton
                 }
                 val added = TimeMoviesPool.addLocalPoolBundles(raw)
@@ -504,7 +548,11 @@ class TimeMoviesPlugin : Plugin() {
             .show()
     }
 
-    private fun showSignUpDialog(ctx: Context) {
+    private fun showSignUpDialog(
+        ctx: Context,
+        prefilledEmail: String? = null,
+        isAliasMultiplier: Boolean = false,
+    ) {
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
@@ -514,23 +562,40 @@ class TimeMoviesPlugin : Plugin() {
         val nameInput = EditText(ctx).apply {
             hint = "الاسم (مثال: Mehdi)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+            if (isAliasMultiplier) setText("Mehdi")
         }
         val emailInput = EditText(ctx).apply {
             hint = "بريد إلكتروني حقيقي لاستلام رمز التفعيل (Gmail...)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            if (!prefilledEmail.isNullOrBlank()) setText(prefilledEmail)
         }
         val passInput = EditText(ctx).apply {
             hint = "كلمة المرور (8 أحرف أو أكثر)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            if (isAliasMultiplier) {
+                val rnd = (1000..9999).random()
+                setText("MehdiTm#$rnd")
+            }
         }
 
         container.addView(nameInput)
         container.addView(emailInput)
         container.addView(passInput)
 
+        val dialogTitle = if (isAliasMultiplier) {
+            "➕ مضاعفة الرصيد بحساب Gmail إضافي"
+        } else {
+            "إنشاء حساب مجاني — TimeMovies"
+        }
+        val dialogMessage = if (isAliasMultiplier) {
+            "تم حفظ حسابك الحالي في مخزن التبديل التلقائي وتوليد صيغة Gmail بديلة تصل رسائل OTP الخاصة بها إلى نفس بريدك مباشرة:"
+        } else {
+            "سيتم توليد هوية جهاز افتراضية جديدة تلقائياً وإرسال رمز تفعيل (OTP) إلى بريدك الإلكتروني:"
+        }
+
         AlertDialog.Builder(ctx)
-            .setTitle("إنشاء حساب مجاني — TimeMovies")
-            .setMessage("سيتم توليد هوية جهاز افتراضية جديدة تلقائياً وإرسال رمز تفعيل (OTP) إلى بريدك الإلكتروني:")
+            .setTitle(dialogTitle)
+            .setMessage(dialogMessage)
             .setView(container)
             .setPositiveButton("إرسال الرمز") { _, _ ->
                 val name = nameInput.text?.toString()?.trim().orEmpty().ifEmpty { "Mehdi" }
@@ -545,7 +610,7 @@ class TimeMoviesPlugin : Plugin() {
                     val res = TimeMoviesApi.signUpWithEmail(name, email, pass)
                     runOnUi(ctx) {
                         if (res.success && TimeMoviesPrefs.isSignedIn) {
-                            toast(ctx, "🎉 تم إنشاء وتفعيل الحساب بنجاح!")
+                            toast(ctx, "🎉 تم إنشاء وتفعيل الحساب وإضافته لمخزن التبديل التلقائي!")
                         } else if (res.success) {
                             showOtpActivationDialog(ctx, email)
                         } else {

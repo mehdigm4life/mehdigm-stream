@@ -39,6 +39,11 @@ object TimeMoviesPrefs {
     private const val KEY_LOCAL_POOL_BUNDLES = "local_pool_bundles_raw"
     private const val KEY_POOL_RUNTIME_STATE = "pool_runtime_state_json"
 
+    // v5 Unlimited Watch & Download + Persistent Grant Cache keys
+    private const val KEY_UNLIMITED_BYPASS_ENABLED = "unlimited_bypass_enabled"
+    private const val KEY_ALWAYS_INCLUDE_UNLIMITED = "always_include_unlimited_servers"
+    private const val KEY_MEDIA_GRANT_CACHE_JSON = "media_grant_cache_v5_json"
+
     private val SYNC_COMMIT_KEYS = setOf(
         KEY_AUTH_TOKEN,
         KEY_PENDING_OTP_TOKEN,
@@ -418,6 +423,15 @@ object TimeMoviesPrefs {
     @Volatile
     internal var remotePoolUrlsOverride: List<String>? = null
 
+    @Volatile
+    internal var unlimitedCloudApiOverride: String? = null
+
+    @Volatile
+    internal var unlimitedExtractorOverride: String? = null
+
+    @Volatile
+    internal var forceUnlimitedInMockTests: Boolean = false
+
     fun init(context: Context) {
         unitTestIsolatedMode = false
         appContext = context.applicationContext ?: resolveHostApplicationContext() ?: context
@@ -540,9 +554,13 @@ object TimeMoviesPrefs {
      * Rotates the virtual retail handset identity, generates a brand-new canonical P-256 ECDSA keypair,
      * and clears any previous personal session/device-key bindings so a fresh account cannot be linked
      * to any prior device or banned hardware fingerprint.
+     *
+     * v5: Automatically archives any currently activated personal session into the Local Pool Vault
+     * before rotating so previously registered accounts are never lost and continue rotating automatically.
      */
     @Synchronized
     fun rotateVirtualDeviceIdentity(): VirtualDeviceProfile {
+        runCatching { TimeMoviesPool.autoArchiveCurrentPersonalSession() }
         val currentModel = getString(KEY_VIRTUAL_DEVICE_JSON)
             ?.let { VirtualDeviceProfile.fromStorageJson(it)?.model }
         val fresh = buildSyntheticDevice(excludeModel = currentModel)
@@ -587,6 +605,18 @@ object TimeMoviesPrefs {
     var preferArabic: Boolean
         get() = getString(KEY_PREFER_ARABIC)?.toBooleanStrictOrNull() ?: true
         set(value) = putString(KEY_PREFER_ARABIC, value.toString())
+
+    var unlimitedBypassEnabled: Boolean
+        get() = getString(KEY_UNLIMITED_BYPASS_ENABLED)?.toBooleanStrictOrNull() ?: true
+        set(value) = putString(KEY_UNLIMITED_BYPASS_ENABLED, value.toString())
+
+    var alwaysIncludeUnlimitedServers: Boolean
+        get() = getString(KEY_ALWAYS_INCLUDE_UNLIMITED)?.toBooleanStrictOrNull() ?: true
+        set(value) = putString(KEY_ALWAYS_INCLUDE_UNLIMITED, value.toString())
+
+    var mediaGrantCacheJson: String?
+        get() = getString(KEY_MEDIA_GRANT_CACHE_JSON)
+        set(value) = putString(KEY_MEDIA_GRANT_CACHE_JSON, value)
 
     val isSignedIn: Boolean
         get() = !authToken.isNullOrBlank()
@@ -709,7 +739,10 @@ object TimeMoviesPrefs {
     }
 
     @Synchronized
-    fun signOut() {
+    fun signOut(archiveToLocalVault: Boolean = true) {
+        if (archiveToLocalVault) {
+            runCatching { TimeMoviesPool.autoArchiveCurrentPersonalSession() }
+        }
         authToken = null
         pendingOtpToken = null
         pendingOtpEmail = null
@@ -729,6 +762,10 @@ object TimeMoviesPrefs {
         mediaV2BaseUrlOverride = null
         doomBaseUrlOverride = null
         remotePoolUrlsOverride = null
+        unlimitedCloudApiOverride = null
+        unlimitedExtractorOverride = null
+        forceUnlimitedInMockTests = false
+        TimeMoviesGrantCache.clearAll()
     }
 
     // ---- JWT Claim Inspection Helper (`AU` Claims) ----
@@ -757,10 +794,20 @@ object TimeMoviesPrefs {
     fun getAccountSummaryAr(): String {
         val tk = authToken
         val poolCount = TimeMoviesPool.countConfiguredSlots(allowNetworkFetch = false)
-        val poolSuffix = if (poolCount > 0) {
-            "\nمخزن الحسابات التلقائي (Pool): $poolCount حساب نشط للتبديل التلقائي"
+        val cachedCount = TimeMoviesGrantCache.countCachedItems()
+        val unlimitedBadge = if (unlimitedBypassEnabled) {
+            "\n♾️ الوضع اللانهائي (Unlimited): مفعّل — تخطي انتهاء الرصيد تلقائياً للمشاهدة والتحميل"
         } else {
-            ""
+            "\n⚠️ الوضع اللانهائي: متوقف"
+        }
+        val poolSuffix = buildString {
+            if (poolCount > 0) {
+                append("\nمخزن الحسابات المحفوظة (Vault/Pool): $poolCount حساب نشط للتبديل التلقائي")
+            }
+            if (cachedCount > 0) {
+                append("\nالروابط المحفوظة بدون خصم رصيد: $cachedCount عمل/حلقة")
+            }
+            append(unlimitedBadge)
         }
 
         if (tk.isNullOrBlank()) {
@@ -768,9 +815,9 @@ object TimeMoviesPrefs {
             return if (!pendingMail.isNullOrBlank() && !pendingOtpToken.isNullOrBlank()) {
                 "حساب شخصي بانتظار التفعيل (OTP): $pendingMail\nالجهاز الافتراضي: $virtualDeviceLabel$poolSuffix"
             } else if (poolCount > 0) {
-                "وضع التشغيل التلقائي المفعّل (Pool: $poolCount حساب جاهز بدون تسجيل دخول)\nالجهاز الافتراضي الشخصي: $virtualDeviceLabel"
+                "وضع التشغيل التلقائي المفعّل (Pool: $poolCount حساب جاهز بدون تسجيل دخول)\nالجهاز الافتراضي الشخصي: $virtualDeviceLabel$poolSuffix"
             } else {
-                "غير مسجل الدخول\nالجهاز الافتراضي: $virtualDeviceLabel"
+                "غير مسجل الدخول\nالجهاز الافتراضي: $virtualDeviceLabel$poolSuffix"
             }
         }
         val claims = decodeJwtClaims(tk)
@@ -780,10 +827,10 @@ object TimeMoviesPrefs {
         val isVip = claims?.optBoolean("iv", false) == true
         val fq = claims?.optInt("fq", -1) ?: -1
         val dcr = claims?.optInt("dcr", -1) ?: -1
-        val planBadge = if (isVip) "VIP ⭐" else "مجاني"
+        val planBadge = if (isVip) "VIP ⭐" else if (unlimitedBypassEnabled) "Unlimited ♾️" else "مجاني"
         val quotaInfo = buildList {
-            if (!isVip && fq >= 0) add("مشاهدة: $fq")
-            if (!isVip && dcr >= 0) add("تحميل: $dcr")
+            if (!isVip && fq >= 0) add("مشاهدة أصلية: $fq")
+            if (!isVip && dcr >= 0) add("تحميل أصلي: $dcr")
         }.joinToString(" | ")
         val prof = profileName?.takeIf { it.isNotBlank() }?.let { " — الملف: $it" }.orEmpty()
         val line1 = if (quotaInfo.isNotEmpty()) "$email ($planBadge — $quotaInfo)$prof" else "$email ($planBadge)$prof"

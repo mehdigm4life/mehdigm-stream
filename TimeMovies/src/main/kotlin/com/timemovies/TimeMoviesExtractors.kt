@@ -262,12 +262,17 @@ object TimeMoviesExtractors {
         val variants: List<HlsVariantStream>,
     )
 
+    @Volatile
+    private var activeCachePayload: LinkPayload? = null
+
+    @Volatile
+    private var lastWatchGrantUncharged: Boolean = false
+
     suspend fun extractAllLinks(
         payload: LinkPayload,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        if (!TimeMoviesApi.hasUsableAuth()) return false
         if (TimeMoviesPrefs.isSignedIn && TimeMoviesPrefs.profileId.isNullOrBlank()) {
             TimeMoviesApi.syncAppDataAndSelectMainProfile()
         }
@@ -276,39 +281,129 @@ object TimeMoviesExtractors {
         val emittedUrls = Collections.synchronizedSet( LinkedHashSet<String>() )
         val emittedSubs = Collections.synchronizedSet( LinkedHashSet<String>() )
         var foundAny = false
+        var hasDirectDownloadLink = false
 
         val dedupCallback: (ExtractorLink) -> Unit = { link ->
             val key = "${link.type}:${link.url}"
             if (emittedUrls.add(key)) {
                 foundAny = true
+                if (link.type == ExtractorLinkType.VIDEO) {
+                    hasDirectDownloadLink = true
+                }
                 callback(link)
             }
         }
         val dedupSubCallback: (SubtitleFile) -> Unit = { sub ->
             if (emittedSubs.add(sub.url)) {
+                activeCachePayload?.let { cacheTarget ->
+                    TimeMoviesGrantCache.putResolved(
+                        payload = cacheTarget,
+                        subtitles = listOf(TimeMoviesGrantCache.CachedSubtitle(sub.lang, sub.url)),
+                    )
+                }
                 subtitleCallback(sub)
             }
         }
 
-        // 1. Watch stream links (Internal Origin -> External DoomVideoPlayer fallback)
-        val watchOk = extractForAction(
-            action = "watch",
-            payload = payload,
-            subtitleCallback = dedupSubCallback,
-            callback = dedupCallback,
-        )
-        if (watchOk) foundAny = true
+        val unlimitedActive = TimeMoviesUnlimitedEngine.isRuntimeActive()
 
-        // 2. Multi-quality progressive MP4/MKV download links (Internal Origin -> External DoomVideoPlayer fallback)
-        val downloadOk = extractForAction(
-            action = "download",
-            payload = payload,
-            subtitleCallback = dedupSubCallback,
-            callback = dedupCallback,
-        )
-        if (downloadOk) foundAny = true
+        // 0. Persistent Zero-Quota Grant Cache Check (0 credits on replay / resume / quality switch / download!)
+        val cachedEntry = TimeMoviesGrantCache.getValidEntry(payload)
+        var nativeWatchOk = false
+        if (cachedEntry != null) {
+            if (emitCachedMediaEntry(cachedEntry, dedupSubCallback, dedupCallback)) {
+                nativeWatchOk = true
+            }
+        }
+
+        // 1. Native TimeMovies / DoomPlayer extraction (only when not already cached & credentials + fileCode exist)
+        val canAttemptNative = payload.fileCode.isNotBlank() && TimeMoviesApi.hasUsableAuth()
+        if (!nativeWatchOk && canAttemptNative) {
+            activeCachePayload = payload
+            lastWatchGrantUncharged = false
+            try {
+                nativeWatchOk = extractForAction(
+                    action = "watch",
+                    payload = payload,
+                    subtitleCallback = dedupSubCallback,
+                    callback = dedupCallback,
+                )
+
+                val isPersonalVip = TimeMoviesPrefs.decodeJwtClaims()?.optBoolean("iv", false) == true
+                val shouldRequestNativeDownload = !unlimitedActive ||
+                    !TimeMoviesPrefs.alwaysIncludeUnlimitedServers ||
+                    isPersonalVip ||
+                    lastWatchGrantUncharged
+
+                if (shouldRequestNativeDownload) {
+                    extractForAction(
+                        action = "download",
+                        payload = payload,
+                        subtitleCallback = dedupSubCallback,
+                        callback = dedupCallback,
+                    )
+                }
+            } finally {
+                activeCachePayload = null
+            }
+        }
+
+        // 2. Permanent Zero-Quota Unlimited Watch & Direct-MP4 Download Engine (`TimeMoviesUnlimitedEngine`):
+        //    - Runs automatically whenever native watch/download hit `quota_exhausted` / `insufficient_quota`,
+        //      user has no account, or `fileCode` was omitted (`!foundAny`).
+        //    - Also runs alongside single-grant `watch` when `alwaysIncludeUnlimitedServers` is enabled so every
+        //      title has direct progressive `.mp4` multi-quality downloads (`1080p`..`360p`) at 0 extra credits!
+        if (unlimitedActive && (!foundAny || !hasDirectDownloadLink || TimeMoviesPrefs.alwaysIncludeUnlimitedServers)) {
+            TimeMoviesUnlimitedEngine.extractUnlimitedLinks(
+                payload = payload,
+                subtitleCallback = dedupSubCallback,
+                callback = dedupCallback,
+            )
+        }
+
+        if (foundAny) {
+            TimeMoviesApi.lastMediaRefusalReason = null
+        }
 
         return foundAny
+    }
+
+    private suspend fun emitCachedMediaEntry(
+        entry: TimeMoviesGrantCache.CachedMediaEntry,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        var emitted = false
+        for (sub in entry.subtitles) {
+            subtitleCallback(newSubtitleFile(lang = sub.lang, url = sub.url))
+        }
+        val m3u8 = entry.absolutizedMasterM3u8
+        if (!m3u8.isNullOrBlank() && m3u8.contains("#EXTM3U", ignoreCase = true)) {
+            emitAbsolutizedMasterM3u8(
+                absolutized = m3u8,
+                baseOriginUrl = "https://sv505.egy.rocks/hls/cached_master.m3u8",
+                baseLabel = "TimeMovies Stream ⚡",
+                autoLabel = "TimeMovies Stream ⚡ [Auto HLS]",
+                qualityHint = null,
+                subtitleCallback = subtitleCallback,
+                callback = callback,
+            )
+            emitted = true
+        }
+        for (vid in entry.directVideos) {
+            callback(
+                newExtractorLink(
+                    source = vid.label,
+                    name = vid.label,
+                    url = vid.url,
+                    type = ExtractorLinkType.VIDEO,
+                ) {
+                    this.quality = vid.quality
+                }
+            )
+            emitted = true
+        }
+        return emitted
     }
 
     private suspend fun extractForAction(
@@ -331,6 +426,9 @@ object TimeMoviesExtractors {
             executorTarget = null,
             playerInstalled = true,
         )
+        if (action == "watch" && primaryGrant != null && primaryGrant.ok && !primaryGrant.charged) {
+            lastWatchGrantUncharged = true
+        }
         if (primaryGrant != null && primaryGrant.ok) {
             processGrantPayload(
                 action = action,
@@ -766,66 +864,27 @@ object TimeMoviesExtractors {
 
             if (inspected != null && inspected.contains("#EXTM3U", ignoreCase = true)) {
                 val absolutized = absolutizeM3u8Manifest(inspected, cleanUrl)
-                val master = parseMasterManifestDetails(absolutized, cleanUrl)
-
-                // Only pass standalone `.vtt`/`.srt`/`.ass` subtitle files to `subtitleCallback`;
-                // segmented HLS `.m3u8` subtitle playlists (`index-f4-v1.m3u8`) MUST stay inside the
-                // Master M3U8 so Media3 `HlsMediaSource` renders them natively as `EMBEDDED_IN_VIDEO`.
-                for (sub in parseHlsSubtitlesFromMaster(absolutized, cleanUrl)) {
-                    if (isStandaloneSubtitleFileUrl(sub.url)) {
-                        subtitleCallback(
-                            newSubtitleFile(
-                                lang = sub.label,
-                                url = sub.url,
-                            )
-                        )
-                    }
-                }
-
-                val autoPlayableUrl = TimeMoviesLocalHlsServer.registerM3u8(absolutized, slug = "auto") ?: cleanUrl
-                val bestVariantQuality = master.variants
-                    .maxOfOrNull { it.quality }
-                    ?.takeIf { it > Qualities.Unknown.value }
-
-                callback(
-                    newExtractorLink(
-                        source = baseLabel,
-                        name = autoLabel,
-                        url = autoPlayableUrl,
-                        type = ExtractorLinkType.M3U8,
-                    ) {
-                        this.quality = bestVariantQuality
-                            ?: qualityHint
-                            ?: parseQualityNumber(cleanUrl)
-                            ?: Qualities.Unknown.value
-                    }
+                val master = emitAbsolutizedMasterM3u8(
+                    absolutized = absolutized,
+                    baseOriginUrl = cleanUrl,
+                    baseLabel = baseLabel,
+                    autoLabel = autoLabel,
+                    qualityHint = qualityHint,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
                 )
 
-                if (master.isMaster && master.variants.isNotEmpty()) {
-                    val hasSeparateMediaTracks = master.mediaLines.any {
-                        it.type == "AUDIO" || it.type == "SUBTITLES" || it.type == "CLOSED-CAPTIONS"
-                    }
-
-                    for (variant in master.variants) {
-                        if (variant.url == cleanUrl) continue
-                        val variantPlayableUrl = if (hasSeparateMediaTracks) {
-                            val singleMaster = synthesizeSingleVariantMasterM3u8(master, variant)
-                            TimeMoviesLocalHlsServer.registerM3u8(singleMaster, slug = variant.displayLabel) ?: variant.url
-                        } else {
-                            variant.url
-                        }
-                        callback(
-                            newExtractorLink(
-                                source = baseLabel,
-                                name = "$baseLabel [${variant.displayLabel}]",
-                                url = variantPlayableUrl,
-                                type = ExtractorLinkType.M3U8,
-                            ) {
-                                this.quality = variant.quality
-                            }
-                        )
-                    }
+                val probeVariantUrl = master.variants.firstOrNull()?.url
+                activeCachePayload?.let { cacheTarget ->
+                    TimeMoviesGrantCache.putResolved(
+                        payload = cacheTarget,
+                        absolutizedMasterM3u8 = absolutized,
+                        probeUrl = probeVariantUrl ?: cleanUrl,
+                    )
                 }
+
+                // Zero-extra-quota Kaltura `/pd/` progressive `.mp4` probe on `sv*.egy.rocks`
+                tryEmitZeroQuotaKalturaProgressiveMp4(master, baseLabel, callback)
                 return true
             }
 
@@ -849,6 +908,19 @@ object TimeMoviesExtractors {
             ?: parseQualityNumber(cleanUrl)
             ?: Qualities.Unknown.value
 
+        activeCachePayload?.let { cacheTarget ->
+            TimeMoviesGrantCache.putResolved(
+                payload = cacheTarget,
+                directVideos = listOf(
+                    TimeMoviesGrantCache.CachedDirectVideo(
+                        url = cleanUrl,
+                        label = sourceLabel,
+                        quality = resolvedQuality,
+                    )
+                ),
+            )
+        }
+
         callback(
             newExtractorLink(
                 source = sourceLabel,
@@ -860,6 +932,132 @@ object TimeMoviesExtractors {
             }
         )
         return true
+    }
+
+    private suspend fun emitAbsolutizedMasterM3u8(
+        absolutized: String,
+        baseOriginUrl: String,
+        baseLabel: String,
+        autoLabel: String,
+        qualityHint: Int?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): ParsedMasterManifest {
+        val master = parseMasterManifestDetails(absolutized, baseOriginUrl)
+
+        // Only pass standalone `.vtt`/`.srt`/`.ass` subtitle files to `subtitleCallback`;
+        // segmented HLS `.m3u8` subtitle playlists (`index-f4-v1.m3u8`) MUST stay inside the
+        // Master M3U8 so Media3 `HlsMediaSource` renders them natively as `EMBEDDED_IN_VIDEO`.
+        for (sub in parseHlsSubtitlesFromMaster(absolutized, baseOriginUrl)) {
+            if (isStandaloneSubtitleFileUrl(sub.url)) {
+                subtitleCallback(
+                    newSubtitleFile(
+                        lang = sub.label,
+                        url = sub.url,
+                    )
+                )
+            }
+        }
+
+        val autoPlayableUrl = TimeMoviesLocalHlsServer.registerM3u8(absolutized, slug = "auto") ?: baseOriginUrl
+        val bestVariantQuality = master.variants
+            .maxOfOrNull { it.quality }
+            ?.takeIf { it > Qualities.Unknown.value }
+
+        callback(
+            newExtractorLink(
+                source = baseLabel,
+                name = autoLabel,
+                url = autoPlayableUrl,
+                type = ExtractorLinkType.M3U8,
+            ) {
+                this.quality = bestVariantQuality
+                    ?: qualityHint
+                    ?: parseQualityNumber(baseOriginUrl)
+                    ?: Qualities.Unknown.value
+            }
+        )
+
+        if (master.isMaster && master.variants.isNotEmpty()) {
+            val hasSeparateMediaTracks = master.mediaLines.any {
+                it.type == "AUDIO" || it.type == "SUBTITLES" || it.type == "CLOSED-CAPTIONS"
+            }
+
+            for (variant in master.variants) {
+                if (variant.url == baseOriginUrl) continue
+                val variantPlayableUrl = if (hasSeparateMediaTracks) {
+                    val singleMaster = synthesizeSingleVariantMasterM3u8(master, variant)
+                    TimeMoviesLocalHlsServer.registerM3u8(singleMaster, slug = variant.displayLabel) ?: variant.url
+                } else {
+                    variant.url
+                }
+                callback(
+                    newExtractorLink(
+                        source = baseLabel,
+                        name = "$baseLabel [${variant.displayLabel}]",
+                        url = variantPlayableUrl,
+                        type = ExtractorLinkType.M3U8,
+                    ) {
+                        this.quality = variant.quality
+                    }
+                )
+            }
+        }
+        return master
+    }
+
+    /**
+     * Probes Kaltura `nginx-vod-module` `/pd/` progressive `.mp4` path derived from an already-granted
+     * `sv*.egy.rocks/hls/...` variant URL. If the CDN permits `/pd/` under the same token (`200`/`206`
+     * + `video/`), emits a direct `.mp4` download link at **0 extra credits**.
+     */
+    private suspend fun tryEmitZeroQuotaKalturaProgressiveMp4(
+        master: ParsedMasterManifest,
+        baseLabel: String,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val sampleVariant = master.variants
+            .sortedByDescending { it.quality }
+            .firstOrNull { it.url.contains("/hls/", ignoreCase = true) && it.url.contains(".mp4/", ignoreCase = true) }
+            ?: return
+
+        val pdCandidate = sampleVariant.url
+            .replaceFirst("/hls/", "/pd/", ignoreCase = true)
+            .replace(Regex("""\.mp4/index-[^?]+""", RegexOption.IGNORE_CASE), ".mp4")
+        if (pdCandidate == sampleVariant.url) return
+
+        val isValidMp4 = runCatching {
+            val req = Request.Builder()
+                .url(pdCandidate)
+                .get()
+                .header("Range", "bytes=0-63")
+                .build()
+            inspectClient.newCall(req).execute().use { resp ->
+                val ct = resp.header("Content-Type")?.lowercase(Locale.US).orEmpty()
+                resp.code in 200..299 && (ct.startsWith("video/") || ct.contains("mp4") || ct.contains("octet-stream"))
+            }
+        }.getOrDefault(false)
+
+        if (!isValidMp4) return
+        val q = sampleVariant.quality.takeIf { it > 0 } ?: Qualities.P720.value
+        val dlLabel = "$baseLabel Direct [${q}p MP4]"
+
+        activeCachePayload?.let { cacheTarget ->
+            TimeMoviesGrantCache.putResolved(
+                payload = cacheTarget,
+                directVideos = listOf(TimeMoviesGrantCache.CachedDirectVideo(pdCandidate, dlLabel, q)),
+            )
+        }
+        callback(
+            newExtractorLink(
+                source = dlLabel,
+                name = dlLabel,
+                url = pdCandidate,
+                type = ExtractorLinkType.VIDEO,
+            ) {
+                this.quality = q
+            }
+        )
     }
 
     private fun isKnownExternalHoster(url: String): Boolean {

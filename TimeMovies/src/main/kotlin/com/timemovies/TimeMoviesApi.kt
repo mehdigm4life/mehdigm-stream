@@ -784,6 +784,7 @@ object TimeMoviesApi {
 
                 ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                 syncAppDataAndSelectMainProfile()
+                TimeMoviesPool.autoArchiveCurrentPersonalSession()
 
                 ApiEnvelope(true, status, message, token, refusal)
             } else {
@@ -868,6 +869,7 @@ object TimeMoviesApi {
                     TimeMoviesPrefs.pendingOtpEmail = null
                     ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
                     syncAppDataAndSelectMainProfile()
+                    TimeMoviesPool.autoArchiveCurrentPersonalSession()
                 } else {
                     TimeMoviesPrefs.pendingOtpToken = token
                     TimeMoviesPrefs.pendingOtpEmail = cleanEmail
@@ -969,6 +971,7 @@ object TimeMoviesApi {
 
                 val finalToken = TimeMoviesPrefs.authToken ?: initialToken
                 syncAppDataAndSelectMainProfile()
+                TimeMoviesPool.autoArchiveCurrentPersonalSession()
                 ApiEnvelope(true, status, message, finalToken, refusal)
             } else {
                 ApiEnvelope(false, status, message ?: "فشل تفعيل الرمز (${res.code})", null, refusal)
@@ -1052,6 +1055,7 @@ object TimeMoviesApi {
         syncServerClockIfNeeded(force = true)
         val dk = ensureSessionDeviceKeyEnrolled(PersonalSessionContext)
         val profile = syncAppDataAndSelectMainProfile()
+        TimeMoviesPool.autoArchiveCurrentPersonalSession()
         return if (profile != null || !dk.isNullOrBlank()) {
             true to "تم تفعيل التوكن وربط مفتاح الجهاز بنجاح"
         } else {
@@ -1508,9 +1512,11 @@ object TimeMoviesApi {
         }
 
         var lastRefusalPayload: MediaGrantPayload? = null
+        var exhaustedPersonalUserId: String? = null
 
         // 1. Personal account first (if signed in)
         if (TimeMoviesPrefs.isSignedIn) {
+            val personalUid = TimeMoviesPool.extractJwtUserId(TimeMoviesPrefs.authToken)
             val (code, parsed) = executeSingleGrantAttempt(
                 session = PersonalSessionContext,
                 bodyJson = buildGrantBody(operationId, clientAttemptKey),
@@ -1518,6 +1524,7 @@ object TimeMoviesApi {
             if (parsed != null) {
                 if (parsed.ok || parsed.reason == "player_not_installed" || parsed.reason == "execution_failed") {
                     lastSuccessfulGrantSession = PersonalSessionContext
+                    if (parsed.ok) lastMediaRefusalReason = null
                     return parsed
                 }
                 lastRefusalPayload = parsed
@@ -1528,11 +1535,16 @@ object TimeMoviesApi {
                 if (!shouldFailoverPoolOnGrantRefusal(parsed.reason, code)) {
                     return parsed
                 }
+                exhaustedPersonalUserId = personalUid
+                TimeMoviesPool.markUserIdQuotaExhausted(personalUid, action = action)
             }
         }
 
-        // 2. Built-in Pre-Activated Pool Slots (automatic round-robin + quota failover!)
-        val poolCandidates = TimeMoviesPool.getMediaCandidateSlots()
+        // 2. Built-in Pre-Activated + Local Auto-Vault Pool Slots (automatic round-robin + quota failover!)
+        val poolCandidates = TimeMoviesPool.getMediaCandidateSlots(
+            action = action,
+            excludeUserId = exhaustedPersonalUserId,
+        )
         for ((idx, slot) in poolCandidates.withIndex()) {
             val slotSession = PoolSlotSessionContext(slot.slotId)
             // Fresh attempt key when failing over to a distinct pool account (`operationId` belongs to a single account)
@@ -1557,7 +1569,7 @@ object TimeMoviesApi {
             if (code == 401 || code == 403) {
                 TimeMoviesPool.markSlotAuthFailed(slot.slotId)
             } else if (parsed != null && shouldFailoverPoolOnGrantRefusal(parsed.reason, code)) {
-                TimeMoviesPool.markSlotQuotaExhausted(slot.slotId)
+                TimeMoviesPool.markSlotQuotaExhausted(slot.slotId, action = action)
             }
 
             if (parsed != null) {

@@ -286,6 +286,9 @@ object TimeMoviesModels {
         val seasonId: String? = null,
         val seasonNum: Int? = null,
         val episodeNum: Int? = null,
+        val titleAr: String? = null,
+        val year: Int? = null,
+        val isAnime: Boolean = false,
     ) {
         fun toJson(): String = JSONObject().apply {
             put("wk", workId)
@@ -296,6 +299,9 @@ object TimeMoviesModels {
             if (!seasonId.isNullOrBlank()) put("ss", seasonId)
             if (seasonNum != null) put("ssn", seasonNum)
             if (episodeNum != null) put("epn", episodeNum)
+            if (!titleAr.isNullOrBlank()) put("tlr", titleAr)
+            if (year != null) put("ry", year)
+            if (isAnime) put("ani", true)
         }.toString()
 
         companion object {
@@ -312,6 +318,9 @@ object TimeMoviesModels {
                     seasonId = obj.optNonBlank("ss"),
                     seasonNum = obj.optIntOrNull("ssn"),
                     episodeNum = obj.optIntOrNull("epn"),
+                    titleAr = obj.optNonBlank("tlr"),
+                    year = obj.optIntOrNull("ry"),
+                    isAnime = obj.optBoolean("ani", false),
                 )
             }.getOrNull()
         }
