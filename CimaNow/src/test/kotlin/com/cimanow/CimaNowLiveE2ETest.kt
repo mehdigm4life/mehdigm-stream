@@ -231,18 +231,27 @@ class CimaNowLiveE2ETest {
                 }
             }
         }
-        // Dump full watchHtml base64 gzipped so we can inspect 100% locally!
-        val baos = java.io.ByteArrayOutputStream()
-        java.util.zip.GZIPOutputStream(baos).use { gz -> gz.write(html.toByteArray(Charsets.UTF_8)) }
-        val gzB64 = java.util.Base64.getEncoder().encodeToString(baos.toByteArray())
-        println("[WATCH_GZ_LEN] ${gzB64.length}")
-        var off = 0
-        var chunkIdx = 0
-        while (off < gzB64.length && chunkIdx < 6) {
-            val end = minOf(gzB64.length, off + 8000)
-            println("[WATCH_GZ_$chunkIdx] ${gzB64.substring(off, end)}")
-            off = end
-            chunkIdx++
+        val kEl = doc.selectFirst("script[id^=k_]") ?: doc.select("script").firstOrNull { it.data().length in 60..16000 }
+        if (kEl != null) {
+            val kAttr = kEl.attributes().firstOrNull { it.value.length > 500 }?.value.orEmpty()
+            val baos = java.io.ByteArrayOutputStream()
+            java.util.zip.GZIPOutputStream(baos).use { gz ->
+                gz.write((kEl.outerHtml()).toByteArray(Charsets.UTF_8))
+            }
+            val kB64 = java.util.Base64.getEncoder().encodeToString(baos.toByteArray())
+            println("[WATCH_KEL_B64_LEN] ${kB64.length} rawAttrLen=${kAttr.length}")
+            var off = 0
+            var idx = 0
+            while (off < kB64.length) {
+                val end = minOf(kB64.length, off + 8000)
+                println("[WATCH_KEL_$idx] ${kB64.substring(off, end)}")
+                off = end
+                idx++
+            }
+        }
+        val mEl = doc.selectFirst("script[id^=m_]") ?: doc.select("script").firstOrNull { s -> s.attributes().any { it.value.length > 50000 } }
+        if (mEl != null) {
+            println("[WATCH_MEL] id=${mEl.id()} attrs=${mEl.attributes().map { "${it.key}:${it.value.length}:${it.value.take(40)}" }}")
         }
     }
 
