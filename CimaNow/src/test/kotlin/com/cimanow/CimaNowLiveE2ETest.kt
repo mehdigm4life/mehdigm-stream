@@ -183,8 +183,39 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
+    fun testDiagV5(): Unit = runBlocking {
+        assumeTrue("Set CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        val api = CimaNow()
+        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
+        assertNotNull("Expected MovieLoadResponse", bkLoad)
+        val dataObj = CimaNowCrypto.safeJsonObject(bkLoad!!.dataUrl)
+        val itemUrl = dataObj?.optString("itemUrl") ?: beekeeperUrl
+        val shineUrl = dataObj?.optString("shineUrl").orEmpty()
+        assertTrue(shineUrl.isNotBlank())
+
+        val scriptText = javaClass.classLoader!!.getResourceAsStream("diag_v5.js")!!
+            .bufferedReader(Charsets.UTF_8).readText()
+        val tmpScript = java.io.File.createTempFile("diag_v5_", ".js")
+        val tmpOut = java.io.File.createTempFile("diag_v5_out_", ".json")
+        try {
+            tmpScript.writeText(scriptText, Charsets.UTF_8)
+            val proc = ProcessBuilder("node", tmpScript.absolutePath, shineUrl, itemUrl, tmpOut.absolutePath)
+                .redirectErrorStream(true)
+                .redirectOutput(java.io.File("/dev/null"))
+                .start()
+            proc.waitFor(140L, java.util.concurrent.TimeUnit.SECONDS)
+            println("[DIAG_V5_START]\n" + (if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}") + "\n[DIAG_V5_END]")
+        } finally {
+            tmpScript.delete()
+            tmpOut.delete()
+        }
+        Unit
+    }
+
+    @Test
     fun testFullLiveEndToEndSuite(): Unit = runBlocking {
-        assumeTrue("Skipping live E2E test unless CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        assumeTrue("Skipping live E2E test unless CIMANOW_FULL_E2E=1", System.getenv("CIMANOW_FULL_E2E") == "1")
 
         val api = CimaNow()
         CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
