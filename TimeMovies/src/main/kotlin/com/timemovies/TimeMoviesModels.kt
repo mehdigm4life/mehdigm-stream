@@ -237,11 +237,19 @@ object TimeMoviesModels {
         val size: String?,
     )
 
+    data class MediaEpisodeItem(
+        val code: String?,
+        val name: String?,
+        val sources: List<MediaSourceItem>,
+    )
+
     data class MediaV2Payload(
         val ok: Boolean,
         val reason: String?,
         val src: String?,
         val sources: List<MediaSourceItem>,
+        val episodes: List<MediaEpisodeItem> = emptyList(),
+        val qualities: List<Int> = emptyList(),
     )
 
     data class ExternalExecutionInfo(
@@ -259,6 +267,12 @@ object TimeMoviesModels {
         val target: Int?,
         val charged: Boolean,
         val unavailable: Boolean,
+        val notConfigured: Boolean = false,
+        val operationId: String? = null,
+        val codes: List<String> = emptyList(),
+        val period: String? = null,
+        val limit: Int? = null,
+        val count: Int? = null,
         val media: MediaV2Payload?,
         val external: ExternalExecutionInfo?,
     )
@@ -288,7 +302,7 @@ object TimeMoviesModels {
             fun fromJson(raw: String): LinkPayload? = runCatching {
                 val obj = JSONObject(raw)
                 val wk = obj.optNonBlank("wk") ?: return null
-                val fc = obj.optNonBlank("fc") ?: return null
+                val fc = obj.optNonBlank("fc").orEmpty()
                 LinkPayload(
                     workId = wk,
                     fileCode = fc,
@@ -546,22 +560,47 @@ object TimeMoviesModels {
         )
     }
 
+    private fun parseMediaSourceList(sArr: JSONArray?): List<MediaSourceItem> {
+        if (sArr == null) return emptyList()
+        val sources = ArrayList<MediaSourceItem>(sArr.length())
+        for (i in 0 until sArr.length()) {
+            val sObj = sArr.optJSONObject(i) ?: continue
+            val link = sObj.optNonBlank("link") ?: continue
+            sources.add(
+                MediaSourceItem(
+                    link = link,
+                    name = sObj.optNonBlank("name"),
+                    quality = sObj.optIntOrNull("quality"),
+                    size = sObj.optNonBlank("size"),
+                )
+            )
+        }
+        return sources
+    }
+
     fun parseMediaV2(obj: JSONObject?): MediaV2Payload? {
         if (obj == null) return null
-        val sources = ArrayList<MediaSourceItem>()
-        val sArr = obj.optJSONArray("sources")
-        if (sArr != null) {
-            for (i in 0 until sArr.length()) {
-                val sObj = sArr.optJSONObject(i) ?: continue
-                val link = sObj.optNonBlank("link") ?: continue
-                sources.add(
-                    MediaSourceItem(
-                        link = link,
-                        name = sObj.optNonBlank("name"),
-                        quality = sObj.optIntOrNull("quality"),
-                        size = sObj.optNonBlank("size"),
+        val sources = parseMediaSourceList(obj.optJSONArray("sources"))
+        val episodes = ArrayList<MediaEpisodeItem>()
+        val epArr = obj.optJSONArray("episodes")
+        if (epArr != null) {
+            for (i in 0 until epArr.length()) {
+                val eObj = epArr.optJSONObject(i) ?: continue
+                episodes.add(
+                    MediaEpisodeItem(
+                        code = eObj.optNonBlank("code"),
+                        name = eObj.optNonBlank("name"),
+                        sources = parseMediaSourceList(eObj.optJSONArray("sources")),
                     )
                 )
+            }
+        }
+        val qualities = ArrayList<Int>()
+        val qArr = obj.optJSONArray("qualities")
+        if (qArr != null) {
+            for (i in 0 until qArr.length()) {
+                val q = qArr.optInt(i, -1)
+                if (q > 0) qualities.add(q)
             }
         }
         return MediaV2Payload(
@@ -569,6 +608,8 @@ object TimeMoviesModels {
             reason = obj.optNonBlank("reason"),
             src = obj.optNonBlank("src"),
             sources = sources,
+            episodes = episodes,
+            qualities = qualities,
         )
     }
 
@@ -592,6 +633,12 @@ object TimeMoviesModels {
             target = obj.optIntOrNull("target"),
             charged = obj.optBoolean("charged", false),
             unavailable = obj.optBoolean("unavailable", false),
+            notConfigured = obj.optBoolean("not_configured", false),
+            operationId = obj.optNonBlank("operation_id"),
+            codes = obj.optJSONArray("codes").toStringList(),
+            period = obj.optNonBlank("period"),
+            limit = obj.optIntOrNull("limit"),
+            count = obj.optIntOrNull("count"),
             media = parseMediaV2(obj.optJSONObject("media")),
             external = external,
         )

@@ -1,7 +1,7 @@
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 1
+version = 2
 
 cloudstream {
     description = "تايم موفيز (TimeMovies) — التطبيق الرسمي: مشاهدة وتحميل أحدث الأفلام والمسلسلات والأنمي بجودات متعددة وترجمات مدمجة مع دعم مشغل Doom Video Player."

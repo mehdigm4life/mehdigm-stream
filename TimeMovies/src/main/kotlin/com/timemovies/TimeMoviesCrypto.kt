@@ -22,13 +22,23 @@ import java.util.Locale
  */
 object TimeMoviesCrypto {
 
+    const val API_BASE_URL = "https://api.apks.lol/api/v4.7/app/"
+    const val MEDIA_V2_BASE_URL = "https://api.apks.lol/v2/media/"
+    const val DOOM_BASE_URL = "https://api.apks.lol/api/player/v1.6/app/"
+
+    const val APP_PACKAGE = "com.extremeqr.proapps"
+    const val APP_VERSION_NAME = "1.0.6.5"
     const val APP_BUILD = "1092"
     const val APP_ID = "60129f949ea4ea03d6598c06"
     const val APP_VERSION_ID = "6a3e1c72b864f954c0ef8d54"
+    const val APP_VERSION_TOKEN = APP_VERSION_ID
     const val DEVICE_SIGNATURE_ALGORITHM = "ECDSA_SHA256_DER"
+    const val SIGNING_ALGORITHM = DEVICE_SIGNATURE_ALGORITHM
 
     const val DOOM_PLAYER_BUILD = "1065"
     const val DOOM_PLAYER_APP_ID = "6a5216d91e12eeadc194ab91"
+    const val DOOM_BUILD = DOOM_PLAYER_BUILD
+    const val DOOM_APP_ID = DOOM_PLAYER_APP_ID
 
     private const val B64_STD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     private const val B64_URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
@@ -60,6 +70,8 @@ object TimeMoviesCrypto {
         val publicKeySpkiB64Url: String,
     )
 
+    typealias DeviceKeyPair = EcKeyMaterial
+
     data class SignedHeaders(
         val dk: String,
         val ds: String,
@@ -73,6 +85,7 @@ object TimeMoviesCrypto {
         val workId: String?,
         val episodeId: String?,
         val isEncryptedTicket: Boolean,
+        val scheme: String = "timesnizz",
     )
 
     fun isEnrollmentEndpoint(encodedPath: String): Boolean {
@@ -355,6 +368,7 @@ object TimeMoviesCrypto {
      */
     fun parseDoomDeepLink(uriString: String): DoomDeepLinkPayload? {
         val trimmed = uriString.trim()
+        val detectedScheme = trimmed.substringBefore("://", "timesnizz").lowercase(Locale.US)
         val afterHost = trimmed
             .substringAfter("://doomplayer.com/", missingDelimiterValue = "")
             .substringBefore('?')
@@ -377,6 +391,7 @@ object TimeMoviesCrypto {
                     workId = null,
                     episodeId = null,
                     isEncryptedTicket = isTicket,
+                    scheme = detectedScheme,
                 )
             }
         }
@@ -406,6 +421,7 @@ object TimeMoviesCrypto {
                 workId = map["wk"] ?: map["workId"],
                 episodeId = map["ep"]?.takeUnless { it == "@" },
                 isEncryptedTicket = isTicket,
+                scheme = detectedScheme,
             )
         }
 
@@ -426,6 +442,7 @@ object TimeMoviesCrypto {
             workId = workId,
             episodeId = episodeId,
             isEncryptedTicket = isTicket,
+            scheme = detectedScheme,
         )
     }
 

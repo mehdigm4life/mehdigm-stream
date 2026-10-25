@@ -424,12 +424,58 @@ class TimeMovies : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val payload = LinkPayload.fromJson(data) ?: return false
-        if (payload.fileCode.isBlank()) return false
-        return TimeMoviesExtractors.extractAllLinks(
-            payload = payload,
+        val initialPayload = LinkPayload.fromJson(data) ?: return false
+
+        if (!TimeMoviesPrefs.isSignedIn) {
+            TimeMoviesPlugin.notifyUserAr("يرجى تسجيل الدخول بحساب TimeMovies من إعدادات الإضافة ⚙️ لتشغيل المحتوى")
+            return false
+        }
+
+        val resolvedPayload = if (initialPayload.fileCode.isNotBlank()) {
+            initialPayload
+        } else {
+            val fresh = TimeMoviesApi.getWorkDetails(initialPayload.workId)
+            val freshCode = if (initialPayload.isMovie) {
+                fresh?.fileCode.orEmpty()
+            } else {
+                val allEps = fresh?.seasons?.flatMap { s -> s.episodes.map { s to it } }.orEmpty()
+                val matched = allEps.firstOrNull { (_, ep) -> ep.id == initialPayload.episodeId }
+                    ?: allEps.firstOrNull { (_, ep) ->
+                        ep.seasonNum == initialPayload.seasonNum && ep.episodeNum == initialPayload.episodeNum
+                    }
+                matched?.second?.fileCode.orEmpty()
+            }
+            initialPayload.copy(fileCode = freshCode)
+        }
+
+        if (resolvedPayload.fileCode.isBlank()) {
+            TimeMoviesPlugin.notifyUserAr("تعذر العثور على رمز ملف التشغيل لهذا العمل — يرجى تحديث الصفحة")
+            return false
+        }
+
+        val ok = TimeMoviesExtractors.extractAllLinks(
+            payload = resolvedPayload,
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
+        if (!ok) {
+            val reason = TimeMoviesApi.lastMediaRefusalReason
+            if (!reason.isNullOrBlank()) {
+                TimeMoviesPlugin.notifyUserAr(translateRefusalReasonAr(reason))
+            }
+        }
+        return ok
+    }
+
+    private fun translateRefusalReasonAr(reason: String): String {
+        return when (reason.lowercase(Locale.US)) {
+            "quota_exhausted", "insufficient_quota" ->
+                "انتهى الرصيد اليومي المجاني لهذا الحساب في TimeMovies"
+            "blocked_by_plan" ->
+                "هذه الميزة تتطلب اشتراك VIP في TimeMovies"
+            "target_over_limit", "device_limit", "max_devices" ->
+                "تم تجاوز الحد الأقصى للأجهزة المسموح بها في هذا الحساب"
+            else -> "تعذر جلب الرابط من خادم TimeMovies ($reason)"
+        }
     }
 }

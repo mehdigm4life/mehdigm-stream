@@ -1,467 +1,929 @@
 package com.timemovies
 
 import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.M3u8Helper
+import com.lagradost.cloudstream3.utils.JsUnpacker
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.getQualityFromName
+import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.timemovies.TimeMoviesModels.ExternalExecutionInfo
 import com.timemovies.TimeMoviesModels.LinkPayload
 import com.timemovies.TimeMoviesModels.MediaGrantPayload
 import com.timemovies.TimeMoviesModels.MediaSourceItem
 import com.timemovies.TimeMoviesModels.MediaV2Payload
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
 import okhttp3.Request
+import org.json.JSONObject
 import java.net.URI
+import java.net.URLDecoder
 import java.util.Collections
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
- * Complete multi-quality playback, subtitle, and download extractor suite for TimeMovies v4.7
- * and Doom Video Player v1.6 (`timesnizz://` / `timesdizz://`).
+ * Multi-path stream, download, hoster, and subtitle extraction engine for TimeMovies v4.7 & DoomVideoPlayer v1.6.
+ *
+ * Resolution Strategy:
+ * 1. Ensures an active `USP` profile is selected (`x-p`, `m-a`) before requesting grants.
+ * 2. Probes `POST /api/v4.7/app/media/grant` in Internal Origin mode (`executor_target = null`, `player_installed = false`)
+ *    with idempotent `ExecutionFailed` retry (`operation_id` + `client_attempt_key`), then fetches
+ *    `GET /v2/media/manifest` (`watch`) and `GET /v2/media/download` (`download`) with `X-Media-Grant`.
+ * 3. Automatically falls back to External `DoomVideoPlayer` mode (`executor_target = "external"`, `player_installed = true`)
+ *    whenever internal origin is not configured or refused (`player_not_installed`), resolving encrypted
+ *    `timesnizz://` & `timesdizz://` tickets via `POST /api/player/v1.6/app/resolve-play` and `resolve-download`.
+ * 4. Emits untouched Auto-HLS master streams (matching `DoomVideoPlayer`'s `application/x-mpegURL` `MediaItem`),
+ *    individual `#EXT-X-STREAM-INF` quality variants, embedded `#EXT-X-MEDIA:TYPE=SUBTITLES` VTT/SRT tracks,
+ *    multi-quality progressive MP4/MKV downloads, DASH `.mpd` manifests, and third-party hoster links.
  */
 object TimeMoviesExtractors {
 
-    data class HlsSubtitleTrack(
+    private val KNOWN_EXTERNAL_HOSTER_KEYWORDS = listOf(
+        "dood", "d000d", "ds2play", "dsvplay",
+        "mixdrop", "mxdrop",
+        "streamtape", "strtape",
+        "vidmoly",
+        "voe.sx", "voeunblock",
+        "streamwish", "wishembed", "sfastwish", "flaswish", "obeywish",
+        "filemoon", "moonmov",
+        "hglink", "cavanhabg", "dumbalag", "uasopt", "dhcplay", "earnvids", "streamhg",
+        "vidara", "vidroba",
+        "bysezejataos", "bysevepoin", "bysedikamoum", "bysekoze",
+        "lulustream", "luluvdo",
+        "mp4upload",
+        "sendvid",
+        "ok.ru", "odnoklassniki",
+        "mediafire.com",
+        "pixeldrain.com",
+        "gofile.io",
+        "uqload",
+        "vidoza",
+        "upstream.to",
+        "vtube",
+    )
+
+    private val inspectClient by lazy {
+        TimeMoviesApi.plainClient.newBuilder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .build()
+    }
+
+    data class ParsedSubtitleTrack(
         val label: String,
-        val languageCode: String?,
+        val langCode: String?,
         val url: String,
         val isDefault: Boolean,
     )
 
-    private val ATTRIBUTE_REGEX = Regex("""([A-Z0-9-]+)=("([^"]*)"|[^,]*)""")
-
-    /**
-     * Parses `#EXT-X-MEDIA:TYPE=SUBTITLES,...` entries from an HLS master `.m3u8` playlist,
-     * resolving relative `.vtt`/`.m3u8` subtitle URIs against `masterUrl`.
-     */
-    fun parseHlsSubtitlesFromMaster(masterContent: String, masterUrl: String): List<HlsSubtitleTrack> {
-        if (masterContent.isBlank()) return emptyList()
-        val tracks = ArrayList<HlsSubtitleTrack>()
-        val seenUrls = HashSet<String>()
-
-        for (rawLine in masterContent.lineSequence()) {
-            val line = rawLine.trim()
-            if (!line.startsWith("#EXT-X-MEDIA:", ignoreCase = true)) continue
-            val attrs = HashMap<String, String>()
-            for (m in ATTRIBUTE_REGEX.findAll(line.substringAfter(":"))) {
-                val key = m.groupValues[1].uppercase(Locale.US)
-                val quoted = m.groups[3]?.value
-                val value = quoted ?: m.groupValues[2].trim()
-                attrs[key] = value
-            }
-            if (!attrs["TYPE"].equals("SUBTITLES", ignoreCase = true)) continue
-            val uriAttr = attrs["URI"]?.trim()?.takeIf { it.isNotEmpty() } ?: continue
-            val resolvedUrl = resolveRelativeUri(masterUrl, uriAttr)
-            if (!seenUrls.add(resolvedUrl)) continue
-
-            val langCode = attrs["LANGUAGE"]?.trim()?.lowercase(Locale.US)
-            val rawName = attrs["NAME"]?.trim()?.takeIf { it.isNotEmpty() }
-            val label = mapSubtitleDisplayName(rawName, langCode)
-            val isDefault = attrs["DEFAULT"].equals("YES", ignoreCase = true)
-
-            tracks.add(
-                HlsSubtitleTrack(
-                    label = label,
-                    languageCode = langCode,
-                    url = resolvedUrl,
-                    isDefault = isDefault,
-                )
-            )
-        }
-        return tracks
-    }
-
-    /**
-     * If an HLS subtitle track points to a subtitle variant `.m3u8` containing a single `.vtt`/`.webvtt` segment,
-     * unwraps that direct `.vtt` URL when possible so external players can load it directly too.
-     */
-    private fun unwrapVttPlaylistIfSingleFile(subPlaylistUrl: String): String {
-        val cleanPath = subPlaylistUrl.substringBefore('?').lowercase(Locale.US)
-        if (cleanPath.endsWith(".vtt") || cleanPath.endsWith(".webvtt") || cleanPath.endsWith(".srt")) {
-            return subPlaylistUrl
-        }
-        if (!cleanPath.endsWith(".m3u8")) return subPlaylistUrl
-        return runCatching {
-            val req = Request.Builder()
-                .url(subPlaylistUrl)
-                .get()
-                .header("User-Agent", "okhttp/4.12.0")
-                .build()
-            TimeMoviesApi.httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return subPlaylistUrl
-                val body = resp.body?.string().orEmpty()
-                val segLines = body.lineSequence()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() && !it.startsWith("#") }
-                    .toList()
-                if (segLines.size == 1) {
-                    val single = segLines.first()
-                    if (single.substringBefore('?').let {
-                            it.endsWith(".vtt", true) || it.endsWith(".webvtt", true) || it.endsWith(".srt", true)
-                        }
-                    ) {
-                        return resolveRelativeUri(subPlaylistUrl, single)
-                    }
-                }
-                subPlaylistUrl
-            }
-        }.getOrDefault(subPlaylistUrl)
-    }
-
-    fun resolveRelativeUri(baseUrl: String, ref: String): String {
-        if (ref.startsWith("http://", ignoreCase = true) || ref.startsWith("https://", ignoreCase = true)) {
-            return ref
-        }
-        return runCatching { URI(baseUrl).resolve(ref).toString() }.getOrDefault(ref)
-    }
-
-    private fun mapSubtitleDisplayName(rawName: String?, langCode: String?): String {
-        val code = langCode?.substringBefore('-').orEmpty()
-        return when {
-            code == "ar" || rawName?.contains("arab", true) == true || rawName?.contains("عرب") == true -> "العربية (Arabic)"
-            code == "en" || rawName?.contains("eng", true) == true -> "English"
-            code == "fr" || rawName?.contains("fren", true) == true -> "Français"
-            code == "es" || rawName?.contains("span", true) == true -> "Español"
-            code == "tr" || rawName?.contains("turk", true) == true -> "Türkçe"
-            code == "de" || rawName?.contains("germ", true) == true -> "Deutsch"
-            !rawName.isNullOrBlank() -> rawName
-            !langCode.isNullOrBlank() -> langCode.uppercase(Locale.US)
-            else -> "Subtitle"
-        }
-    }
+    data class ParsedHlsVariant(
+        val url: String,
+        val quality: Int,
+        val label: String,
+    )
 
     suspend fun extractAllLinks(
         payload: LinkPayload,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
-    ): Boolean = withContext(Dispatchers.IO) {
-        if (!TimeMoviesPrefs.isSignedIn) {
-            return@withContext false
+    ): Boolean {
+        if (!TimeMoviesPrefs.isSignedIn) return false
+        if (TimeMoviesPrefs.profileId.isNullOrBlank()) {
+            TimeMoviesApi.syncAppDataAndSelectMainProfile()
         }
 
-        val emittedUrls = Collections.synchronizedSet(HashSet<String>())
-        val emittedSubs = Collections.synchronizedSet(HashSet<String>())
+        TimeMoviesApi.lastMediaRefusalReason = null
+        val emittedUrls = Collections.synchronizedSet( LinkedHashSet<String>() )
+        val emittedSubs = Collections.synchronizedSet( LinkedHashSet<String>() )
         var foundAny = false
 
-        // 1. Primary Watch Grant (handles BOTH Internal MediaV2 & External DoomVideoPlayer)
-        var watchGrant = TimeMoviesApi.requestMediaGrant(
+        val dedupCallback: (ExtractorLink) -> Unit = { link ->
+            val key = "${link.type}:${link.url}"
+            if (emittedUrls.add(key)) {
+                foundAny = true
+                callback(link)
+            }
+        }
+        val dedupSubCallback: (SubtitleFile) -> Unit = { sub ->
+            if (emittedSubs.add(sub.url)) {
+                subtitleCallback(sub)
+            }
+        }
+
+        // 1. Watch stream links (Internal Origin -> External DoomVideoPlayer fallback)
+        val watchOk = extractForAction(
             action = "watch",
-            fileCode = payload.fileCode,
-            workId = payload.workId,
-            episodeId = payload.episodeId,
-            seasonId = payload.seasonId,
-            executorTarget = null,
-            playerInstalled = true,
+            payload = payload,
+            subtitleCallback = dedupSubCallback,
+            callback = dedupCallback,
         )
+        if (watchOk) foundAny = true
 
-        // If uncharged & refused because server explicitly requires `executor_target = "external"`, retry with `"external"`
-        if ((watchGrant == null || !watchGrant.ok) && watchGrant?.charged != true) {
-            val extWatchGrant = TimeMoviesApi.requestMediaGrant(
-                action = "watch",
-                fileCode = payload.fileCode,
-                workId = payload.workId,
-                episodeId = payload.episodeId,
-                seasonId = payload.seasonId,
-                executorTarget = "external",
-                playerInstalled = true,
-            )
-            if (extWatchGrant != null && extWatchGrant.ok) {
-                watchGrant = extWatchGrant
-            }
-        }
+        // 2. Multi-quality progressive MP4/MKV download links (Internal Origin -> External DoomVideoPlayer fallback)
+        val downloadOk = extractForAction(
+            action = "download",
+            payload = payload,
+            subtitleCallback = dedupSubCallback,
+            callback = dedupCallback,
+        )
+        if (downloadOk) foundAny = true
 
-        if (watchGrant != null && watchGrant.ok) {
-            val resolvedWatch = emitFromGrant(
-                action = "watch",
-                grantPayload = watchGrant,
-                sourcePrefix = "TimeMovies",
-                emittedUrls = emittedUrls,
-                emittedSubs = emittedSubs,
-                subtitleCallback = subtitleCallback,
-                callback = callback,
-            )
-            if (resolvedWatch) foundAny = true
-        }
-
-        // 2. Direct Multi-Quality MP4/MKV Download Grant (`360p` / `480p` / `720p` / `1080p` / `2160p`)
-        if (TimeMoviesPrefs.fetchDownloadGrant) {
-            var downloadGrant = TimeMoviesApi.requestMediaGrant(
-                action = "download",
-                fileCode = payload.fileCode,
-                workId = payload.workId,
-                episodeId = payload.episodeId,
-                seasonId = payload.seasonId,
-                executorTarget = null,
-                playerInstalled = true,
-            )
-            if ((downloadGrant == null || !downloadGrant.ok) && downloadGrant?.charged != true) {
-                val extDlGrant = TimeMoviesApi.requestMediaGrant(
-                    action = "download",
-                    fileCode = payload.fileCode,
-                    workId = payload.workId,
-                    episodeId = payload.episodeId,
-                    seasonId = payload.seasonId,
-                    executorTarget = "external",
-                    playerInstalled = true,
-                )
-                if (extDlGrant != null && extDlGrant.ok) {
-                    downloadGrant = extDlGrant
-                }
-            }
-            if (downloadGrant != null && downloadGrant.ok) {
-                val resolvedDl = emitFromGrant(
-                    action = "download",
-                    grantPayload = downloadGrant,
-                    sourcePrefix = "TimeMovies Direct",
-                    emittedUrls = emittedUrls,
-                    emittedSubs = emittedSubs,
-                    subtitleCallback = subtitleCallback,
-                    callback = callback,
-                )
-                if (resolvedDl) foundAny = true
-            }
-        }
-
-        foundAny
+        return foundAny
     }
 
-    private suspend fun emitFromGrant(
+    private suspend fun extractForAction(
         action: String,
-        grantPayload: MediaGrantPayload,
-        sourcePrefix: String,
-        emittedUrls: MutableSet<String>,
-        emittedSubs: MutableSet<String>,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit,
-    ): Boolean = coroutineScope {
-        var emittedCount = 0
-
-        // Path A: External DoomVideoPlayer ticket or descriptor (`timesnizz://` / `timesdizz://`)
-        val ext = grantPayload.external
-        if (ext != null) {
-            val directTicket = ext.ticket?.takeIf { it.isNotBlank() }
-                ?: ext.descriptor?.let { TimeMoviesCrypto.parseDoomDeepLink(it)?.srcOrUrl }
-
-            if (!directTicket.isNullOrBlank()) {
-                val resolvedUrl = if (action == "download") {
-                    TimeMoviesApi.resolveDoomDownload(directTicket)
-                } else {
-                    TimeMoviesApi.resolveDoomPlay(directTicket)
-                }
-                if (!resolvedUrl.isNullOrBlank()) {
-                    if (emitResolvedStreamUrl(
-                            streamUrl = resolvedUrl,
-                            label = "$sourcePrefix (DoomPlayer)",
-                            qualityHint = null,
-                            emittedUrls = emittedUrls,
-                            emittedSubs = emittedSubs,
-                            subtitleCallback = subtitleCallback,
-                            callback = callback,
-                        )
-                    ) {
-                        emittedCount++
-                    }
-                }
-            }
-        }
-
-        // Path B: Embedded `MediaV2Payload` or Origin `<origin>/v2/media/{manifest|download}` via `X-Media-Grant`
-        val mediaV2: MediaV2Payload? = grantPayload.media
-            ?: grantPayload.grant?.takeIf { it.isNotBlank() }?.let { grantToken ->
-                TimeMoviesApi.fetchOriginMedia(action, grantToken)
-            }
-
-        if (mediaV2 != null) {
-            val hlsSrc = mediaV2.src?.takeIf { it.isNotBlank() }
-            if (!hlsSrc.isNullOrBlank()) {
-                val realHlsUrl = if (hlsSrc.startsWith("http://", true) || hlsSrc.startsWith("https://", true)) {
-                    hlsSrc
-                } else {
-                    TimeMoviesApi.resolveDoomPlay(hlsSrc)
-                }
-                if (!realHlsUrl.isNullOrBlank()) {
-                    if (emitResolvedStreamUrl(
-                            streamUrl = realHlsUrl,
-                            label = "$sourcePrefix HLS",
-                            qualityHint = null,
-                            emittedUrls = emittedUrls,
-                            emittedSubs = emittedSubs,
-                            subtitleCallback = subtitleCallback,
-                            callback = callback,
-                        )
-                    ) {
-                        emittedCount++
-                    }
-                }
-            }
-
-            if (mediaV2.sources.isNotEmpty()) {
-                val isExternalTicketMode = (grantPayload.target == 2) || (grantPayload.external != null)
-                val resolvedSources = mediaV2.sources.map { item ->
-                    async(Dispatchers.IO) {
-                        resolveMediaSourceItem(item, isExternalTicketMode)
-                    }
-                }.awaitAll().filterNotNull()
-
-                for ((item, finalUrl) in resolvedSources) {
-                    if (!emittedUrls.add(finalUrl)) continue
-                    val qVal = item.quality ?: parseQualityDigits(item.name) ?: Qualities.Unknown.value
-                    val sizeBadge = item.size?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
-                    val qBadge = if (qVal > 0) "${qVal}p" else (item.name ?: "MP4")
-                    val isM3u8 = finalUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
-                    callback(
-                        newExtractorLink(
-                            source = sourcePrefix,
-                            name = "$sourcePrefix [$qBadge$sizeBadge]",
-                            url = finalUrl,
-                            type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
-                        ) {
-                            this.quality = qVal
-                            this.headers = mapOf("User-Agent" to "okhttp/4.12.0")
-                        }
-                    )
-                    emittedCount++
-                }
-            }
-        }
-
-        emittedCount > 0
-    }
-
-    private fun resolveMediaSourceItem(
-        item: MediaSourceItem,
-        isExternalTicketMode: Boolean,
-    ): Pair<MediaSourceItem, String>? {
-        val raw = item.link.trim()
-        if (raw.isEmpty()) return null
-        if (raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true)) {
-            return item to raw
-        }
-        if (raw.startsWith("timesdizz://", ignoreCase = true) || raw.startsWith("timesnizz://", ignoreCase = true)) {
-            val parsed = TimeMoviesCrypto.parseDoomDeepLink(raw) ?: return null
-            val resolved = if (parsed.isEncryptedTicket) {
-                TimeMoviesApi.resolveDoomDownload(parsed.srcOrUrl) ?: TimeMoviesApi.resolveDoomPlay(parsed.srcOrUrl)
-            } else {
-                parsed.srcOrUrl
-            } ?: return null
-            return item to resolved
-        }
-        val resolved = if (isExternalTicketMode || !raw.startsWith("http", true)) {
-            TimeMoviesApi.resolveDoomDownload(raw)
-        } else {
-            raw
-        } ?: return null
-        return item to resolved
-    }
-
-    suspend fun emitResolvedStreamUrl(
-        streamUrl: String,
-        label: String,
-        qualityHint: Int?,
-        emittedUrls: MutableSet<String>,
-        emittedSubs: MutableSet<String>,
+        payload: LinkPayload,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val cleanPath = streamUrl.substringBefore('?').lowercase(Locale.US)
-        val isHls = cleanPath.endsWith(".m3u8") || streamUrl.contains("m3u8", ignoreCase = true)
-        val headers = mapOf("User-Agent" to "okhttp/4.12.0")
+        var emitted = false
+        val trackingCallback: (ExtractorLink) -> Unit = { link ->
+            emitted = true
+            callback(link)
+        }
 
-        if (!isHls) {
-            if (!emittedUrls.add(streamUrl)) return false
+        // Attempt 1: Internal Origin Mode (`executor_target = null`, `player_installed = false` per `rca.java`)
+        val internalGrant = requestGrantWithExecutionRetry(
+            action = action,
+            payload = payload,
+            executorTarget = null,
+            playerInstalled = false,
+        )
+        if (internalGrant != null && internalGrant.ok) {
+            processGrantPayload(
+                action = action,
+                grantPayload = internalGrant,
+                subtitleCallback = subtitleCallback,
+                callback = trackingCallback,
+            )
+        }
+
+        if (emitted) return true
+
+        // Attempt 2: External `DoomVideoPlayer` Mode (`executor_target = "external"`, `player_installed = true`)
+        // Triggered when internal mode was refused (e.g. `player_not_installed` on external-only capability)
+        // or returned no playable URLs without charging quota.
+        val shouldTryExternal = internalGrant == null ||
+            !internalGrant.ok ||
+            !internalGrant.charged
+        if (shouldTryExternal) {
+            val externalGrant = requestGrantWithExecutionRetry(
+                action = action,
+                payload = payload,
+                executorTarget = "external",
+                playerInstalled = true,
+            )
+            if (externalGrant != null && externalGrant.ok) {
+                processGrantPayload(
+                    action = action,
+                    grantPayload = externalGrant,
+                    subtitleCallback = subtitleCallback,
+                    callback = trackingCallback,
+                )
+            }
+        }
+
+        return emitted
+    }
+
+    /**
+     * Calls `requestMediaGrant` and, if `ExecutionFailed` is returned (`!ok` with non-blank `operationId`),
+     * retries once with the same `operation_id` + `client_attempt_key` (`at5.java:185–215`).
+     */
+    private fun requestGrantWithExecutionRetry(
+        action: String,
+        payload: LinkPayload,
+        executorTarget: String?,
+        playerInstalled: Boolean,
+    ): MediaGrantPayload? {
+        val attemptKey = UUID.randomUUID().toString()
+        val first = TimeMoviesApi.requestMediaGrant(
+            action = action,
+            workId = payload.workId,
+            fileCode = payload.fileCode,
+            episodeId = payload.episodeId,
+            seasonId = payload.seasonId,
+            executorTarget = executorTarget,
+            playerInstalled = playerInstalled,
+            clientAttemptKey = attemptKey,
+        ) ?: return null
+
+        if (!first.ok && !first.operationId.isNullOrBlank()) {
+            val retried = TimeMoviesApi.requestMediaGrant(
+                action = action,
+                workId = payload.workId,
+                fileCode = payload.fileCode,
+                episodeId = payload.episodeId,
+                seasonId = payload.seasonId,
+                executorTarget = executorTarget,
+                playerInstalled = playerInstalled,
+                operationId = first.operationId,
+                clientAttemptKey = attemptKey,
+            )
+            if (retried != null) return retried
+        }
+        return first
+    }
+
+    private suspend fun processGrantPayload(
+        action: String,
+        grantPayload: MediaGrantPayload,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        var found = false
+
+        // 1. Inline `media` inside `MediaGrantResponse`
+        if (grantPayload.media != null) {
+            if (processMediaV2Payload(action, grantPayload.media, subtitleCallback, callback)) {
+                found = true
+            }
+        }
+
+        // 2. Origin grant token (`X-Media-Grant` -> `GET /v2/media/{manifest|download}`)
+        if (!grantPayload.grant.isNullOrBlank()) {
+            val originMedia = TimeMoviesApi.fetchOriginMedia(
+                action = action,
+                grantToken = grantPayload.grant,
+                codes = grantPayload.codes,
+            )
+            if (originMedia != null) {
+                if (processMediaV2Payload(action, originMedia, subtitleCallback, callback)) {
+                    found = true
+                }
+            }
+        }
+
+        // 3. External `DoomVideoPlayer` execution descriptor / ticket (`timesnizz://` / `timesdizz://`)
+        if (grantPayload.external != null) {
+            if (processExternalExecution(action, grantPayload.external, subtitleCallback, callback)) {
+                found = true
+            }
+        }
+
+        return found
+    }
+
+    private suspend fun processMediaV2Payload(
+        action: String,
+        media: MediaV2Payload,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        var found = false
+        val isWatch = action == "watch" || action == "cast"
+
+        // Primary `src` stream (HLS manifest or ticket)
+        val src = media.src?.trim()
+        if (!src.isNullOrEmpty()) {
+            if (handleCandidateLink(
+                    rawLink = src,
+                    sourceLabel = if (isWatch) "TimeMovies Stream" else "TimeMovies Direct",
+                    qualityHint = null,
+                    isWatch = isWatch,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            ) {
+                found = true
+            }
+        }
+
+        // Multi-quality `sources` list
+        if (processSourceItems(media.sources, isWatch, subtitleCallback, callback)) {
+            found = true
+        }
+
+        // Optional `episodes` list (`MediaV2Episode`)
+        for (ep in media.episodes) {
+            if (processSourceItems(ep.sources, isWatch, subtitleCallback, callback)) {
+                found = true
+            }
+        }
+
+        return found
+    }
+
+    private suspend fun processSourceItems(
+        sources: List<MediaSourceItem>,
+        isWatch: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        var found = false
+        for (sourceItem in sources) {
+            val rawLink = sourceItem.link.trim()
+            if (rawLink.isEmpty()) continue
+
+            val qualityInt = sourceItem.quality ?: parseQualityNumber(sourceItem.name)
+            val qualityTag = buildList {
+                sourceItem.name?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    ?: qualityInt?.let { add("${it}p") }
+                sourceItem.size?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }.joinToString(" • ")
+
+            val basePrefix = if (isWatch) "TimeMovies Stream" else "TimeMovies Download"
+            val label = if (qualityTag.isNotEmpty()) "$basePrefix [$qualityTag]" else basePrefix
+
+            if (handleCandidateLink(
+                    rawLink = rawLink,
+                    sourceLabel = label,
+                    qualityHint = qualityInt,
+                    isWatch = isWatch,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            ) {
+                found = true
+            }
+        }
+        return found
+    }
+
+    private suspend fun processExternalExecution(
+        action: String,
+        ext: ExternalExecutionInfo,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val isWatch = action != "download"
+        val descriptor = ext.descriptor?.trim()
+        if (!descriptor.isNullOrEmpty()) {
+            val deepLink = TimeMoviesCrypto.parseDoomDeepLink(descriptor)
+            if (deepLink != null) {
+                val resolvedUrl = if (deepLink.isEncryptedTicket) {
+                    if (!isWatch || deepLink.scheme == "timesdizz") {
+                        TimeMoviesApi.resolveDoomDownloadTicket(deepLink.srcOrUrl)
+                    } else {
+                        TimeMoviesApi.resolveDoomPlayTicket(deepLink.srcOrUrl)
+                    }
+                } else {
+                    deepLink.srcOrUrl
+                }
+                if (!resolvedUrl.isNullOrBlank()) {
+                    return emitResolvedHttpUrl(
+                        url = resolvedUrl,
+                        sourceLabel = if (!isWatch || deepLink.scheme == "timesdizz") {
+                            "DoomPlayer Download"
+                        } else {
+                            "DoomPlayer Stream"
+                        },
+                        qualityHint = null,
+                        isWatch = isWatch && deepLink.scheme != "timesdizz",
+                        subtitleCallback = subtitleCallback,
+                        callback = callback,
+                    )
+                }
+            } else if (descriptor.startsWith("http://", true) || descriptor.startsWith("https://", true)) {
+                return emitResolvedHttpUrl(
+                    url = descriptor,
+                    sourceLabel = if (isWatch) "DoomPlayer Stream" else "DoomPlayer Download",
+                    qualityHint = null,
+                    isWatch = isWatch,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            }
+        }
+
+        val rawTicket = ext.ticket?.trim()
+        if (!rawTicket.isNullOrEmpty()) {
+            val resolvedUrl = if (rawTicket.startsWith("http://", true) || rawTicket.startsWith("https://", true)) {
+                rawTicket
+            } else if (!isWatch) {
+                TimeMoviesApi.resolveDoomDownloadTicket(rawTicket)
+            } else {
+                TimeMoviesApi.resolveDoomPlayTicket(rawTicket)
+            }
+            if (!resolvedUrl.isNullOrBlank()) {
+                return emitResolvedHttpUrl(
+                    url = resolvedUrl,
+                    sourceLabel = if (isWatch) "DoomPlayer Stream" else "DoomPlayer Download",
+                    qualityHint = null,
+                    isWatch = isWatch,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            }
+        }
+
+        return false
+    }
+
+    private suspend fun handleCandidateLink(
+        rawLink: String,
+        sourceLabel: String,
+        qualityHint: Int?,
+        isWatch: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val trimmed = rawLink.trim()
+        if (trimmed.isEmpty()) return false
+
+        // 1. `timesnizz://` or `timesdizz://` DoomVideoPlayer deep-link
+        if (trimmed.startsWith("timesnizz://", true) || trimmed.startsWith("timesdizz://", true)) {
+            val parsed = TimeMoviesCrypto.parseDoomDeepLink(trimmed) ?: return false
+            val resolved = if (parsed.isEncryptedTicket) {
+                if (parsed.scheme == "timesdizz" || !isWatch) {
+                    TimeMoviesApi.resolveDoomDownloadTicket(parsed.srcOrUrl)
+                } else {
+                    TimeMoviesApi.resolveDoomPlayTicket(parsed.srcOrUrl)
+                }
+            } else {
+                parsed.srcOrUrl
+            } ?: return false
+
+            return emitResolvedHttpUrl(
+                url = resolved,
+                sourceLabel = sourceLabel,
+                qualityHint = qualityHint,
+                isWatch = isWatch && parsed.scheme != "timesdizz",
+                subtitleCallback = subtitleCallback,
+                callback = callback,
+            )
+        }
+
+        // 2. Non-URL encrypted ticket string -> resolve via DoomVideoPlayer v1.6/v1.5 API
+        if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
+            // URL-encoded HTTP link check (`DownloadScreenKt`: `CommonExtensionKt.urlDecode($url)`)
+            val urlDecoded = runCatching { URLDecoder.decode(trimmed, "UTF-8").trim() }.getOrNull()
+            if (urlDecoded != null && (urlDecoded.startsWith("http://", true) || urlDecoded.startsWith("https://", true))) {
+                return emitResolvedHttpUrl(
+                    url = urlDecoded,
+                    sourceLabel = sourceLabel,
+                    qualityHint = qualityHint,
+                    isWatch = isWatch,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                )
+            }
+
+            val resolved = if (isWatch) {
+                TimeMoviesApi.resolveDoomPlayTicket(trimmed)
+                    ?: TimeMoviesApi.resolveDoomDownloadTicket(trimmed)
+            } else {
+                TimeMoviesApi.resolveDoomDownloadTicket(trimmed)
+                    ?: TimeMoviesApi.resolveDoomPlayTicket(trimmed)
+            } ?: return false
+
+            return emitResolvedHttpUrl(
+                url = resolved,
+                sourceLabel = sourceLabel,
+                qualityHint = qualityHint,
+                isWatch = isWatch,
+                subtitleCallback = subtitleCallback,
+                callback = callback,
+            )
+        }
+
+        // 3. Direct HTTP(S) stream, progressive file, or external hoster URL
+        return emitResolvedHttpUrl(
+            url = trimmed,
+            sourceLabel = sourceLabel,
+            qualityHint = qualityHint,
+            isWatch = isWatch,
+            subtitleCallback = subtitleCallback,
+            callback = callback,
+        )
+    }
+
+    /**
+     * Emits playable `ExtractorLink`(s) from a resolved `http(s)://` URL:
+     * - Known third-party hosters -> `loadExtractor(...)` + generic embed unpacker
+     * - MPEG-DASH `.mpd` -> `ExtractorLinkType.DASH`
+     * - Progressive `.mp4`/`.mkv`/`.webm` or download link -> `ExtractorLinkType.VIDEO`
+     * - Watch stream (`isWatch == true` or `.m3u8`) -> `ExtractorLinkType.M3U8`
+     *   (matching `DoomVideoPlayer` `PlayerScreenKt`: `.setMimeType("application/x-mpegURL")`),
+     *   emitting BOTH the untouched master URL AND parsed multi-quality `#EXT-X-STREAM-INF` variants + subtitles!
+     */
+    internal suspend fun emitResolvedHttpUrl(
+        url: String,
+        sourceLabel: String,
+        qualityHint: Int?,
+        isWatch: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val cleanUrl = url.trim()
+        if (!cleanUrl.startsWith("http://", true) && !cleanUrl.startsWith("https://", true)) {
+            return false
+        }
+
+        // 1. Known third-party hoster / embed URL -> delegate to CloudStream + registered custom extractors
+        if (isKnownExternalHoster(cleanUrl)) {
+            if (delegateToHosterExtractors(cleanUrl, sourceLabel, subtitleCallback, callback)) {
+                return true
+            }
+        }
+
+        val pathPart = cleanUrl.substringBefore('?').substringBefore('#').lowercase(Locale.US)
+
+        // 2. MPEG-DASH manifest (`.mpd`)
+        if (pathPart.endsWith(".mpd") || cleanUrl.lowercase(Locale.US).contains(".mpd?")) {
             callback(
                 newExtractorLink(
-                    source = label,
-                    name = label,
-                    url = streamUrl,
-                    type = ExtractorLinkType.VIDEO,
+                    source = sourceLabel,
+                    name = sourceLabel,
+                    url = cleanUrl,
+                    type = ExtractorLinkType.DASH,
                 ) {
-                    this.quality = qualityHint ?: Qualities.Unknown.value
-                    this.headers = headers
+                    this.quality = qualityHint ?: parseQualityNumber(cleanUrl) ?: Qualities.Unknown.value
                 }
             )
             return true
         }
 
-        // Fetch master playlist once to extract embedded `#EXT-X-MEDIA:TYPE=SUBTITLES` tracks AND multi-quality variants
-        val masterText = runCatching {
-            val req = Request.Builder().url(streamUrl).get().header("User-Agent", "okhttp/4.12.0").build()
-            TimeMoviesApi.httpClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
-            }
-        }.getOrDefault("")
+        val isExplicitProgressiveFile = pathPart.endsWith(".mp4") ||
+            pathPart.endsWith(".mkv") ||
+            pathPart.endsWith(".webm") ||
+            pathPart.endsWith(".avi") ||
+            pathPart.endsWith(".mov")
 
-        if (masterText.isNotBlank()) {
-            val subTracks = parseHlsSubtitlesFromMaster(masterText, streamUrl)
-            for (sub in subTracks) {
-                val finalSubUrl = unwrapVttPlaylistIfSingleFile(sub.url)
-                if (emittedSubs.add(finalSubUrl)) {
+        val isExplicitHls = isLikelyHlsUrl(cleanUrl)
+
+        // 3. HLS adaptive stream:
+        //    In both TimeMovies (`manifest`) and DoomVideoPlayer (`PlayerScreenKt`: `application/x-mpegURL`),
+        //    every watch URL that isn't an explicit `.mp4`/`.mkv` file is an HLS playlist!
+        if (isExplicitHls || (isWatch && !isExplicitProgressiveFile)) {
+            val inspected = inspectHttpPayloadIfText(cleanUrl)
+            if (inspected != null && looksLikeHtmlEmbed(inspected)) {
+                if (delegateToHosterExtractors(cleanUrl, sourceLabel, subtitleCallback, callback, inspected)) {
+                    return true
+                }
+            }
+
+            // Always emit the untouched master HLS URL first so signed query tokens & ExoPlayer native adaptive
+            // selection work identically to `DoomVideoPlayer` (`MediaItem.Builder().setUri(dr).setMimeType("application/x-mpegURL")`)!
+            val autoLabel = if (sourceLabel.contains("[")) sourceLabel else "$sourceLabel [Auto HLS]"
+            callback(
+                newExtractorLink(
+                    source = sourceLabel,
+                    name = autoLabel,
+                    url = cleanUrl,
+                    type = ExtractorLinkType.M3U8,
+                ) {
+                    this.quality = qualityHint ?: parseQualityNumber(cleanUrl) ?: Qualities.Unknown.value
+                }
+            )
+
+            // If the master manifest body was readable `#EXTM3U`, also emit embedded VTT/SRT subtitles
+            // and individual `#EXT-X-STREAM-INF` quality variants (preserving parent query tokens if needed).
+            if (inspected != null && inspected.contains("#EXTM3U")) {
+                for (sub in parseHlsSubtitlesFromMaster(inspected, cleanUrl)) {
                     subtitleCallback(
                         newSubtitleFile(
                             lang = sub.label,
-                            url = finalSubUrl,
+                            url = sub.url,
                         )
                     )
                 }
+                for (variant in parseHlsVariantsFromMaster(inspected, cleanUrl)) {
+                    if (variant.url != cleanUrl) {
+                        callback(
+                            newExtractorLink(
+                                source = sourceLabel,
+                                name = "$sourceLabel [${variant.label}]",
+                                url = variant.url,
+                                type = ExtractorLinkType.M3U8,
+                            ) {
+                                this.quality = variant.quality
+                            }
+                        )
+                    }
+                }
+            }
+            return true
+        }
+
+        // 4. Progressive MP4 / MKV direct video download or stream
+        val resolvedQuality = qualityHint
+            ?: parseQualityNumber(sourceLabel)
+            ?: parseQualityNumber(cleanUrl)
+            ?: Qualities.Unknown.value
+
+        callback(
+            newExtractorLink(
+                source = sourceLabel,
+                name = sourceLabel,
+                url = cleanUrl,
+                type = ExtractorLinkType.VIDEO,
+            ) {
+                this.quality = resolvedQuality
+            }
+        )
+        return true
+    }
+
+    private fun isKnownExternalHoster(url: String): Boolean {
+        val host = runCatching { URI(url).host?.lowercase(Locale.US).orEmpty() }.getOrDefault("")
+        if (host.isEmpty()) return false
+        return KNOWN_EXTERNAL_HOSTER_KEYWORDS.any { kw -> host.contains(kw) }
+    }
+
+    private fun isLikelyHlsUrl(url: String): Boolean {
+        val lower = url.lowercase(Locale.US)
+        return lower.contains(".m3u8") ||
+            lower.contains("/hls/") ||
+            lower.contains("playlist") ||
+            lower.contains("manifest") ||
+            lower.contains("mpegurl")
+    }
+
+    private fun looksLikeHtmlEmbed(body: String): Boolean {
+        val trimmed = body.trimStart()
+        return trimmed.startsWith("<!DOCTYPE html", ignoreCase = true) ||
+            trimmed.startsWith("<html", ignoreCase = true) ||
+            trimmed.contains("eval(function(p,a,c,k,e,d)") ||
+            trimmed.contains("jwplayer(")
+    }
+
+    /**
+     * Lightly inspects a stream URL ONLY if it returns small text (`#EXTM3U` or `text/html`),
+     * immediately aborting without reading binary video segments if `Content-Type` is binary video.
+     */
+    private fun inspectHttpPayloadIfText(url: String): String? = runCatching {
+        val req = Request.Builder()
+            .url(url)
+            .get()
+            .header("Accept", "*/*")
+            .build()
+        inspectClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val ct = resp.header("Content-Type")?.lowercase(Locale.US).orEmpty()
+            if (ct.startsWith("video/") || ct.contains("octet-stream") || ct.contains("mp4")) {
+                return null
+            }
+            val contentLength = resp.header("Content-Length")?.toLongOrNull() ?: -1L
+            if (contentLength > 2_000_000L) return null
+            resp.body?.string()
+        }
+    }.getOrNull()
+
+    private suspend fun delegateToHosterExtractors(
+        url: String,
+        sourceLabel: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+        prefetchedHtml: String? = null,
+    ): Boolean {
+        var found = false
+        val wrappedCallback: (ExtractorLink) -> Unit = { link ->
+            found = true
+            callback(link)
+        }
+
+        runCatching {
+            if (loadExtractor(url, url, subtitleCallback, wrappedCallback)) {
+                found = true
+            }
+        }
+        if (found) return true
+
+        // Generic packed-JS / JWPlayer / Plyr HTML sniffer fallback
+        return extractGenericHtmlEmbed(
+            embedUrl = url,
+            sourceLabel = sourceLabel,
+            prefetchedHtml = prefetchedHtml,
+            subtitleCallback = subtitleCallback,
+            callback = wrappedCallback,
+        )
+    }
+
+    internal suspend fun extractGenericHtmlEmbed(
+        embedUrl: String,
+        sourceLabel: String,
+        prefetchedHtml: String? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        val html = prefetchedHtml ?: runCatching { app.get(embedUrl, referer = embedUrl).text }.getOrNull() ?: return false
+        val combined = buildString {
+            append(html)
+            val packedRegex = Regex("""eval\(function\(p,a,c,k,e,[dr]\).*?\.split\(['"]\|['"]\)\)\)""", RegexOption.DOT_MATCHES_ALL)
+            for (m in packedRegex.findAll(html)) {
+                val unpacked = runCatching { JsUnpacker(m.value).unpack() }.getOrNull()
+                if (!unpacked.isNullOrBlank()) {
+                    append('\n')
+                    append(unpacked)
+                }
             }
         }
 
-        val generated = runCatching {
-            M3u8Helper.generateM3u8(
-                source = label,
-                streamUrl = streamUrl,
-                referer = "",
-                headers = headers,
-            )
-        }.getOrDefault(emptyList())
+        var emitted = false
+        val origin = runCatching {
+            val u = URI(embedUrl)
+            "${u.scheme}://${u.host}"
+        }.getOrDefault(embedUrl)
 
-        var count = 0
-        for (link in generated) {
-            if (emittedUrls.add(link.url)) {
-                callback(link)
-                count++
+        // Extract relative or absolute `.m3u8` / `.mp4` stream candidates (`hls2`, `hls4`, `hls3`, `file:"..."`)
+        val streamCandidates = LinkedHashSet<String>()
+        val jsonLinkKeys = listOf("hls4", "hls2", "hls3", "file", "src")
+        for (key in jsonLinkKeys) {
+            val rgx = Regex("""["']$key["']\s*:\s*["']([^"']+)["']""")
+            for (m in rgx.findAll(combined)) {
+                val candidate = m.groupValues[1].replace("\\/", "/").trim()
+                if (candidate.contains(".m3u8") || candidate.contains(".mp4") || candidate.startsWith("/stream/")) {
+                    streamCandidates.add(resolveRelativeUrl(embedUrl, candidate))
+                }
             }
         }
+        val directUrlRegex = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
+        for (m in directUrlRegex.findAll(combined)) {
+            streamCandidates.add(m.value.replace("\\/", "/"))
+        }
 
-        // Always ensure master HLS stream itself is available (preserves embedded HLS audio/subtitles in ExoPlayer)
-        if (emittedUrls.add(streamUrl)) {
+        for (streamUrl in streamCandidates) {
+            val isM3u8 = streamUrl.lowercase(Locale.US).contains(".m3u8")
             callback(
                 newExtractorLink(
-                    source = label,
-                    name = "$label [Auto]",
+                    source = sourceLabel,
+                    name = sourceLabel,
                     url = streamUrl,
-                    type = ExtractorLinkType.M3U8,
+                    type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
                 ) {
-                    this.quality = qualityHint ?: Qualities.Unknown.value
-                    this.headers = headers
+                    this.referer = "$origin/"
+                    this.quality = parseQualityNumber(streamUrl) ?: Qualities.Unknown.value
                 }
             )
-            count++
+            emitted = true
         }
 
-        return count > 0
+        // Subtitle `.vtt` / `.srt` tracks inside HTML player configs
+        val subRegex = Regex("""https?://[^\s"'<>\\]+?\.(?:vtt|srt)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
+        for (m in subRegex.findAll(combined)) {
+            val subUrl = m.value.replace("\\/", "/")
+            subtitleCallback(newSubtitleFile("Subtitle", subUrl))
+        }
+
+        return emitted
     }
 
-    private fun parseQualityDigits(text: String?): Int? {
+    fun parseQualityNumber(text: String?): Int? {
         if (text.isNullOrBlank()) return null
-        return Regex("""(2160|1440|1080|720|480|360|240)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+        Regex("""(2160|1440|1080|720|480|360|240)\s*p?""", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+            ?.let { return it }
+
+        val lower = text.lowercase(Locale.US)
+        return when {
+            lower.contains("4k") || lower.contains("uhd") -> Qualities.P2160.value
+            lower.contains("fhd") -> Qualities.P1080.value
+            lower.contains("hd") -> Qualities.P720.value
+            lower.contains("sd") -> Qualities.P480.value
+            else -> getQualityFromName(text).takeIf { it != Qualities.Unknown.value }
+        }
+    }
+
+    // ---- HLS `#EXT-X-STREAM-INF` Variant & `#EXT-X-MEDIA:TYPE=SUBTITLES` Parsers ----
+
+    fun parseHlsVariantsFromMaster(
+        masterContent: String,
+        masterUrl: String,
+    ): List<ParsedHlsVariant> {
+        val out = ArrayList<ParsedHlsVariant>()
+        val seen = HashSet<String>()
+        val lines = masterContent.lines()
+        val masterQuery = runCatching { URI(masterUrl).rawQuery?.takeIf { it.isNotBlank() } }.getOrNull()
+
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i].trim()
+            if (line.startsWith("#EXT-X-STREAM-INF:", ignoreCase = true)) {
+                val attrs = line.substringAfter(':')
+                val height = Regex("""RESOLUTION=\d+x(\d+)""", RegexOption.IGNORE_CASE)
+                    .find(attrs)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+                val nameAttr = parseM3u8Attribute(attrs, "NAME")
+                val quality = height ?: parseQualityNumber(nameAttr) ?: Qualities.Unknown.value
+                val label = when {
+                    height != null -> "${height}p"
+                    !nameAttr.isNullOrBlank() -> nameAttr
+                    else -> "HLS"
+                }
+
+                var j = i + 1
+                while (j < lines.size && (lines[j].isBlank() || lines[j].trim().startsWith("#"))) {
+                    j++
+                }
+                if (j < lines.size) {
+                    var resolved = resolveRelativeUrl(masterUrl, lines[j].trim())
+                    // Preserve signed query token from `masterUrl` when relative variant URI lacks a query string
+                    if (!masterQuery.isNullOrBlank() && !resolved.contains('?') && !lines[j].trim().startsWith("http", true)) {
+                        resolved = "$resolved?$masterQuery"
+                    }
+                    if (seen.add(resolved)) {
+                        out.add(ParsedHlsVariant(url = resolved, quality = quality, label = label))
+                    }
+                    i = j
+                }
+            }
+            i++
+        }
+        return out.sortedByDescending { it.quality }
+    }
+
+    fun parseHlsSubtitlesFromMaster(
+        masterContent: String,
+        masterUrl: String,
+    ): List<ParsedSubtitleTrack> {
+        val out = ArrayList<ParsedSubtitleTrack>()
+        val seenUrls = HashSet<String>()
+        val masterQuery = runCatching { URI(masterUrl).rawQuery?.takeIf { it.isNotBlank() } }.getOrNull()
+
+        for (rawLine in masterContent.lineSequence()) {
+            val line = rawLine.trim()
+            if (!line.startsWith("#EXT-X-MEDIA:", ignoreCase = true)) continue
+            if (!line.contains("TYPE=SUBTITLES", ignoreCase = true)) continue
+
+            val uriAttr = parseM3u8Attribute(line, "URI") ?: continue
+            var resolvedUri = resolveRelativeUrl(masterUrl, uriAttr)
+            if (!masterQuery.isNullOrBlank() && !resolvedUri.contains('?') && !uriAttr.startsWith("http", true)) {
+                resolvedUri = "$resolvedUri?$masterQuery"
+            }
+            if (!seenUrls.add(resolvedUri)) continue
+
+            val nameAttr = parseM3u8Attribute(line, "NAME")
+            val langAttr = parseM3u8Attribute(line, "LANGUAGE")
+            val defaultAttr = parseM3u8Attribute(line, "DEFAULT")?.equals("YES", ignoreCase = true) == true
+
+            val label = when {
+                !nameAttr.isNullOrBlank() && !langAttr.isNullOrBlank() &&
+                    !nameAttr.contains(langAttr, ignoreCase = true) ->
+                    "${normalizeSubtitleLabel(nameAttr, langAttr)}"
+                !nameAttr.isNullOrBlank() -> normalizeSubtitleLabel(nameAttr, langAttr)
+                !langAttr.isNullOrBlank() -> normalizeSubtitleLabel(langAttr, langAttr)
+                else -> "Subtitle"
+            }
+
+            out.add(
+                ParsedSubtitleTrack(
+                    label = label,
+                    langCode = langAttr,
+                    url = resolvedUri,
+                    isDefault = defaultAttr,
+                )
+            )
+        }
+        return out
+    }
+
+    private fun parseM3u8Attribute(line: String, key: String): String? {
+        val quoted = Regex("""(?:^|,)\s*$key="([^"]*)"""", RegexOption.IGNORE_CASE).find(line)
+        if (quoted != null) return quoted.groupValues[1].trim()
+        val unquoted = Regex("""(?:^|,)\s*$key=([^,\s]+)""", RegexOption.IGNORE_CASE).find(line)
+        return unquoted?.groupValues?.get(1)?.trim()
+    }
+
+    private fun normalizeSubtitleLabel(name: String, lang: String?): String {
+        val code = lang?.lowercase(Locale.US).orEmpty()
+        return when {
+            code.startsWith("ar") || name.contains("arab", ignoreCase = true) || name.contains("عرب") ->
+                if (name.contains("عرب")) name else "العربية ($name)"
+            code.startsWith("en") || name.contains("eng", ignoreCase = true) -> "English"
+            code.startsWith("fr") -> "Français"
+            code.startsWith("es") -> "Español"
+            code.startsWith("tr") -> "Türkçe"
+            else -> name
+        }
+    }
+
+    private fun resolveRelativeUrl(baseUrl: String, relativeOrAbs: String): String {
+        if (relativeOrAbs.startsWith("http://", true) || relativeOrAbs.startsWith("https://", true)) {
+            return relativeOrAbs
+        }
+        return runCatching {
+            URI(baseUrl).resolve(relativeOrAbs).toString()
+        }.getOrElse {
+            val baseDir = baseUrl.substringBefore('?').substringBeforeLast('/', "")
+            if (relativeOrAbs.startsWith('/')) {
+                val origin = Regex("""^https?://[^/]+""").find(baseUrl)?.value.orEmpty()
+                "$origin$relativeOrAbs"
+            } else {
+                "$baseDir/$relativeOrAbs"
+            }
+        }
     }
 }
 
-/**
- * Standalone CloudStream `ExtractorApi` for `timesnizz://doomplayer.com/...` playback links.
- */
-class DoomPlayerPlayExtractor : ExtractorApi() {
-    override val name = "Doom Video Player"
-    override val mainUrl = "timesnizz://doomplayer.com"
-    override val requiresReferer = false
+// =========================================================================
+// Registered CloudStream `ExtractorApi` Classes (`DoomVideoPlayer` + Hosters)
+// =========================================================================
+
+open class DoomPlayerPlayExtractor : ExtractorApi() {
+    override val name: String = "DoomVideoPlayer"
+    override val mainUrl: String = "timesnizz://doomplayer.com"
+    override val requiresReferer: Boolean = false
 
     override suspend fun getUrl(
         url: String,
@@ -469,32 +931,33 @@ class DoomPlayerPlayExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ) {
-        val parsed = TimeMoviesCrypto.parseDoomDeepLink(url) ?: return
-        val resolved = if (parsed.isEncryptedTicket) {
-            withContext(Dispatchers.IO) { TimeMoviesApi.resolveDoomPlay(parsed.srcOrUrl) }
-        } else {
-            parsed.srcOrUrl
+        val parsed = TimeMoviesCrypto.parseDoomDeepLink(url)
+        val resolved = when {
+            parsed != null && parsed.isEncryptedTicket -> TimeMoviesApi.resolveDoomPlayTicket(parsed.srcOrUrl)
+            parsed != null -> parsed.srcOrUrl
+            else -> TimeMoviesApi.resolveDoomPlayTicket(url.substringAfterLast('/'))
         } ?: return
 
-        TimeMoviesExtractors.emitResolvedStreamUrl(
-            streamUrl = resolved,
-            label = name,
+        TimeMoviesExtractors.emitResolvedHttpUrl(
+            url = resolved,
+            sourceLabel = name,
             qualityHint = null,
-            emittedUrls = Collections.synchronizedSet(HashSet()),
-            emittedSubs = Collections.synchronizedSet(HashSet()),
+            isWatch = true,
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
     }
 }
 
-/**
- * Standalone CloudStream `ExtractorApi` for `timesdizz://doomplayer.com/...` direct download links.
- */
-class DoomPlayerDownloadExtractor : ExtractorApi() {
-    override val name = "Doom Video Download"
-    override val mainUrl = "timesdizz://doomplayer.com"
-    override val requiresReferer = false
+class DoomPlayerHttpsPlayExtractor : DoomPlayerPlayExtractor() {
+    override val name: String = "DoomVideoPlayer Play"
+    override val mainUrl: String = "https://doomplayer.com/play"
+}
+
+open class DoomPlayerDownloadExtractor : ExtractorApi() {
+    override val name: String = "DoomVideoPlayer Download"
+    override val mainUrl: String = "timesdizz://doomplayer.com"
+    override val requiresReferer: Boolean = false
 
     override suspend fun getUrl(
         url: String,
@@ -502,21 +965,196 @@ class DoomPlayerDownloadExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ) {
-        val parsed = TimeMoviesCrypto.parseDoomDeepLink(url) ?: return
-        val resolved = if (parsed.isEncryptedTicket) {
-            withContext(Dispatchers.IO) { TimeMoviesApi.resolveDoomDownload(parsed.srcOrUrl) }
-        } else {
-            parsed.srcOrUrl
+        val parsed = TimeMoviesCrypto.parseDoomDeepLink(url)
+        val resolved = when {
+            parsed != null && parsed.isEncryptedTicket -> TimeMoviesApi.resolveDoomDownloadTicket(parsed.srcOrUrl)
+            parsed != null -> parsed.srcOrUrl
+            else -> TimeMoviesApi.resolveDoomDownloadTicket(url.substringAfterLast('/'))
         } ?: return
 
-        TimeMoviesExtractors.emitResolvedStreamUrl(
-            streamUrl = resolved,
-            label = name,
+        TimeMoviesExtractors.emitResolvedHttpUrl(
+            url = resolved,
+            sourceLabel = name,
             qualityHint = null,
-            emittedUrls = Collections.synchronizedSet(HashSet()),
-            emittedSubs = Collections.synchronizedSet(HashSet()),
+            isWatch = false,
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
     }
+}
+
+class DoomPlayerHttpsDownloadExtractor : DoomPlayerDownloadExtractor() {
+    override val name: String = "DoomVideoPlayer Direct"
+    override val mainUrl: String = "https://doomplayer.com/download"
+}
+
+class TimeMoviesMediaV2Extractor : ExtractorApi() {
+    override val name: String = "TimeMovies MediaV2"
+    override val mainUrl: String = "https://api.apks.lol/v2/media"
+    override val requiresReferer: Boolean = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val grant = referer?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: return
+        val action = if (url.contains("/download")) "download" else "watch"
+        val media = TimeMoviesApi.fetchOriginMedia(action, grant) ?: return
+        val src = media.src?.trim()
+        if (!src.isNullOrEmpty()) {
+            TimeMoviesExtractors.emitResolvedHttpUrl(
+                url = src,
+                sourceLabel = name,
+                qualityHint = null,
+                isWatch = action == "watch",
+                subtitleCallback = subtitleCallback,
+                callback = callback,
+            )
+        }
+        for (item in media.sources) {
+            TimeMoviesExtractors.emitResolvedHttpUrl(
+                url = item.link,
+                sourceLabel = "$name [${item.name ?: "${item.quality ?: ""}p"}]",
+                qualityHint = item.quality,
+                isWatch = action == "watch",
+                subtitleCallback = subtitleCallback,
+                callback = callback,
+            )
+        }
+    }
+}
+
+// ---- StreamHG / EarnVids Family Extractors ----
+
+open class TmStreamHgExtractor : ExtractorApi() {
+    override val name: String = "StreamHG"
+    override val mainUrl: String = "https://hglink.to"
+    override val requiresReferer: Boolean = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        TimeMoviesExtractors.extractGenericHtmlEmbed(
+            embedUrl = url,
+            sourceLabel = name,
+            subtitleCallback = subtitleCallback,
+            callback = callback,
+        )
+    }
+}
+
+class TmCavanhabgExtractor : TmStreamHgExtractor() {
+    override val mainUrl: String = "https://cavanhabg.com"
+}
+
+class TmDumbalagExtractor : TmStreamHgExtractor() {
+    override val mainUrl: String = "https://dumbalag.com"
+}
+
+class TmUasoptExtractor : TmStreamHgExtractor() {
+    override val mainUrl: String = "https://uasopt.com"
+}
+
+class TmDhcplayExtractor : TmStreamHgExtractor() {
+    override val mainUrl: String = "https://dhcplay.com"
+}
+
+class TmEarnVidsExtractor : TmStreamHgExtractor() {
+    override val name: String = "EarnVids"
+    override val mainUrl: String = "https://earnvids.com"
+}
+
+// ---- Vidara / Vidroba Family Extractors ----
+
+open class TmVidaraExtractor : ExtractorApi() {
+    override val name: String = "Vidara"
+    override val mainUrl: String = "https://vidara.to"
+    override val requiresReferer: Boolean = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val fileCode = Regex("""/(?:e|d|v)/([A-Za-z0-9]+)""").find(url)?.groupValues?.getOrNull(1)
+        if (!fileCode.isNullOrBlank()) {
+            val origin = runCatching {
+                val u = URI(url)
+                "${u.scheme}://${u.host}"
+            }.getOrDefault(mainUrl)
+            val apiText = runCatching {
+                app.get("$origin/api/stream?filecode=$fileCode", referer = "$origin/e/$fileCode").text
+            }.getOrNull()
+            if (!apiText.isNullOrBlank() && apiText.trimStart().startsWith("{")) {
+                val json = runCatching { JSONObject(apiText) }.getOrNull()
+                val streamUrl = json?.optString("streaming_url", "")?.trim().orEmpty()
+                if (streamUrl.startsWith("http")) {
+                    TimeMoviesExtractors.emitResolvedHttpUrl(
+                        url = streamUrl,
+                        sourceLabel = name,
+                        qualityHint = null,
+                        isWatch = true,
+                        subtitleCallback = subtitleCallback,
+                        callback = callback,
+                    )
+                    return
+                }
+            }
+        }
+        TimeMoviesExtractors.extractGenericHtmlEmbed(
+            embedUrl = url,
+            sourceLabel = name,
+            subtitleCallback = subtitleCallback,
+            callback = callback,
+        )
+    }
+}
+
+class TmVidaraSoExtractor : TmVidaraExtractor() {
+    override val mainUrl: String = "https://vidara.so"
+}
+
+class TmVidrobaExtractor : TmVidaraExtractor() {
+    override val name: String = "Vidroba"
+    override val mainUrl: String = "https://vidroba.com"
+}
+
+// ---- Byse Family Extractors ----
+
+open class TmByseExtractor : ExtractorApi() {
+    override val name: String = "Byse"
+    override val mainUrl: String = "https://bysezejataos.com"
+    override val requiresReferer: Boolean = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        TimeMoviesExtractors.extractGenericHtmlEmbed(
+            embedUrl = url,
+            sourceLabel = name,
+            subtitleCallback = subtitleCallback,
+            callback = callback,
+        )
+    }
+}
+
+class TmByseVepoinExtractor : TmByseExtractor() {
+    override val mainUrl: String = "https://bysevepoin.com"
+}
+
+class TmByseDikamoumExtractor : TmByseExtractor() {
+    override val mainUrl: String = "https://bysedikamoum.com"
+}
+
+class TmByseKozeExtractor : TmByseExtractor() {
+    override val mainUrl: String = "https://bysekoze.com"
 }
