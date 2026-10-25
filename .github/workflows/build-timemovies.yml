@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 jobs:
   build:
@@ -28,10 +29,36 @@ jobs:
           cache: 'gradle'
 
       - name: Configure Android SDK, test, and build TimeMovies plugin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace
+          set +e
+          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace > /tmp/gradle_out.txt 2>&1
+          RC=$?
+          cat /tmp/gradle_out.txt
+          if [ $RC -ne 0 ]; then
+            python3 - <<'PY'
+          import glob, json, os, subprocess
+          parts = []
+          for xmlf in sorted(glob.glob("TimeMovies/build/test-results/**/*.xml", recursive=True)):
+              parts.append(f"=== {xmlf} ===\n" + open(xmlf, encoding="utf-8", errors="replace").read())
+          parts.append("=== GRADLE ===\n" + open("/tmp/gradle_out.txt", encoding="utf-8", errors="replace").read()[-25000:])
+          summary = "```\n" + "\n\n".join(parts)[:62000] + "\n```"
+          payload = {
+              "name": "JUnit Report",
+              "head_sha": os.environ["GITHUB_SHA"],
+              "status": "completed",
+              "conclusion": "failure",
+              "output": {"title": "JUnit XML & Gradle", "summary": summary},
+          }
+          with open("/tmp/cr.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f)
+          subprocess.run(["gh", "api", "--method", "POST", f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", "--input", "/tmp/cr.json"], check=False)
+          PY
+            exit $RC
+          fi
 
       - name: Upload TimeMovies.cs3 artifact
         uses: actions/upload-artifact@v4
