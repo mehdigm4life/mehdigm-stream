@@ -491,11 +491,11 @@ object CimaNowGatewaySolver {
                 ];
                 const xvfb = '/usr/bin/xvfb-run';
                 const proc = fs.existsSync(xvfb)
-                    ? spawn(xvfb, ['-a', '-s', '-screen 0 1280x1024x24', chromeBin, ...args], { stdio: 'ignore' })
-                    : spawn(chromeBin, ['--headless=new', ...args], { stdio: 'ignore' });
+                    ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: 'ignore', detached: true })
+                    : spawn(chromeBin, ['--headless=new', ...args], { stdio: 'ignore', detached: true });
                 function cleanup(out) {
                     try { fs.writeFileSync(outPath, JSON.stringify(out), 'utf8'); } catch(e) {}
-                    try { proc.kill('SIGKILL'); } catch(e) {}
+                    try { process.kill(-proc.pid, 'SIGKILL'); } catch(e) { try { proc.kill('SIGKILL'); } catch(e2) {} }
                     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch(e) {}
                     process.exit(0);
                 }
@@ -534,6 +534,12 @@ object CimaNowGatewaySolver {
                             }
                             if (u.includes('/watching/') && u.includes('token=')) minted = u;
                         }
+                        if (m.method === 'Network.responseReceived') {
+                            const u = m.params.response.url || '';
+                            if (m.params.type === 'Document' || u.includes('get-link')) {
+                                diag.push('res:' + m.params.response.status + ':' + u.slice(0, 65));
+                            }
+                        }
                         if (m.method === 'Network.loadingFinished' && getLinkReqId && m.params.requestId === getLinkReqId) {
                             getLinkDone = true;
                         }
@@ -560,7 +566,6 @@ object CimaNowGatewaySolver {
                             }
                         }
                         if (minted) {
-                            try { await send('Browser.close'); } catch(e) {}
                             return cleanup({ url: minted, diag });
                         }
                         // Let initial redirect + non-interactive Turnstile run undisturbed for first 4.5s
@@ -626,7 +631,9 @@ object CimaNowGatewaySolver {
                                             }
                                         }
                                     }
-                                    return 'WAIT:btn=' + (!!btn) + ',h=' + h + ',ttl=' + ttl + ',loc=' + loc.slice(0, 42);
+                                    var domLen = document.documentElement ? document.documentElement.innerHTML.length : -1;
+                                    var snip = (!btn && domLen > 0) ? document.documentElement.innerHTML.slice(0, 140) : '';
+                                    return 'WAIT:btn=' + (!!btn) + ',wd=' + navigator.webdriver + ',dom=' + domLen + ',h=' + h + ',ttl=' + ttl + ',snip=' + snip;
                                 } catch(e) { return 'ERR:' + e.message; }
                             })()`,
                             returnByValue: true
@@ -636,9 +643,8 @@ object CimaNowGatewaySolver {
                             firstBtnMs = ms;
                             diag.push('firstBtn=' + ms);
                         }
-                        if (ms % 3000 === 0) diag.push(ms + ':' + pv);
+                        if (ms === 5000 || ms % 6000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
-                            try { await send('Browser.close'); } catch(e) {}
                             return cleanup({ url: pv.slice(4), diag });
                         } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 2000) {
                             lastBtnClick = ms;
@@ -654,7 +660,6 @@ object CimaNowGatewaySolver {
                             }
                         }
                     }
-                    try { await send('Browser.close'); } catch(e) {}
                     cleanup({ url: minted, diag });
                 })().catch(e => cleanup({ url: '', diag: ['catch:' + (e && e.message)] }));
             """.trimIndent()

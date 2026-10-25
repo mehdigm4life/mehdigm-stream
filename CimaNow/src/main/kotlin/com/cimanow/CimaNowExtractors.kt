@@ -284,6 +284,7 @@ object CimaNowExtractors {
         }
         val gwOrigin = originOf(gwEntry).ifBlank { "https://rm.freex2line.online" }
         val vaultReferer = "$gwOrigin/2020/02/blog-post.html/"
+        debugLogger?.invoke("unlock entry item=${effectiveItemUrl.take(90)} gw=${gwEntry.take(120)}")
 
         // 1. Primary path: Turnstile Gateway Solver (Android stealth WebView / CI Chromium)
         val tMint0 = System.currentTimeMillis()
