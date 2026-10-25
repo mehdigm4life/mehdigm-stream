@@ -162,16 +162,22 @@ internal object TimeMoviesLocalHlsServer {
         }
     }
 
-    fun registerM3u8(m3u8Content: String): String? {
+    fun registerM3u8(m3u8Content: String, slug: String = "master"): String? {
         val normalized = m3u8Content.removePrefix("\uFEFF").trim()
         if (!normalized.startsWith("#EXTM3U", ignoreCase = true)) return null
         val bytes = "$normalized\n".toByteArray(Charsets.UTF_8)
-        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
-        val key = buildString(24) {
-            for (i in 0 until 12) {
+        val safeSlug = slug.lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+            .ifEmpty { "hls" }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$safeSlug\n$normalized".toByteArray(Charsets.UTF_8))
+        val hash = buildString(20) {
+            for (i in 0 until 10) {
                 append("%02x".format(digest[i]))
             }
         }
+        val key = "$safeSlug-$hash"
         synchronized(store) {
             store[key] = bytes
         }
@@ -776,7 +782,7 @@ object TimeMoviesExtractors {
                     }
                 }
 
-                val autoPlayableUrl = TimeMoviesLocalHlsServer.registerM3u8(absolutized) ?: cleanUrl
+                val autoPlayableUrl = TimeMoviesLocalHlsServer.registerM3u8(absolutized, slug = "auto") ?: cleanUrl
                 val bestVariantQuality = master.variants
                     .maxOfOrNull { it.quality }
                     ?.takeIf { it > Qualities.Unknown.value }
@@ -804,7 +810,7 @@ object TimeMoviesExtractors {
                         if (variant.url == cleanUrl) continue
                         val variantPlayableUrl = if (hasSeparateMediaTracks) {
                             val singleMaster = synthesizeSingleVariantMasterM3u8(master, variant)
-                            TimeMoviesLocalHlsServer.registerM3u8(singleMaster) ?: variant.url
+                            TimeMoviesLocalHlsServer.registerM3u8(singleMaster, slug = variant.displayLabel) ?: variant.url
                         } else {
                             variant.url
                         }
