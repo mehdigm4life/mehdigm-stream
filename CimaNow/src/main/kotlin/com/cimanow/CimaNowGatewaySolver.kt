@@ -74,7 +74,7 @@ object CimaNowGatewaySolver {
 
         return solverMutex.withLock {
             getCachedWatchingUrl(itemUrl)?.let { return@withLock it }
-            val cleanShine = unwrapHrefLi(shineUrl)
+            val cleanShine = unwrapHrefLi(shineUrl) ?: return@withLock null
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
                 mintViaAndroidWebView(cleanShine, itemUrl)
