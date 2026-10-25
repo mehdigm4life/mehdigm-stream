@@ -1,7 +1,7 @@
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 4
+version = 5
 
 cloudstream {
     description = "سيما ناو — مشاهدة وتحميل أحدث الأفلام والمسلسلات العربية والأجنبية والتركية والآسيوية والأنمي والبرامج بجودات متعددة."
@@ -31,7 +31,7 @@ android {
 }
 
 dependencies {
-    implementation("org.mozilla:rhino:1.8.1")
+    compileOnly("org.mozilla:rhino:1.8.1")
     val testImplementation by configurations
     val compileOnly by configurations
     compileOnly.dependencies.withType<FileCollectionDependency>().all {

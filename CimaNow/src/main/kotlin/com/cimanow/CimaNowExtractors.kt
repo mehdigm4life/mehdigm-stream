@@ -235,11 +235,11 @@ object CimaNowExtractors {
                 referer = gatewayVaultReferer,
             ) ?: run {
                 debugLogger?.invoke("[$pTag] watching fetch null")
-                return@withStickySession null
+                throw CimaNowNetwork.CimaBlockedException("watching network error")
             }
             if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) {
                 debugLogger?.invoke("[$pTag] watching blocked code=$wCode len=${watchHtml.length}")
-                return@withStickySession null
+                throw CimaNowNetwork.CimaBlockedException("watching blocked HTTP $wCode")
             }
 
             val vault = CimaNowCrypto.unlockWatchingVault(watchHtml) ?: run {
@@ -332,6 +332,16 @@ object CimaNowExtractors {
                         unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
                         return unlocked
                     }
+                }
+            }
+            // Layer-2 Future-Proof Fallback: if Rhino/OkHttp could not unlock `/watching/`,
+            // open `mintedUrl` directly inside Android WebView's native V8 engine.
+            if (!mintedUrl.isNullOrBlank()) {
+                val wvFallback = CimaNowGatewaySolver.extractWatchingSourcesViaWebView(mintedUrl, vaultReferer)
+                if (wvFallback != null) {
+                    val unlocked = UnlockedSources(mintedUrl, wvFallback.watchEmbeds, wvFallback.downloads)
+                    unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
+                    return unlocked
                 }
             }
         }
@@ -1350,8 +1360,7 @@ object CimaNowExtractors {
 
         val cx = org.mozilla.javascript.Context.enter()
         return try {
-            cx.isInterpretedMode = true
-            cx.languageVersion = org.mozilla.javascript.Context.VERSION_ES6
+            CimaNowCrypto.configureRhinoAndroidSafe(cx)
             val scope = cx.initSafeStandardObjects()
             val harness = """
                 var window = this;

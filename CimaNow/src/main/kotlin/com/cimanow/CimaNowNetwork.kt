@@ -68,6 +68,11 @@ object CimaNowNetwork {
         private set
 
     @Volatile
+    var preferredUserAgent: String = MOBILE_UA
+
+    class CimaBlockedException(message: String = "CimaNow IP/WAF block") : RuntimeException(message)
+
+    @Volatile
     private var directBlockedUntilMs: Long = 0L
 
     private val proxyMutex = Mutex()
@@ -224,17 +229,39 @@ object CimaNowNetwork {
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val bucket = store[domainKey(url.host)] ?: return emptyList()
+            val bucket = store[domainKey(url.host)]
             val now = System.currentTimeMillis()
-            val out = ArrayList<Cookie>(bucket.size)
-            for ((name, c) in bucket) {
-                if (c.expiresAt < now) {
-                    bucket.remove(name)
-                } else {
-                    out.add(c)
+            val out = LinkedHashMap<String, Cookie>()
+            if (syncWithWebKit && android.os.Build.VERSION.SDK_INT > 0) {
+                runCatching {
+                    val raw = CookieManager.getInstance().getCookie("${url.scheme}://${url.host}").orEmpty()
+                    for (pair in raw.split(';')) {
+                        val eq = pair.indexOf('=')
+                        if (eq <= 0) continue
+                        val name = pair.substring(0, eq).trim()
+                        val value = pair.substring(eq + 1).trim()
+                        if (name.isNotEmpty() && value.isNotEmpty()) {
+                            Cookie.Builder()
+                                .name(name)
+                                .value(value)
+                                .domain(url.host)
+                                .path("/")
+                                .build()
+                                .also { out[name] = it }
+                        }
+                    }
                 }
             }
-            return out
+            if (bucket != null) {
+                for ((name, c) in bucket) {
+                    if (c.expiresAt < now) {
+                        bucket.remove(name)
+                    } else {
+                        out[name] = c
+                    }
+                }
+            }
+            return out.values.toList()
         }
 
         fun exportCookieHeader(urlStr: String): String {
@@ -496,7 +523,7 @@ object CimaNowNetwork {
         runCatching {
             val rb = Request.Builder()
                 .url(encodedUrl)
-                .header("User-Agent", MOBILE_UA)
+                .header("User-Agent", preferredUserAgent)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             if (!referer.isNullOrBlank()) {
@@ -588,7 +615,7 @@ object CimaNowNetwork {
         ): NoRedirectResponse? = runCatching {
             val rb = Request.Builder()
                 .url(encodeUrl(url))
-                .header("User-Agent", MOBILE_UA)
+                .header("User-Agent", preferredUserAgent)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             if (!referer.isNullOrBlank()) rb.header("Referer", encodeUrl(referer))
@@ -607,15 +634,21 @@ object CimaNowNetwork {
             referer: String? = null,
             extraHeaders: Map<String, String> = emptyMap(),
         ): Pair<Int, String>? = runCatching {
+            val encodedTarget = encodeUrl(url)
             val rb = Request.Builder()
-                .url(encodeUrl(url))
-                .header("User-Agent", MOBILE_UA)
+                .url(encodedTarget)
+                .header("User-Agent", preferredUserAgent)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             if (!referer.isNullOrBlank()) rb.header("Referer", encodeUrl(referer))
             for ((k, v) in extraHeaders) rb.header(k, v)
             client.newCall(rb.build()).execute().use { res ->
-                res.code to res.body?.string().orEmpty()
+                val finalUrl = res.request.url.toString()
+                if (isSoftRedirectedToHome(encodedTarget, finalUrl)) {
+                    403 to ""
+                } else {
+                    res.code to res.body?.string().orEmpty()
+                }
             }
         }.getOrNull()
 
@@ -629,7 +662,7 @@ object CimaNowNetwork {
             val rb = Request.Builder()
                 .url(encodeUrl(url))
                 .post(rawFormBody.toRequestBody(FORM_MEDIA_TYPE))
-                .header("User-Agent", MOBILE_UA)
+                .header("User-Agent", preferredUserAgent)
                 .header("Accept", "*/*")
                 .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             if (!referer.isNullOrBlank()) rb.header("Referer", encodeUrl(referer))
@@ -642,7 +675,7 @@ object CimaNowNetwork {
     }
 
     fun newDirectSession(): StickyHttpSession {
-        val store = SessionCookieStore(false)
+        val store = SessionCookieStore(syncWithWebKit = true)
         return StickyHttpSession(newIsolatedDirectClient(store), store, null)
     }
 
@@ -650,13 +683,14 @@ object CimaNowNetwork {
         val now = System.currentTimeMillis()
         if (now >= directBlockedUntilMs) {
             try {
-                val store = SessionCookieStore(false)
+                val store = SessionCookieStore(syncWithWebKit = true)
                 val session = StickyHttpSession(newIsolatedDirectClient(store), store, null)
                 val directResult = block(session)
-                if (directResult != null) return@withContext directResult
-                directBlockedUntilMs = System.currentTimeMillis() + 300_000L
+                return@withContext directResult
             } catch (ce: CancellationException) {
                 throw ce
+            } catch (_: CimaBlockedException) {
+                directBlockedUntilMs = System.currentTimeMillis() + 300_000L
             } catch (_: Throwable) {
                 directBlockedUntilMs = System.currentTimeMillis() + 300_000L
             }

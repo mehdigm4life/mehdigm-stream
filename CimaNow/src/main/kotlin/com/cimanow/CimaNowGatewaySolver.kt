@@ -3,6 +3,8 @@ package com.cimanow
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
@@ -23,42 +25,60 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.lang.reflect.InvocationHandler
 import java.net.URI
 import java.net.URLDecoder
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 /**
- * Stealth Turnstile Gateway Solver for `rm.freex2line.online/loadon/?link=...` -> `/watching/?token=...`.
+ * Stealth Turnstile Gateway Solver & Real-V8 Vault Fallback for CimaNow (v5).
  *
- * Android real-device guarantees (`WebView 150+`, MIUI / MediaTek / PowerVR / Adreno):
- *  1. Zero `window.*` globals, zero `#cs-link-sink` / `#cs-payload` DOM mutations, and zero
- *     `Element` / `Node` / `XMLHttpRequest` / `fetch` monkey-patches (defeating Stage A `_isHijacked()`
- *     and Stage B `js-confuser` integrity checks).
- *  2. On-screen `PassThroughWebViewContainer` (`translationX = 0f, translationY = 0f` at `index = 0`
- *     behind player UI with `dispatchTouchEvent = false` for user touches) so `getGlobalVisibleRect`
- *     is `true` and Chromium's `BeginMainFrame` (`requestAnimationFrame` 10s countdown + invisible
- *     Turnstile widget) runs unthrottled at 60Hz without intercepting user input.
- *  3. Native suppression of Android WebView's `X-Requested-With: com.lagradost.cloudstream3` header via
- *     `WebSettingsCompat` + Chromium `AwSettings` reflection (preventing `freex2line.online` WAF 403).
- *  4. Detached JS-disabled `onCreateWindow` popup sink so `openads.js` receives a non-null `WindowProxy`
- *     on popunder taps #1/#2 (advancing its click counter to tap #3's main-frame navigation) with zero
- *     ad network traffic and zero extra GPU surfaces.
- *  5. Exact `(wv.width / window.innerWidth, wv.height / window.innerHeight)` CSS-to-View coordinate
- *     mapping with full touchscreen `TOOL_TYPE_FINGER` `MotionEvent` dispatch (`event.isTrusted === true`).
+ * Permanent Android real-device architecture (`WebView 96–160+`, MIUI / HyperOS / MediaTek / PowerVR / Adreno):
+ *  1. Genuine Self-Consistent Browser Identity (Attempt #1): keeps `WebSettings.userAgentString` 100%
+ *     native untouched on Attempt #1 so HTTP `User-Agent`, `Sec-CH-UA` brand metadata, `navigator`,
+ *     `window.chrome`, and WebGL are 100% consistent inside `challenges.cloudflare.com`'s cross-origin
+ *     Turnstile widget (`0x4AAAAAAFkYRL2ky4jDsK1G`, preventing Turnstile `error-callback` ->
+ *     `"من فضلك استخدم متصفح اخر"`). Attempt #2 purges `HttpOnly` cookies via `removeAllCookies` and
+ *     falls back to `cleanWebViewUserAgent`.
+ *  2. Multi-Layer `X-Requested-With` Suppression: uses `SupportLibReflectionUtil` boundary reflection
+ *     via `WebView.getWebViewClassLoader()` (plus `WebSettingsCompat` & `AwSettings` fallbacks) to
+ *     prevent `rm.freex2line.online` WAF 403 on older WebViews even without `androidx.webkit`.
+ *  3. Topmost Unoccluded `PassThroughWebViewContainer` (`container.alpha = 0.01f`, `wv.alpha = 1.0f`)
+ *     + Single-WebView GPU Discipline (`PowerVR Rogue GE8320` 8-RTS safe): unoccluded 60Hz frame ticks
+ *     without intercepting user touches, and at most one unattached `LAYER_TYPE_NONE` popup sink torn
+ *     down on the next main-looper tick.
+ *  4. Pure Read-Only Gateway Probe + `#xqeqjp`/`#xqeqjp1` Overlay Dismissal + Smooth-Scroll-Safe Tap
+ *     Targeting: zero premature DOM mutations during the 10s countdown, fast dismissal of full-screen
+ *     `<a id="xqeqjp*">` overlays, and stationary `instant` scroll coordinates.
+ *  5. Layer-2 Real-V8 `/watching/` Vault Fallback ([extractWatchingSourcesViaWebView]): if OkHttp+Rhino
+ *     ever misses a future `/watching/` JS obfuscation update, loads `mintedUrl` directly in Android
+ *     WebView and captures all watch embeds + direct MP4 downloads natively via V8 + `shouldInterceptRequest`.
  */
 object CimaNowGatewaySolver {
 
     private const val TAG = "CimaNowGW"
     private const val TOKEN_TTL_MS = 15 * 60 * 1000L
-    private const val ATTEMPT_1_TIMEOUT_MS = 38_000L
-    private const val ATTEMPT_2_TIMEOUT_MS = 26_000L
+    private const val ATTEMPT_1_TIMEOUT_MS = 36_000L
+    private const val ATTEMPT_2_TIMEOUT_MS = 28_000L
+    private const val WATCHING_WV_TIMEOUT_MS = 18_000L
+
+    data class WebViewWatchingResult(
+        val watchEmbeds: List<Pair<String, String>>,
+        val downloads: List<CimaNowCrypto.DownloadEntry>,
+    )
 
     private data class CachedToken(val mintedWatchingUrl: String, val expiresAtMs: Long)
 
@@ -156,9 +176,71 @@ object CimaNowGatewaySolver {
             host.contains("gstatic.")
     }
 
+    private fun isWatchingPageInfraHost(host: String): Boolean {
+        if (host.isEmpty()) return true
+        return host.contains("cimanow") ||
+            host.contains("cloudflare") ||
+            host.contains("googleapis.") ||
+            host.contains("gstatic.") ||
+            host.contains("jquery.") ||
+            host.contains("fontawesome.") ||
+            host.contains("jsdelivr.") ||
+            host.contains("cdnjs.") ||
+            host.contains("wp.com") ||
+            host.contains("googlesyndication.") ||
+            host.contains("googletagmanager.") ||
+            host.contains("doubleclick.")
+    }
+
+    private fun unwrapBoundaryDelegate(obj: Any?): Any? {
+        if (obj == null) return null
+        if (obj is InvocationHandler) {
+            runCatching {
+                return obj.javaClass.getMethod("getDelegate").invoke(obj)
+            }
+            runCatching {
+                val f = obj.javaClass.declaredFields.firstOrNull()
+                if (f != null) {
+                    f.isAccessible = true
+                    return f.get(obj)
+                }
+            }
+        }
+        return obj
+    }
+
     @Suppress("UNCHECKED_CAST")
     internal fun suppressXRequestedWithHeader(settings: WebSettings): String {
-        val modes = ArrayList<String>(2)
+        val modes = ArrayList<String>(3)
+
+        // 1. Official Chromium WebView APK support_lib_glue boundary (unobfuscated across WebView M96+)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val wvLoader = WebView.getWebViewClassLoader()
+                val glueCls = Class.forName("org.chromium.support_lib_glue.SupportLibReflectionUtil", false, wvLoader)
+                val factoryHandler = glueCls.getDeclaredMethod("createWebViewProviderFactory")
+                    .apply { isAccessible = true }
+                    .invoke(null)
+                val factoryTarget = unwrapBoundaryDelegate(factoryHandler)
+                val convHandler = factoryTarget?.javaClass?.methods?.firstOrNull {
+                    it.name == "getWebkitToCompatConverter" && it.parameterTypes.isEmpty()
+                }?.invoke(factoryTarget)
+                val convTarget = unwrapBoundaryDelegate(convHandler)
+                val settingsHandler = convTarget?.javaClass?.methods?.firstOrNull {
+                    it.name == "convertSettings" && it.parameterTypes.size == 1
+                }?.invoke(convTarget, settings)
+                val settingsTarget = unwrapBoundaryDelegate(settingsHandler)
+                val allowSetter = settingsTarget?.javaClass?.methods?.firstOrNull {
+                    it.name == "setRequestedWithHeaderOriginAllowList" && it.parameterTypes.size == 1
+                }
+                if (allowSetter != null) {
+                    allowSetter.invoke(settingsTarget, Collections.emptySet<String>())
+                    modes.add("SupportLibGlue")
+                }
+            }
+        }
+
+        // 2. AndroidX WebSettingsCompat (if bundled by host app)
         runCatching {
             val featureCls = Class.forName("androidx.webkit.WebViewFeature")
             val supported = featureCls
@@ -168,10 +250,12 @@ object CimaNowGatewaySolver {
                 val compatCls = Class.forName("androidx.webkit.WebSettingsCompat")
                 compatCls
                     .getMethod("setRequestedWithHeaderOriginAllowList", WebSettings::class.java, Set::class.java)
-                    .invoke(null, settings, emptySet<String>())
+                    .invoke(null, settings, Collections.emptySet<String>())
                 modes.add("WebSettingsCompat")
             }
         }
+
+        // 3. Direct AwSettings reflection (AOSP / unminified system WebViews)
         runCatching {
             var awSettingsObj: Any? = null
             var cls: Class<*>? = settings.javaClass
@@ -201,27 +285,32 @@ object CimaNowGatewaySolver {
                     it.name == "setRequestedWithHeaderOriginAllowList" && it.parameterTypes.size == 1
                 }?.also { it.isAccessible = true }
                 if (setter != null) {
-                    setter.invoke(awSettingsObj, emptySet<String>())
+                    setter.invoke(awSettingsObj, Collections.emptySet<String>())
                     modes.add("AwSettings")
                 }
             }
         }
-        return if (modes.isEmpty()) "default" else modes.joinToString("+")
+
+        return if (modes.isEmpty()) "native-m130+" else modes.joinToString("+")
     }
 
-    private suspend fun clearGatewayCookiesOnMain(gwOrigin: String) {
+    /**
+     * Purges ALL WebView cookies (including `HttpOnly` Cloudflare `cf_clearance` / `__cf_bm` cookies
+     * that `setCookie("...; Max-Age=0")` cannot delete in Chromium `CookieMonster`).
+     */
+    private suspend fun purgeAllWebViewCookiesOnMain() {
         if (Build.VERSION.SDK_INT <= 0) return
-        withContext(Dispatchers.Main) {
-            runCatching {
-                val cm = CookieManager.getInstance()
-                val existing = cm.getCookie(gwOrigin).orEmpty()
-                for (part in existing.split(';')) {
-                    val name = part.substringBefore('=').trim()
-                    if (name.isNotEmpty()) {
-                        cm.setCookie(gwOrigin, "$name=; Max-Age=0; Path=/")
+        withTimeoutOrNull(3_000L) {
+            withContext(Dispatchers.Main) {
+                runCatching {
+                    val cm = CookieManager.getInstance()
+                    suspendCancellableCoroutine<Boolean> { cont ->
+                        cm.removeAllCookies { removed ->
+                            if (cont.isActive) cont.resume(removed)
+                        }
                     }
+                    cm.flush()
                 }
-                cm.flush()
             }
         }
     }
@@ -236,15 +325,24 @@ object CimaNowGatewaySolver {
                 ?: return@withLock null
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
-                mintViaAndroidWebView(cleanShine, itemUrl, ATTEMPT_1_TIMEOUT_MS, attempt = 1)
-                    ?: run {
-                        val gwOrigin = runCatching {
-                            val u = URI(CimaNowNetwork.encodeUrl(cleanShine))
-                            "${u.scheme}://${u.host}"
-                        }.getOrDefault("https://rm.freex2line.online")
-                        clearGatewayCookiesOnMain(gwOrigin)
-                        mintViaAndroidWebView(cleanShine, itemUrl, ATTEMPT_2_TIMEOUT_MS, attempt = 2)
-                    }
+                // Attempt #1: 100% native untouched Android WebView identity (zero UA/Sec-CH-UA mismatch)
+                mintViaAndroidWebView(
+                    shineUrl = cleanShine,
+                    itemUrl = itemUrl,
+                    timeoutMs = ATTEMPT_1_TIMEOUT_MS,
+                    attempt = 1,
+                    useNativeDefaultUa = true,
+                ) ?: run {
+                    // Attempt #2: Full HttpOnly cookie purge + cleaned Chrome Mobile UA fallback
+                    purgeAllWebViewCookiesOnMain()
+                    mintViaAndroidWebView(
+                        shineUrl = cleanShine,
+                        itemUrl = itemUrl,
+                        timeoutMs = ATTEMPT_2_TIMEOUT_MS,
+                        attempt = 2,
+                        useNativeDefaultUa = false,
+                    )
+                }
             } else if (Build.VERSION.SDK_INT == 0) {
                 mintViaHeadlessChromiumCli(cleanShine, itemUrl)
                     ?: mintViaHeadlessChromiumCli(cleanShine, itemUrl)
@@ -269,6 +367,7 @@ object CimaNowGatewaySolver {
         itemUrl: String,
         timeoutMs: Long,
         attempt: Int,
+        useNativeDefaultUa: Boolean,
     ): String? {
         val activity = CommonActivity.activity ?: return null
         if (activity.isFinishing || activity.isDestroyed) return null
@@ -276,7 +375,8 @@ object CimaNowGatewaySolver {
         val deferred = CompletableDeferred<String?>()
         var containerRef: PassThroughWebViewContainer? = null
         var webViewRef: WebView? = null
-        val popupWebViews = ArrayList<WebView>(3)
+        val popupWebViews = ArrayList<WebView>(1)
+        val mainHandler = Handler(Looper.getMainLooper())
 
         return try {
             withContext(Dispatchers.Main) {
@@ -287,7 +387,11 @@ object CimaNowGatewaySolver {
                         return@withContext
                     }
 
+                // Topmost unoccluded pass-through wrapper (`container.alpha = 0.01f`, `wv.alpha = 1.0f`)
+                // so Chromium's BeginMainFrame / rAF / Turnstile visibility observers run at full 60Hz
+                // without being occluded behind an opaque sibling View, while user touches pass through.
                 val container = PassThroughWebViewContainer(activity).apply {
+                    alpha = 0.01f
                     visibility = View.VISIBLE
                     translationX = 0f
                     translationY = 0f
@@ -299,7 +403,7 @@ object CimaNowGatewaySolver {
                 containerRef = container
 
                 val wv = WebView(activity).apply {
-                    alpha = 0.01f
+                    alpha = 1.0f
                     visibility = View.VISIBLE
                     translationX = 0f
                     translationY = 0f
@@ -310,8 +414,13 @@ object CimaNowGatewaySolver {
                 webViewRef = wv
 
                 val rawDefaultUa = runCatching { WebSettings.getDefaultUserAgent(activity) }
-                    .getOrDefault(CimaNowNetwork.MOBILE_UA)
-                val cleanChromeUa = cleanWebViewUserAgent(rawDefaultUa)
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: wv.settings.userAgentString.orEmpty()
+                val cleanedUa = cleanWebViewUserAgent(rawDefaultUa)
+                if (cleanedUa.isNotBlank()) {
+                    CimaNowNetwork.preferredUserAgent = cleanedUa
+                }
                 val xrwMode = suppressXRequestedWithHeader(wv.settings)
 
                 wv.settings.apply {
@@ -328,13 +437,18 @@ object CimaNowGatewaySolver {
                     cacheMode = WebSettings.LOAD_DEFAULT
                     setSupportMultipleWindows(true)
                     javaScriptCanOpenWindowsAutomatically = true
-                    userAgentString = cleanChromeUa
+                    if (!useNativeDefaultUa) {
+                        userAgentString = cleanedUa
+                    }
                 }
 
-                logInfo("Attempt #$attempt init WebView (xrw=$xrwMode, ua=${cleanChromeUa.take(78)})")
+                val activeUa = wv.settings.userAgentString.orEmpty()
+                logInfo(
+                    "Attempt #$attempt init WebView (nativeUa=$useNativeDefaultUa, xrw=$xrwMode, ua=${activeUa.take(82)})",
+                )
 
-                // Give openads.js a real non-null WindowProxy on popunder taps #1 & #2 while aborting
-                // all ad loads immediately and capturing /watching/?token=... if opened in a new window.
+                // PowerVR Rogue GE8320 single-surface safe popup sink: at most ONE unattached
+                // software-layered WebView (0 GPU RenderTargetSurfaces) torn down on next tick.
                 wv.webChromeClient = object : WebChromeClient() {
                     override fun onCreateWindow(
                         view: WebView?,
@@ -342,8 +456,10 @@ object CimaNowGatewaySolver {
                         isUserGesture: Boolean,
                         resultMsg: android.os.Message?,
                     ): Boolean {
+                        if (popupWebViews.isNotEmpty()) return false
                         val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                         val popupWv = runCatching { WebView(activity) }.getOrNull() ?: return false
+                        popupWv.setLayerType(View.LAYER_TYPE_NONE, null)
                         popupWebViews.add(popupWv)
                         popupWv.settings.apply {
                             javaScriptEnabled = false
@@ -351,7 +467,10 @@ object CimaNowGatewaySolver {
                             blockNetworkImage = true
                         }
                         popupWv.webViewClient = object : WebViewClient() {
+                            private var handled = false
                             private fun interceptPopup(u: String?): Boolean {
+                                if (handled) return true
+                                handled = true
                                 val minted = normalizeMintedWatchingUrl(u)
                                 if (minted != null) {
                                     logInfo("Attempt #$attempt captured watching URL via popup!")
@@ -360,12 +479,12 @@ object CimaNowGatewaySolver {
                                     logInfo("Attempt #$attempt swallowed popunder: ${hostOnly(u)}")
                                 }
                                 runCatching { popupWv.stopLoading() }
-                                view?.postDelayed({
+                                mainHandler.post {
                                     runCatching {
                                         popupWebViews.remove(popupWv)
                                         popupWv.destroy()
                                     }
-                                }, 250L)
+                                }
                                 return true
                             }
 
@@ -384,6 +503,15 @@ object CimaNowGatewaySolver {
                         }
                         transport.webView = popupWv
                         resultMsg.sendToTarget()
+                        // Guarantee teardown even if popup stays on about:blank
+                        mainHandler.postDelayed({
+                            if (popupWebViews.remove(popupWv)) {
+                                runCatching {
+                                    popupWv.stopLoading()
+                                    popupWv.destroy()
+                                }
+                            }
+                        }, 600L)
                         return true
                     }
                 }
@@ -460,11 +588,7 @@ object CimaNowGatewaySolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 container.addView(wv, matchParent)
-                if (root.childCount > 0) {
-                    root.addView(container, 0, matchParent)
-                } else {
-                    root.addView(container, matchParent)
-                }
+                root.addView(container, matchParent)
 
                 wv.loadUrl(
                     CimaNowNetwork.encodeUrl(shineUrl),
@@ -476,28 +600,29 @@ object CimaNowGatewaySolver {
                 val startedMs = SystemClock.uptimeMillis()
                 var firstBtnSeenMs = 0L
                 var lastTsTapMs = 0L
+                var lastOvlTapMs = 0L
                 var lastBtnTapMs = 0L
                 var tsTapCount = 0
                 var btnTapCount = 0
 
                 // Let initial /loadon/ -> href.li -> /redirectingfree/ -> /blog-post.html/ load cleanly
-                delay(2_800L)
+                delay(2_600L)
 
                 while (!deferred.isCompleted) {
-                    delay(550L)
+                    delay(450L)
                     if (deferred.isCompleted) break
 
                     val nowMs = SystemClock.uptimeMillis()
                     val elapsedMs = nowMs - startedMs
                     // Once blog-post.html (#downloadbtn) mounts, leave Stage B & invisible Turnstile
-                    // completely undisturbed for 6.5s while the 10-second countdown runs.
-                    if (firstBtnSeenMs > 0L && nowMs - firstBtnSeenMs < 6_500L) continue
+                    // completely undisturbed for 6.2s while the 10-second countdown runs.
+                    if (firstBtnSeenMs > 0L && nowMs - firstBtnSeenMs < 6_200L) continue
 
-                    val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 11_500L)
+                    val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 12_500L)
                     val allowTsTap = if (firstBtnSeenMs == 0L) {
-                        elapsedMs >= 5_500L
+                        elapsedMs >= 6_500L
                     } else {
-                        nowMs - firstBtnSeenMs >= 8_500L
+                        nowMs - firstBtnSeenMs >= 8_200L
                     }
 
                     val probeResult = withContext(Dispatchers.Main) {
@@ -511,8 +636,8 @@ object CimaNowGatewaySolver {
 
                     if (deferred.isCompleted || probeResult == "DONE") break
 
-                    if (probeResult == "ERR:WAF" || probeResult == "ERR:BROWSER") {
-                        logWarn("Attempt #$attempt gateway rejected browser ($probeResult) at ${elapsedMs}ms")
+                    if (probeResult == "ERR:WAF" || probeResult == "ERR:BROWSER" || probeResult == "ERR:ADBLOCK") {
+                        logWarn("Attempt #$attempt gateway rejected page ($probeResult) at ${elapsedMs}ms")
                         deferred.complete(null)
                         break
                     }
@@ -532,7 +657,7 @@ object CimaNowGatewaySolver {
                         }
                         probeResult.startsWith("BTN:") -> {
                             if (firstBtnSeenMs == 0L) firstBtnSeenMs = nowMs
-                            if (nowMs - lastBtnTapMs >= 650L) {
+                            if (nowMs - lastBtnTapMs >= 520L) {
                                 lastBtnTapMs = nowMs
                                 val target = parseCssTapTarget(probeResult.removePrefix("BTN:"))
                                 if (target != null) {
@@ -542,9 +667,20 @@ object CimaNowGatewaySolver {
                                 }
                             }
                         }
+                        probeResult.startsWith("OVL:") -> {
+                            // Clear full-screen #xqeqjp / #xqeqjp1 overlay quickly so Turnstile checkbox can receive taps
+                            val payload = probeResult.removePrefix("OVL:").removeSuffix(":HASBTN")
+                            if (nowMs - lastOvlTapMs >= 480L) {
+                                lastOvlTapMs = nowMs
+                                parseCssTapTarget(payload)?.let { target ->
+                                    logInfo("Attempt #$attempt dismissing #xqeqjp overlay css=(${target.cssX.toInt()},${target.cssY.toInt()})")
+                                    dispatchTrustedTap(containerRef, webViewRef, target)
+                                }
+                            }
+                        }
                         probeResult.startsWith("TS:") -> {
                             val payload = probeResult.removePrefix("TS:").removeSuffix(":HASBTN")
-                            if (nowMs - lastTsTapMs >= 4_200L) {
+                            if (nowMs - lastTsTapMs >= 3_200L) {
                                 lastTsTapMs = nowMs
                                 val sides = payload.split('|')
                                 val chosen = sides.getOrNull(tsTapCount % sides.size)?.let { parseCssTapTarget(it) }
@@ -568,6 +704,7 @@ object CimaNowGatewaySolver {
             null
         } finally {
             withContext(NonCancellable + Dispatchers.Main) {
+                mainHandler.removeCallbacksAndMessages(null)
                 runCatching { CookieManager.getInstance().flush() }
                 for (pwv in popupWebViews) {
                     runCatching {
@@ -599,7 +736,7 @@ object CimaNowGatewaySolver {
         }
     }
 
-    private fun buildReadOnlyGatewayProbeJs(countdownElapsed: Boolean, allowTurnstileTap: Boolean): String {
+    internal fun buildReadOnlyGatewayProbeJs(countdownElapsed: Boolean, allowTurnstileTap: Boolean): String {
         val forceFlag = if (countdownElapsed) "true" else "false"
         val tsTapFlag = if (allowTurnstileTap) "true" else "false"
         return """
@@ -610,19 +747,31 @@ object CimaNowGatewaySolver {
                     var iw = Math.round(window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0);
                     var ih = Math.round(window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0);
                     var btn = document.getElementById('downloadbtn');
+                    var cd = document.getElementById('countdown');
                     var h = btn ? String(btn.getAttribute('href') || '') : '';
                     if (btn) {
                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) {
                             return 'URL:' + h;
                         }
-                        if (h === '#watch-ready' || ($forceFlag && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
-                            if (btn.hidden || getComputedStyle(btn).display === 'none') {
+                        var isReadyHref = (h === '#watch-ready') ||
+                            ($forceFlag && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1);
+                        if (isReadyHref) {
+                            var cs = getComputedStyle(btn);
+                            if ($forceFlag && !cd && (btn.hidden || cs.display === 'none')) {
                                 btn.removeAttribute('hidden');
                                 btn.style.setProperty('display', 'inline-block', 'important');
                             }
-                            btn.scrollIntoView({block: 'center', inline: 'center'});
                             var br = btn.getBoundingClientRect();
                             if (br.width > 4 && br.height > 4) {
+                                if (br.top < 8 || br.bottom > ih - 8) {
+                                    try {
+                                        btn.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
+                                    } catch(e1) {
+                                        window.scrollTo(0, Math.max(0, (window.pageYOffset || 0) + br.top - (ih / 2) + (br.height / 2)));
+                                    }
+                                    br = btn.getBoundingClientRect();
+                                    if (br.top < 4 || br.bottom > ih - 4) return 'SCROLL:HASBTN';
+                                }
                                 return 'BTN:' + Math.round(br.left + br.width / 2) + ',' + Math.round(br.top + br.height / 2) + ',' + iw + ',' + ih;
                             }
                         }
@@ -631,8 +780,11 @@ object CimaNowGatewaySolver {
                         if (btxt.indexOf('unable to access freex2line') !== -1 || btxt.indexOf('Sorry, you have been blocked') !== -1) {
                             return 'ERR:WAF';
                         }
-                        if (btxt.indexOf('استخدم متصفح اخر') !== -1) {
+                        if (btxt.indexOf('استخدم متصفح اخر') !== -1 || btxt.indexOf('متصفح آخر') !== -1) {
                             return 'ERR:BROWSER';
+                        }
+                        if (btxt.indexOf('منع الإعلانات') !== -1 || btxt.indexOf('منع الاعلانات') !== -1) {
+                            return 'ERR:ADBLOCK';
                         }
                     }
                     if ($tsTapFlag && h !== '#watch-ready') {
@@ -662,19 +814,23 @@ object CimaNowGatewaySolver {
                                     p = p.parentElement;
                                 }
                             }
-                            if (!box) {
-                                var divs = document.querySelectorAll('div');
-                                for (var di = 0; di < divs.length; di++) {
-                                    var dr = divs[di].getBoundingClientRect();
-                                    if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
-                                        box = divs[di];
-                                        break;
-                                    }
-                                }
-                            }
                             if (box) {
-                                box.scrollIntoView({block: 'center', inline: 'center'});
+                                var ovl1 = document.getElementById('xqeqjp');
+                                var ovl2 = document.getElementById('xqeqjp1');
+                                var activeOvl = (ovl1 && ovl1.offsetWidth > 10 && getComputedStyle(ovl1).display !== 'none') ? ovl1
+                                    : ((ovl2 && ovl2.offsetWidth > 10 && getComputedStyle(ovl2).display !== 'none') ? ovl2 : null);
+                                if (activeOvl && iw > 40 && ih > 40) {
+                                    return 'OVL:' + Math.round(iw / 2) + ',' + Math.round(ih / 2) + ',' + iw + ',' + ih + (btn ? ':HASBTN' : '');
+                                }
                                 var tr = box.getBoundingClientRect();
+                                if (tr.top < 8 || tr.bottom > ih - 8) {
+                                    try {
+                                        box.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
+                                    } catch(e2) {
+                                        window.scrollTo(0, Math.max(0, (window.pageYOffset || 0) + tr.top - (ih / 2)));
+                                    }
+                                    tr = box.getBoundingClientRect();
+                                }
                                 if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
                                     var cy = Math.round(tr.top + tr.height / 2);
                                     var lx = Math.round(tr.left + 28);
@@ -690,6 +846,243 @@ object CimaNowGatewaySolver {
                 return 'WAIT';
             })();
         """.trimIndent()
+    }
+
+    // ── Layer-2 Real-V8 `/watching/` Vault Unlocker (Future-Proof Android Fallback) ──
+
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+    suspend fun extractWatchingSourcesViaWebView(
+        mintedWatchingUrl: String,
+        refererUrl: String,
+    ): WebViewWatchingResult? {
+        if (Build.VERSION.SDK_INT <= 0) return null
+        val activity = CommonActivity.activity ?: return null
+        if (activity.isFinishing || activity.isDestroyed) return null
+
+        return solverMutex.withLock {
+            var containerRef: PassThroughWebViewContainer? = null
+            var webViewRef: WebView? = null
+            val interceptedEmbeds = CopyOnWriteArraySet<String>()
+
+            try {
+                withContext(Dispatchers.Main) {
+                    val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return@withContext
+                    val container = PassThroughWebViewContainer(activity).apply {
+                        alpha = 0.01f
+                        visibility = View.VISIBLE
+                        isFocusable = false
+                        isClickable = false
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    }
+                    containerRef = container
+
+                    val wv = WebView(activity).apply {
+                        alpha = 1.0f
+                        visibility = View.VISIBLE
+                        isFocusable = false
+                        isClickable = false
+                    }
+                    webViewRef = wv
+
+                    suppressXRequestedWithHeader(wv.settings)
+                    wv.settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        loadsImagesAutomatically = false
+                        blockNetworkImage = true
+                        mediaPlaybackRequiresUserGesture = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        setSupportMultipleWindows(true)
+                        javaScriptCanOpenWindowsAutomatically = false
+                    }
+
+                    runCatching {
+                        val cm = CookieManager.getInstance()
+                        cm.setAcceptCookie(true)
+                        cm.setAcceptThirdPartyCookies(wv, true)
+                    }
+
+                    wv.webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: android.os.Message?,
+                        ): Boolean = false
+                    }
+
+                    wv.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            if (request != null && !request.isForMainFrame) return false
+                            val u = request?.url?.toString().orEmpty()
+                            return u.startsWith("http") && !hostOnly(u).contains("cimanow")
+                        }
+
+                        @Suppress("DEPRECATION")
+                        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                            val u = url.orEmpty()
+                            return u.startsWith("http") && !hostOnly(u).contains("cimanow")
+                        }
+
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): WebResourceResponse? {
+                            if (request != null && !request.isForMainFrame) {
+                                val u = request.url?.toString().orEmpty()
+                                val h = hostOnly(u)
+                                if (u.startsWith("http") && !isWatchingPageInfraHost(h)) {
+                                    interceptedEmbeds.add(u)
+                                    return WebResourceResponse(
+                                        "text/html",
+                                        "UTF-8",
+                                        ByteArrayInputStream(ByteArray(0)),
+                                    )
+                                }
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+                    }
+
+                    val matchParent = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    container.addView(wv, matchParent)
+                    root.addView(container, matchParent)
+
+                    wv.loadUrl(
+                        CimaNowNetwork.encodeUrl(mintedWatchingUrl),
+                        mapOf("Referer" to CimaNowNetwork.encodeUrl(refererUrl)),
+                    )
+                }
+
+                val embeds = LinkedHashMap<String, String>()
+                val downloads = LinkedHashMap<String, CimaNowCrypto.DownloadEntry>()
+
+                withTimeoutOrNull(WATCHING_WV_TIMEOUT_MS) {
+                    delay(1_400L)
+                    var clickedTabUpTo = -1
+                    var totalTabs = 0
+
+                    for (step in 0 until 28) {
+                        val jsOut = withContext(Dispatchers.Main) {
+                            val wv = webViewRef ?: return@withContext ""
+                            val nextIdx = clickedTabUpTo + 1
+                            evalJsSuspend(
+                                wv,
+                                """
+                                (function(){
+                                    try {
+                                        var out = { iframes: [], dls: [], tabs: 0, clicked: -1, tabName: '' };
+                                        var ifs = document.querySelectorAll('iframe');
+                                        for (var i = 0; i < ifs.length; i++) {
+                                            var s = String(ifs[i].getAttribute('src') || ifs[i].src || '');
+                                            if (s.indexOf('http') === 0 || s.indexOf('//') === 0) out.iframes.push(s);
+                                        }
+                                        var as = document.querySelectorAll('#download a[href], ul.download a[href], a[href*="dl="], a[href*="cimanowtv"], a[href*="vk.com/doc"], a[href*="jetload"], a[href*="upns."], a[href*="byse"], a[href*="filemoon"], a[href*="savefiles"], a[href*="streamhls"], a[href*="uqload"]');
+                                        for (var j = 0; j < as.length; j++) {
+                                            var hr = String(as[j].getAttribute('href') || '');
+                                            if (hr.indexOf('http') === 0 || hr.indexOf('//') === 0) {
+                                                out.dls.push({ u: hr, t: String(as[j].innerText || '').trim().slice(0, 80) });
+                                            }
+                                        }
+                                        var lis = document.querySelectorAll('#watch li[data-id], #watch li[data-index], ul#watch li');
+                                        out.tabs = lis.length;
+                                        if ($nextIdx < lis.length) {
+                                            var li = lis[$nextIdx];
+                                            out.tabName = String(li.innerText || ('Server ' + ($nextIdx + 1))).trim().slice(0, 40);
+                                            li.click();
+                                            out.clicked = $nextIdx;
+                                        }
+                                        return JSON.stringify(out);
+                                    } catch(e) { return ''; }
+                                })()
+                                """.trimIndent(),
+                            )
+                        }
+
+                        val obj = CimaNowCrypto.safeJsonObject(jsOut)
+                        if (obj != null) {
+                            totalTabs = obj.optInt("tabs", 0)
+                            val clicked = obj.optInt("clicked", -1)
+                            val tabName = obj.optString("tabName").ifBlank { "Watch" }
+                            val ifs: JSONArray? = obj.optJSONArray("iframes")
+                            if (ifs != null) {
+                                for (i in 0 until ifs.length()) {
+                                    CimaNowCrypto.normalizeEmbedUrl(ifs.optString(i))?.let { norm ->
+                                        if (!isWatchingPageInfraHost(hostOnly(norm))) {
+                                            embeds.putIfAbsent(norm, tabName)
+                                        }
+                                    }
+                                }
+                            }
+                            val dls: JSONArray? = obj.optJSONArray("dls")
+                            if (dls != null) {
+                                for (i in 0 until dls.length()) {
+                                    val d = dls.optJSONObject(i) ?: continue
+                                    val u = CimaNowCrypto.normalizeEmbedUrl(d.optString("u")) ?: continue
+                                    val lbl = d.optString("t").ifBlank { "Download" }
+                                    val q = Regex("""(2160|1440|1080|720|480|360|240)""").find("$lbl $u")
+                                        ?.groupValues?.get(1)?.toIntOrNull()
+                                    downloads.putIfAbsent(u, CimaNowCrypto.DownloadEntry(u, q, lbl))
+                                }
+                            }
+                            for (ic in interceptedEmbeds) {
+                                CimaNowCrypto.normalizeEmbedUrl(ic)?.let { norm ->
+                                    embeds.putIfAbsent(norm, tabName)
+                                }
+                            }
+                            if (clicked >= 0) {
+                                clickedTabUpTo = clicked
+                            } else if (totalTabs > 0 && clickedTabUpTo >= totalTabs - 1 && (embeds.isNotEmpty() || downloads.isNotEmpty())) {
+                                delay(450L)
+                                for (ic in interceptedEmbeds) {
+                                    CimaNowCrypto.normalizeEmbedUrl(ic)?.let { norm ->
+                                        embeds.putIfAbsent(norm, "Watch")
+                                    }
+                                }
+                                break
+                            }
+                        }
+                        delay(420L)
+                    }
+                }
+
+                if (embeds.isEmpty() && downloads.isEmpty()) {
+                    null
+                } else {
+                    logInfo("WebView V8 vault fallback extracted embeds=${embeds.size} downloads=${downloads.size}")
+                    WebViewWatchingResult(
+                        watchEmbeds = embeds.entries.map { (u, lbl) -> lbl to u },
+                        downloads = downloads.values.toList(),
+                    )
+                }
+            } catch (t: Throwable) {
+                logWarn("extractWatchingSourcesViaWebView error: ${t.message}")
+                null
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main) {
+                    webViewRef?.let { wv ->
+                        runCatching {
+                            wv.stopLoading()
+                            wv.webChromeClient = null
+                            wv.webViewClient = WebViewClient()
+                            wv.loadUrl("about:blank")
+                            (wv.parent as? ViewGroup)?.removeView(wv)
+                            wv.removeAllViews()
+                            wv.destroy()
+                        }
+                    }
+                    containerRef?.let { c ->
+                        runCatching {
+                            (c.parent as? ViewGroup)?.removeView(c)
+                            c.removeAllViews()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun parseCssTapTarget(s: String): CssTapTarget? {
@@ -838,7 +1231,7 @@ object CimaNowGatewaySolver {
                 const xvfb = '/usr/bin/xvfb-run';
                 let procErr = '';
                 const proc = fs.existsSync(xvfb)
-                    ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
+                    ? spawn(xvfb, ['-a', '--server-args=-screen 0 1280x960x24', chromeBin, ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
                     : spawn(chromeBin, ['--headless=new', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
                 if (proc.stderr) proc.stderr.on('data', c => { if (procErr.length < 500) procErr += c.toString('utf8'); });
                 function cleanup(out) {
@@ -858,8 +1251,8 @@ object CimaNowGatewaySolver {
                 }
                 (async () => {
                     let targets = null;
-                    for (let i = 0; i < 35; i++) {
-                        try { targets = await getJson('http://127.0.0.1:' + port + '/json'); if (targets.length) break; } catch(e) {}
+                    for (let i = 0; i < 45; i++) {
+                        try { targets = await getJson('http://127.0.0.1:' + port + '/json'); if (targets && targets.length) break; } catch(e) {}
                         await new Promise(r => setTimeout(r, 400));
                     }
                     if (!targets || !targets.length) return cleanup({ url: '', diag: ['no_targets', 'xvfb=' + fs.existsSync(xvfb), 'err=' + procErr] });
@@ -891,7 +1284,7 @@ object CimaNowGatewaySolver {
                     await send('Page.enable');
                     await send('Network.enable');
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
-                    let lastTsClick = 0, lastBtnClick = 0, firstBtnMs = 0;
+                    let lastTsClick = 0, lastOvlClick = 0, lastBtnClick = 0, firstBtnMs = 0;
                     const tap = async (x, y) => {
                         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
                         await new Promise(r => setTimeout(r, 60));
@@ -912,23 +1305,25 @@ object CimaNowGatewaySolver {
                         }
                         if (ms < 4500) continue;
                         if (firstBtnMs > 0 && ms - firstBtnMs < 6500) continue;
-                        const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 11500);
-                        const allowTsTap = firstBtnMs === 0 ? (ms >= 5500) : (ms - firstBtnMs >= 8500);
+                        const allowBtnForce = firstBtnMs > 0 && (ms - firstBtnMs >= 12000);
+                        const allowTsTap = firstBtnMs === 0 ? (ms >= 6000) : (ms - firstBtnMs >= 8500);
                         const probe = await send('Runtime.evaluate', {
                             expression: `(function(){
                                 try {
                                     var loc = String(location.href || '');
                                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
+                                    var iw = Math.round(window.innerWidth || 412);
+                                    var ih = Math.round(window.innerHeight || 915);
                                     var btn = document.getElementById('downloadbtn');
                                     var h = btn ? String(btn.getAttribute('href') || '') : '';
                                     if (btn) {
                                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
                                         if (h === '#watch-ready' || (${'$'}{allowBtnForce} && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1)) {
-                                            if (btn.hidden || getComputedStyle(btn).display === 'none') {
+                                            if (${'$'}{allowBtnForce} && (btn.hidden || getComputedStyle(btn).display === 'none')) {
                                                 btn.removeAttribute('hidden');
                                                 btn.style.setProperty('display', 'inline-block', 'important');
                                             }
-                                            btn.scrollIntoView({block:'center', inline:'center'});
+                                            try { btn.scrollIntoView({behavior:'instant', block:'center', inline:'center'}); } catch(e) {}
                                             var br = btn.getBoundingClientRect();
                                             if (br.width > 4 && br.height > 4) return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2);
                                         }
@@ -949,18 +1344,15 @@ object CimaNowGatewaySolver {
                                                 if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
                                             }
                                         }
-                                        if (!box) {
-                                            var divs = document.querySelectorAll('div');
-                                            for (var di = 0; di < divs.length; di++) {
-                                                var dr = divs[di].getBoundingClientRect();
-                                                if (dr.width >= 240 && dr.width <= 340 && dr.height >= 55 && dr.height <= 80) {
-                                                    box = divs[di];
-                                                    break;
-                                                }
-                                            }
-                                        }
                                         if (box) {
-                                            box.scrollIntoView({block:'center', inline:'center'});
+                                            var ovl1 = document.getElementById('xqeqjp');
+                                            var ovl2 = document.getElementById('xqeqjp1');
+                                            var activeOvl = (ovl1 && ovl1.offsetWidth > 10 && getComputedStyle(ovl1).display !== 'none') ? ovl1
+                                                : ((ovl2 && ovl2.offsetWidth > 10 && getComputedStyle(ovl2).display !== 'none') ? ovl2 : null);
+                                            if (activeOvl) {
+                                                return 'OVL:' + Math.round(iw / 2) + ',' + Math.round(ih / 2) + (btn ? ':HASBTN' : '');
+                                            }
+                                            try { box.scrollIntoView({behavior:'instant', block:'center', inline:'center'}); } catch(e) {}
                                             var tr = box.getBoundingClientRect();
                                             if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
                                                 var cy = Math.round(tr.top + tr.height/2);
@@ -981,11 +1373,15 @@ object CimaNowGatewaySolver {
                         if (ms % 6000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
                             return cleanup({ url: pv.slice(4), diag });
-                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 650) {
+                        } else if (pv.startsWith('OVL:') && ms - lastOvlClick >= 500) {
+                            lastOvlClick = ms;
+                            const [ox, oy] = pv.slice(4).replace(':HASBTN', '').split(',').map(Number);
+                            if (ox > 0 && oy > 0) await tap(ox, oy);
+                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 600) {
                             lastBtnClick = ms;
                             const [bx, by] = pv.slice(4).split(',').map(Number);
                             if (bx > 0 && by > 0) await tap(bx, by);
-                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 4200) {
+                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 3500) {
                             lastTsClick = ms;
                             const clean = pv.slice(3).replace(':HASBTN', '');
                             const [tx, ty] = clean.split(',').map(Number);
@@ -1002,7 +1398,7 @@ object CimaNowGatewaySolver {
                     .redirectErrorStream(true)
                     .redirectOutput(File("/dev/null"))
                     .start()
-                val finished = p.waitFor(46L, TimeUnit.SECONDS)
+                val finished = p.waitFor(48L, TimeUnit.SECONDS)
                 if (!finished) {
                     p.destroyForcibly()
                 }

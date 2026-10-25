@@ -629,6 +629,26 @@ object CimaNowCrypto {
             el.attributes().any { it.key.equals(attr, ignoreCase = true) }
     }
 
+    internal fun configureRhinoAndroidSafe(cx: Context, preferEs6: Boolean = false) {
+        // Works on both Rhino 1.8+ (setInterpretedMode) and Rhino 1.7.x (setOptimizationLevel(-1))
+        // so Android ART never attempts JVM bytecode generation regardless of host APK version.
+        val setInterp = runCatching {
+            Context::class.java.getMethod("setInterpretedMode", Boolean::class.javaPrimitiveType)
+        }.getOrNull()
+        if (setInterp != null) {
+            runCatching { setInterp.invoke(cx, true) }
+        } else {
+            runCatching {
+                Context::class.java.getMethod("setOptimizationLevel", Int::class.javaPrimitiveType)
+                    .invoke(cx, -1)
+            }
+        }
+        val targetLang = if (preferEs6) 200 else 250
+        if (runCatching { cx.languageVersion = targetLang }.isFailure) {
+            runCatching { cx.languageVersion = Context.VERSION_ES6 }
+        }
+    }
+
     private fun unpackWatchingBootstrapRhino(outerDoc: Document): String? {
         val bootEl = outerDoc.select("script").firstOrNull { s ->
             s.data().length in 60..16_000 && s.attributes().any { a -> a.value.length > 500 }
@@ -638,8 +658,7 @@ object CimaNowCrypto {
         val captured = ArrayList<String>(2)
         val cx = Context.enter()
         try {
-            cx.languageVersion = Context.VERSION_ECMASCRIPT
-            cx.isInterpretedMode = true
+            configureRhinoAndroidSafe(cx)
             val scope = cx.initStandardObjects()
             val bootBridge = RhinoBootBridge(outerDoc, bootEl, captured)
             ScriptableObject.putProperty(scope, "__bb", Context.javaToJS(bootBridge, scope))
@@ -700,8 +719,7 @@ object CimaNowCrypto {
 
         val cx = Context.enter()
         try {
-            cx.languageVersion = Context.VERSION_ECMASCRIPT
-            cx.isInterpretedMode = true
+            configureRhinoAndroidSafe(cx)
             scope = cx.initStandardObjects()
             ScriptableObject.putProperty(scope, "__h", Context.javaToJS(bridge, scope))
 
@@ -931,8 +949,7 @@ object CimaNowCrypto {
                 synchronized(rhinoLock) {
                     val scx = Context.enter()
                     try {
-                        scx.languageVersion = Context.VERSION_ECMASCRIPT
-                        scx.isInterpretedMode = true
+                        configureRhinoAndroidSafe(scx)
                         ScriptableObject.putProperty(scope, "__rawCoreUrl", rawUrl)
                         scx.evaluateString(
                             scope,
@@ -954,8 +971,7 @@ object CimaNowCrypto {
                     synchronized(rhinoLock) {
                         val fcx = Context.enter()
                         try {
-                            fcx.languageVersion = Context.VERSION_ECMASCRIPT
-                            fcx.isInterpretedMode = true
+                            configureRhinoAndroidSafe(fcx)
                             ScriptableObject.putProperty(scope, "__fragIfEl", Context.javaToJS(ifEl, scope))
                             fcx.evaluateString(
                                 scope,
