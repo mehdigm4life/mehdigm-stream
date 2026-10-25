@@ -214,7 +214,7 @@ class TimeMoviesPlugin : Plugin() {
             styledActionButton(context, "فحص الاتصال بسيرفر TimeMovies", "#4A526E") {
                 Toast.makeText(context, "جارٍ فحص الاتصال بسيرفر TimeMovies...", Toast.LENGTH_SHORT).show()
                 bgExecutor.execute {
-                    val astOk = runCatching { TimeMoviesApi.checkAppState() != null }.getOrDefault(false)
+                    val astOk = runCatching { TimeMoviesApi.fetchAppState() != null }.getOrDefault(false)
                     val dkOk = if (TimeMoviesPrefs.isSignedIn) {
                         runCatching { TimeMoviesApi.ensureDeviceKeyEnrolled() }.getOrDefault(false)
                     } else false
