@@ -2,6 +2,11 @@ package com.cimanow
 
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.ScriptableObject
 import java.net.URLEncoder
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -42,6 +47,30 @@ object CimaNowCrypto {
         val serverTabs: List<ServerTab>,
         val downloads: List<DownloadEntry>,
     )
+
+    class WatchingVaultHandle(
+        val decoded: DecodedWatchingPage,
+        private val urlSigner: ((String) -> String)? = null,
+        private val frameDecoder: ((String) -> String?)? = null,
+    ) {
+        fun signCoreSwitchUrl(rawCoreUrl: String, tab: ServerTab): String {
+            urlSigner?.let { signer ->
+                val signed = runCatching { signer(rawCoreUrl) }.getOrNull()
+                if (!signed.isNullOrBlank() && signed != rawCoreUrl) return signed
+            }
+            val sig = calcCoreSig(decoded.coreToken, tab.dataId, tab.dataIndex, decoded.sigSalt)
+            val encSig = URLEncoder.encode(sig, "UTF-8")
+            return "$rawCoreUrl&_s=$encSig"
+        }
+
+        fun decodeCoreIframe(fragmentHtml: String): String? {
+            frameDecoder?.let { dec ->
+                val res = runCatching { dec(fragmentHtml) }.getOrNull()
+                if (!res.isNullOrBlank()) return res
+            }
+            return decodeCnBootFrame(fragmentHtml, decoded.coreToken)
+        }
+    }
 
     // ── Cross-Platform Base64 Helpers (Android API 21..35 + JVM JUnit) ──────
 
@@ -441,43 +470,59 @@ object CimaNowCrypto {
         }
     }
 
-    // ── 3. CSS Flexbox `<x-fx>` Layout Height Solver ─────────────────────────
+    // ── 3. Generalized CSS Flexbox Layout Height Solver (`<x-fx>`, `<x-grid>`, any tag) ──
 
     private data class FlexItem(val order: Int, val domIdx: Int, val outerW: Int, val outerH: Int)
 
     fun computeFlexHeight(fxHtml: String): Int {
-        val fxStyle = Regex("""<x-fx\s+style='([^']+)'""").find(fxHtml)?.groupValues?.get(1) ?: return 0
+        val containerMatch = Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]*display\s*:\s*flex[^'"]*)['"]""", RegexOption.IGNORE_CASE)
+            .find(fxHtml)
+            ?: Regex("""<x-fx\s+style=['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE).find(fxHtml)
+            ?: return 0
+        val fxStyle = containerMatch.groupValues[1]
 
         fun pxProp(style: String, prop: String): Int =
-            Regex("""(?:^|;)\s*${Regex.escape(prop)}:(-?\d+)px""").find(style)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            Regex("""(?:^|;)\s*${Regex.escape(prop)}\s*:\s*(-?\d+)px""", RegexOption.IGNORE_CASE)
+                .find(style)?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
-        fun pairPx(style: String, prop: String): Pair<Int, Int> {
-            val m = Regex("""(?:^|;)\s*${Regex.escape(prop)}:(\d+)px\s+(\d+)px""").find(style)
-                ?: return 0 to 0
-            return (m.groupValues[1].toIntOrNull() ?: 0) to (m.groupValues[2].toIntOrNull() ?: 0)
+        fun boxShorthandPx(style: String, prop: String): Pair<Int, Int> {
+            val m = Regex(
+                """(?:^|;)\s*${Regex.escape(prop)}\s*:\s*(-?\d+)px(?:\s+(-?\d+)px)?(?:\s+(-?\d+)px)?(?:\s+(-?\d+)px)?""",
+                RegexOption.IGNORE_CASE,
+            ).find(style) ?: return 0 to 0
+            val p1 = m.groupValues[1].toIntOrNull() ?: 0
+            val p2 = m.groupValues[2].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: p1
+            val p3 = m.groupValues[3].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: p1
+            val p4 = m.groupValues[4].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: p2
+            return (p1 + p3) to (p2 + p4)
         }
 
         val fxW = pxProp(fxStyle, "width")
-        val (fxPadV, fxPadH) = pairPx(fxStyle, "padding")
+        val (fxPadTotalV, fxPadTotalH) = boxShorthandPx(fxStyle, "padding")
+        val fxBorder = pxProp(fxStyle, "border")
+        val fxBorderBox = fxStyle.contains("box-sizing:border-box", ignoreCase = true)
         val colGap = pxProp(fxStyle, "column-gap")
         val rowGap = pxProp(fxStyle, "row-gap")
-        val availW = fxW - 2 * fxPadH
+        val availW = if (fxBorderBox) fxW - fxPadTotalH - 2 * fxBorder else fxW
 
         val items = ArrayList<FlexItem>()
+        val childrenSlice = fxHtml.substring(containerMatch.range.last + 1)
         var domIdx = 0
-        for (m in Regex("""<x-i\s+style='([^']+)'""").findAll(fxHtml)) {
+        for (m in Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]+)['"]""").findAll(childrenSlice)) {
             val st = m.groupValues[1]
             domIdx++
-            if (st.contains("display:none")) continue
-            val order = Regex("""order:(-?\d+)""").find(st)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val borderBox = st.contains("box-sizing:border-box")
+            if (st.contains("display:none", ignoreCase = true)) continue
+            val order = Regex("""order\s*:\s*(-?\d+)""", RegexOption.IGNORE_CASE)
+                .find(st)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val borderBox = st.contains("box-sizing:border-box", ignoreCase = true)
             val w = pxProp(st, "width")
             val h = pxProp(st, "height")
-            val (padV, padH) = pairPx(st, "padding")
-            val (marV, marH) = pairPx(st, "margin")
-            val boxW = if (borderBox) w else w + 2 * padH
-            val boxH = if (borderBox) h else h + 2 * padV
-            items.add(FlexItem(order, domIdx, boxW + 2 * marH, boxH + 2 * marV))
+            val (padTotalV, padTotalH) = boxShorthandPx(st, "padding")
+            val (marTotalV, marTotalH) = boxShorthandPx(st, "margin")
+            val bdr = pxProp(st, "border")
+            val boxW = if (borderBox) w else w + padTotalH + 2 * bdr
+            val boxH = if (borderBox) h else h + padTotalV + 2 * bdr
+            items.add(FlexItem(order, domIdx, boxW + marTotalH, boxH + marTotalV))
         }
 
         items.sortWith(compareBy<FlexItem> { it.order }.thenBy { it.domIdx })
@@ -501,12 +546,454 @@ object CimaNowCrypto {
         }
         if (countInRow > 0) rowHeights.add(curMaxH)
 
-        return 2 * fxPadV + rowHeights.sum() + max(0, rowHeights.size - 1) * rowGap
+        return fxPadTotalV + 2 * fxBorder + rowHeights.sum() + max(0, rowHeights.size - 1) * rowGap
     }
 
-    // ── 4. `/watching/?token=...` Full Pure-Kotlin Vault Decryptor ───────────
+    // ── 4. Version-Agnostic Rhino `/watching/` Vault Sandbox (V12, V13, V14+) ─
+
+    fun unlockWatchingVault(rawHtml: String): WatchingVaultHandle? {
+        unlockWatchingVaultRhino(rawHtml)?.let { return it }
+        val legacy = decodeWatchingVaultStaticV12(rawHtml) ?: return null
+        return WatchingVaultHandle(legacy)
+    }
 
     fun decodeWatchingVault(rawHtml: String): DecodedWatchingPage? {
+        decodeWatchingVaultStaticV12(rawHtml)?.let { return it }
+        return unlockWatchingVaultRhino(rawHtml)?.decoded
+    }
+
+    @Suppress("unused")
+    private class RhinoWatchingBridge(private val outerDoc: Document) {
+        var decryptedHtml: String = ""
+        var decryptedDoc: Document? = null
+
+        fun hasOuterEl(id: String): Boolean = outerDoc.getElementById(id) != null
+
+        fun getOuterAttr(id: String, attr: String): String =
+            outerDoc.getElementById(id)?.let { el ->
+                el.attributes().firstOrNull { it.key.equals(attr, ignoreCase = true) }?.value
+            } ?: ""
+
+        fun b64ToLatin1(s: String): String =
+            String(b64Decode(s), Charsets.ISO_8859_1)
+
+        fun utf8FromLatin1(s: String): String =
+            String(s.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
+
+        fun flexHeight(html: String): Int = computeFlexHeight(html)
+
+        fun onDocWrite(html: String) {
+            decryptedHtml = html
+            decryptedDoc = Jsoup.parse(html)
+        }
+
+        // Snapshot matched elements ONCE per querySelectorAll call so removeAttribute()
+        // inside _restoreTabs() never shifts subsequent indices!
+        fun qsaSnapshot(sel: String): Array<Element> =
+            decryptedDoc?.select(sel)?.toTypedArray() ?: emptyArray()
+
+        fun elGetAttr(el: Element, attr: String): String? =
+            el.attributes().firstOrNull { it.key.equals(attr, ignoreCase = true) }?.value
+
+        fun elSetAttr(el: Element, attr: String, value: String) {
+            val realKey = el.attributes().firstOrNull { it.key.equals(attr, ignoreCase = true) }?.key ?: attr
+            el.attr(realKey, value)
+        }
+
+        fun elRemoveAttr(el: Element, attr: String) {
+            val realKey = el.attributes().firstOrNull { it.key.equals(attr, ignoreCase = true) }?.key ?: attr
+            el.removeAttr(realKey)
+        }
+
+        fun elHasAttr(el: Element, attr: String): Boolean =
+            el.attributes().any { it.key.equals(attr, ignoreCase = true) }
+    }
+
+    private fun unpackWatchingBootstrapRhino(outerDoc: Document): String? {
+        val bootEl = outerDoc.select("script").firstOrNull { s ->
+            s.data().length in 60..16_000 && s.attributes().any { a -> a.value.length > 500 }
+        } ?: return null
+
+        val bootId = bootEl.id()
+        val captured = ArrayList<String>(2)
+        val cx = Context.enter()
+        try {
+            cx.languageVersion = Context.VERSION_ECMASCRIPT
+            cx.isInterpretedMode = true
+            val scope = cx.initStandardObjects()
+            val bootBridge = object {
+                @Suppress("unused")
+                fun getAttr(id: String, name: String): String {
+                    val target = if (id.isNotBlank()) outerDoc.getElementById(id) ?: bootEl else bootEl
+                    return target.attributes().firstOrNull { it.key.equals(name, ignoreCase = true) }?.value.orEmpty()
+                }
+
+                @Suppress("unused")
+                fun b64(s: String): String = String(b64Decode(s), Charsets.UTF_8)
+
+                @Suppress("unused")
+                fun capture(code: String) {
+                    if (code.length > 200) captured.add(code)
+                }
+            }
+            ScriptableObject.putProperty(scope, "__bb", Context.javaToJS(bootBridge, scope))
+            val bootShim = """
+                var window = this, self = this, globalThis = this;
+                function atob(s) { return String(__bb.b64(String(s))); }
+                var document = {
+                    currentScript: {
+                        id: ${JSONObject.quote(bootId)},
+                        getAttribute: function(n) { return String(__bb.getAttr(${JSONObject.quote(bootId)}, String(n))); },
+                        parentNode: { removeChild: function() {} }
+                    },
+                    getElementById: function(id) {
+                        var sid = String(id);
+                        return {
+                            id: sid,
+                            getAttribute: function(n) { return String(__bb.getAttr(sid, String(n))); },
+                            remove: function() {},
+                            parentNode: { removeChild: function() {} }
+                        };
+                    },
+                    createElement: function() {
+                        return {
+                            _t: '',
+                            set text(v) { this._t = String(v); __bb.capture(this._t); },
+                            set textContent(v) { this._t = String(v); __bb.capture(this._t); },
+                            set innerHTML(v) { this._t = String(v); __bb.capture(this._t); }
+                        };
+                    },
+                    head: { appendChild: function(el) { if (el && el._t) __bb.capture(el._t); } },
+                    body: { appendChild: function(el) { if (el && el._t) __bb.capture(el._t); } },
+                    documentElement: { appendChild: function(el) { if (el && el._t) __bb.capture(el._t); } }
+                };
+                Function = function() {
+                    var body = arguments[arguments.length - 1];
+                    __bb.capture(String(body));
+                    return function() {};
+                };
+            """.trimIndent()
+            cx.evaluateString(scope, bootShim, "boot_shim.js", 1, null)
+            runCatching { cx.evaluateString(scope, bootEl.data(), "boot.js", 1, null) }
+        } catch (_: Throwable) {
+            return null
+        } finally {
+            Context.exit()
+        }
+        return captured.maxByOrNull { it.length }
+    }
+
+    private fun unlockWatchingVaultRhino(rawHtml: String): WatchingVaultHandle? {
+        if (rawHtml.length < 512) return null
+        val outerDoc = Jsoup.parse(rawHtml)
+        val s2Code = unpackWatchingBootstrapRhino(outerDoc) ?: return null
+
+        val bridge = RhinoWatchingBridge(outerDoc)
+        val rhinoLock = Any()
+        val scope: Scriptable
+
+        val cx = Context.enter()
+        try {
+            cx.languageVersion = Context.VERSION_ECMASCRIPT
+            cx.isInterpretedMode = true
+            scope = cx.initStandardObjects()
+            ScriptableObject.putProperty(scope, "__h", Context.javaToJS(bridge, scope))
+
+            val s2Shim = """
+                var window = this, self = this, globalThis = this;
+                var __lastDecodedTk = '';
+                function setTimeout() { return 1; }
+                function setInterval() { return 1; }
+                function clearTimeout() {}
+                function clearInterval() {}
+                var navigator = {
+                    webdriver: false,
+                    userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36'
+                };
+                function atob(s) { return String(__h.b64ToLatin1(String(s))); }
+                function TextDecoder() {}
+                TextDecoder.prototype.decode = function(u8) {
+                    var CHUNK = 8192, parts = [];
+                    for (var i = 0; i < u8.length; i += CHUNK) {
+                        var end = Math.min(i + CHUNK, u8.length);
+                        var sub = u8.subarray ? u8.subarray(i, end) : Array.prototype.slice.call(u8, i, end);
+                        parts.push(String.fromCharCode.apply(null, sub));
+                    }
+                    return String(__h.utf8FromLatin1(parts.join('')));
+                };
+                window.TextDecoder = TextDecoder;
+                function XMLHttpRequest() { this._url = ''; }
+                XMLHttpRequest.prototype.open = function(m, u) { this._url = String(u); };
+                XMLHttpRequest.prototype.send = function() {};
+                window.XMLHttpRequest = XMLHttpRequest;
+
+                function makeStyleObj() {
+                    return {
+                        _css: '',
+                        set cssText(v) { this._css = String(v); },
+                        get cssText() { return this._css; },
+                        setProperty: function() {}
+                    };
+                }
+                function makeFlexChild(h) {
+                    return {
+                        offsetHeight: h, clientHeight: h, scrollHeight: h, offsetWidth: 403,
+                        style: makeStyleObj(),
+                        getBoundingClientRect: function() { return { height: h, width: 403, top: 0, bottom: h, left: 0, right: 403 }; }
+                    };
+                }
+                function makeMockEl(tag, id) {
+                    return {
+                        tagName: String(tag || 'DIV').toUpperCase(),
+                        id: String(id || ''),
+                        style: makeStyleObj(),
+                        _ih: '',
+                        _fh: 0,
+                        parentNode: { removeChild: function() {}, insertBefore: function() {} },
+                        appendChild: function(c) { return c; },
+                        removeChild: function(c) { return c; },
+                        insertBefore: function(c) { return c; },
+                        set innerHTML(v) {
+                            this._ih = String(v);
+                            if (this._ih.indexOf('display:flex') !== -1 || this._ih.indexOf('<x-fx') !== -1) {
+                                this._fh = Number(__h.flexHeight(this._ih));
+                            }
+                        },
+                        get innerHTML() { return this._ih; },
+                        get offsetHeight() { return this._fh; },
+                        get clientHeight() { return this._fh; },
+                        get scrollHeight() { return this._fh; },
+                        get firstChild() { return makeFlexChild(this._fh); },
+                        get firstElementChild() { return makeFlexChild(this._fh); },
+                        querySelector: function() { return makeFlexChild(this._fh); },
+                        getElementsByTagName: function() { return []; },
+                        getBoundingClientRect: function() { return { height: this._fh, width: 403, top: 0, bottom: this._fh, left: 0, right: 403 }; },
+                        getAttribute: function(n) { return String(__h.getOuterAttr(this.id, String(n))); },
+                        setAttribute: function() {},
+                        removeAttribute: function() {},
+                        hasAttribute: function() { return false; }
+                    };
+                }
+                window.getComputedStyle = function(el) {
+                    var css = (el && el.style && el.style._css) ? el.style._css : '';
+                    var res = { height: (el && el._fh ? el._fh : 0) + 'px' };
+                    var re = /([a-z-]+)\s*:\s*([^;!]+)/gi, m;
+                    while ((m = re.exec(css)) !== null) { res[m[1].trim()] = m[2].trim(); }
+                    return res;
+                };
+                function wrapJsoupEl(jEl) {
+                    return {
+                        getAttribute: function(a) {
+                            var v = __h.elGetAttr(jEl, String(a));
+                            return v === null ? null : String(v);
+                        },
+                        setAttribute: function(a, v) { __h.elSetAttr(jEl, String(a), String(v)); },
+                        removeAttribute: function(a) { __h.elRemoveAttr(jEl, String(a)); },
+                        hasAttribute: function(a) { return Boolean(__h.elHasAttr(jEl, String(a))); },
+                        set src(v) { __h.elSetAttr(jEl, 'src', String(v)); },
+                        get src() { var v = __h.elGetAttr(jEl, 'src'); return v === null ? '' : String(v); },
+                        set href(v) { __h.elSetAttr(jEl, 'href', String(v)); },
+                        get href() { var v = __h.elGetAttr(jEl, 'href'); return v === null ? '' : String(v); }
+                    };
+                }
+                function Document() {}
+                Document.prototype.write = function(html) { __h.onDocWrite(String(html)); };
+                var document = new Document();
+                document.documentElement = makeMockEl('HTML', '');
+                document.body = makeMockEl('BODY', '');
+                document.addEventListener = function() {};
+                document.createDocumentFragment = function() { return makeMockEl('FRAG', ''); };
+                document.createElement = function(tag) { return makeMockEl(tag, ''); };
+                document.getElementById = function(id) {
+                    var sid = String(id);
+                    if (__h.hasOuterEl(sid)) return makeMockEl('SCRIPT', sid);
+                    return null;
+                };
+                document.querySelectorAll = function(sel) {
+                    var jArr = __h.qsaSnapshot(String(sel));
+                    var out = [];
+                    for (var i = 0; i < jArr.length; i++) {
+                        out.push(wrapJsoupEl(jArr[i]));
+                    }
+                    return out;
+                };
+            """.trimIndent()
+
+            cx.evaluateString(scope, s2Shim, "s2_shim.js", 1, null)
+            cx.evaluateString(scope, s2Code, "s2_vault.js", 1, null)
+
+            val dDoc = bridge.decryptedDoc ?: return null
+
+            // Snapshot window keys before running inline #vault_script so any newly registered
+            // zero-arg token getter (e.g. _getCoreToken or any future renamed getter) is found automatically!
+            cx.evaluateString(scope, "var __preKeys = Object.keys(window);", "pre_keys.js", 1, null)
+            for (sc in dDoc.select("script")) {
+                val code = sc.data()
+                if (sc.id() == "vault_script" || (code.length in 10..2500 && code.contains("window["))) {
+                    runCatching { cx.evaluateString(scope, code, "vault_inline.js", 1, null) }
+                }
+            }
+            val tokenExtractJs = """
+                (function(){
+                    if (typeof window._getCoreToken === 'function') {
+                        var t = window._getCoreToken();
+                        if (t) { window.tk = t; return String(t); }
+                    }
+                    if (window.tk) return String(window.tk);
+                    var curKeys = Object.keys(window);
+                    for (var i = 0; i < curKeys.length; i++) {
+                        var k = curKeys[i];
+                        if (__preKeys.indexOf(k) === -1 && typeof window[k] === 'function' && window[k].length === 0) {
+                            try {
+                                var r = window[k]();
+                                if (typeof r === 'string' && r.length >= 16) { window.tk = r; return r; }
+                            } catch(e) {}
+                        }
+                    }
+                    return '';
+                })();
+            """.trimIndent()
+            val coreToken = cx.evaluateString(scope, tokenExtractJs, "extract_tk.js", 1, null)?.toString()?.trim().orEmpty()
+
+            // Boot any encrypted initial iframe inside #watch
+            for (ifEl in dDoc.select("#watch iframe, iframe")) {
+                val curSrc = ifEl.attr("src").trim()
+                if (curSrc.isEmpty() || curSrc.startsWith("javascript:", true)) {
+                    ScriptableObject.putProperty(scope, "__initIfEl", Context.javaToJS(ifEl, scope))
+                    runCatching {
+                        cx.evaluateString(
+                            scope,
+                            """
+                            (function(){
+                                var w = wrapJsoupEl(__initIfEl);
+                                for (var k in window) {
+                                    if (k.indexOf('__cnBootFrame') === 0 && typeof window[k] === 'function') {
+                                        try { window[k](w); } catch(e) {}
+                                    }
+                                }
+                            })();
+                            """.trimIndent(),
+                            "boot_init_if.js",
+                            1,
+                            null,
+                        )
+                    }
+                }
+            }
+
+            val initialEmbed = dDoc.select("#watch iframe, iframe")
+                .firstNotNullOfOrNull { el ->
+                    normalizeEmbedUrl(el.attr("src"))
+                        ?: decodeCnBootFrame(el.outerHtml(), coreToken)
+                }
+
+            val serverTabs = ArrayList<ServerTab>()
+            val seenTabs = HashSet<String>()
+            for (li in dDoc.select("li[data-id][data-index]")) {
+                val dataId = li.attr("data-id").trim()
+                val dataIndex = li.attr("data-index").trim()
+                val label = li.text().trim()
+                // Skip canary honeypot tab (data-index == "00") and invalid entries
+                if (dataId.isEmpty() || dataIndex.isEmpty() || dataIndex == "00" || dataIndex == "undefined") continue
+                if (seenTabs.add("$dataId@$dataIndex")) {
+                    serverTabs.add(ServerTab(label.ifBlank { "Server $dataIndex" }, dataId, dataIndex))
+                }
+            }
+
+            val downloads = ArrayList<DownloadEntry>()
+            val seenDl = HashSet<String>()
+            for (a in dDoc.select("#download a[href], li[aria-label=download] a[href], li[aria-label=quality] a[href]")) {
+                val cleaned = normalizeEmbedUrl(
+                    a.attr("href")
+                        .replace("web2.cnvids.com", "fr.cimanow.cc"),
+                ) ?: continue
+                if (!seenDl.add(cleaned)) continue
+                val text = a.text().trim()
+                val qHint = Regex("""(2160|1440|1080|720|480|360|240)p""", RegexOption.IGNORE_CASE)
+                    .find("$text $cleaned")?.groupValues?.get(1)?.toIntOrNull()
+                downloads.add(DownloadEntry(cleaned, text, qHint))
+            }
+
+            val decodedPage = DecodedWatchingPage(
+                html = bridge.decryptedHtml,
+                coreToken = coreToken,
+                sigSalt = "cnV13Sig",
+                initialEmbedUrl = initialEmbed,
+                serverTabs = serverTabs,
+                downloads = downloads,
+            )
+
+            val signerFn: (String) -> String = { rawUrl ->
+                synchronized(rhinoLock) {
+                    val scx = Context.enter()
+                    try {
+                        scx.languageVersion = Context.VERSION_ECMASCRIPT
+                        scx.isInterpretedMode = true
+                        ScriptableObject.putProperty(scope, "__rawCoreUrl", rawUrl)
+                        scx.evaluateString(
+                            scope,
+                            "(function(){ var x = new XMLHttpRequest(); x.open('GET', String(__rawCoreUrl)); return String(x._url || __rawCoreUrl); })()",
+                            "sign_core.js",
+                            1,
+                            null,
+                        )?.toString() ?: rawUrl
+                    } finally {
+                        Context.exit()
+                    }
+                }
+            }
+
+            val frameDecoderFn: (String) -> String? = { fragHtml ->
+                val fragDoc = Jsoup.parse(fragHtml)
+                val ifEl = fragDoc.selectFirst("iframe")
+                if (ifEl != null) {
+                    synchronized(rhinoLock) {
+                        val fcx = Context.enter()
+                        try {
+                            fcx.languageVersion = Context.VERSION_ECMASCRIPT
+                            fcx.isInterpretedMode = true
+                            ScriptableObject.putProperty(scope, "__fragIfEl", Context.javaToJS(ifEl, scope))
+                            fcx.evaluateString(
+                                scope,
+                                """
+                                (function(){
+                                    var w = wrapJsoupEl(__fragIfEl);
+                                    for (var k in window) {
+                                        if (k.indexOf('__cnBootFrame') === 0 && typeof window[k] === 'function') {
+                                            try { window[k](w); } catch(e) {}
+                                        }
+                                    }
+                                })();
+                                """.trimIndent(),
+                                "decode_frame.js",
+                                1,
+                                null,
+                            )
+                        } finally {
+                            Context.exit()
+                        }
+                    }
+                    normalizeEmbedUrl(ifEl.attr("src")) ?: decodeCnBootFrame(fragHtml, coreToken)
+                } else {
+                    decodeCnBootFrame(fragHtml, coreToken)
+                }
+            }
+
+            return WatchingVaultHandle(
+                decoded = decodedPage,
+                urlSigner = signerFn,
+                frameDecoder = frameDecoderFn,
+            )
+        } catch (_: Throwable) {
+            return null
+        } finally {
+            Context.exit()
+        }
+    }
+
+    // ── 4b. Static V12 Pure-Kotlin Vault Decryptor (Fallback & Unit Fixture) ─
+
+    private fun decodeWatchingVaultStaticV12(rawHtml: String): DecodedWatchingPage? {
         val outerDoc = Jsoup.parse(rawHtml)
         val pEl = outerDoc.selectFirst("script[id^=p_]") ?: return null
         val gEl = outerDoc.selectFirst("script[id^=g_]") ?: return null
@@ -746,8 +1233,38 @@ object CimaNowCrypto {
         return h.toULong().toString(36)
     }
 
-    fun decodeCnBootFrame(fragmentHtml: String): String? {
+    fun calcCoreSigV13(token: String, id: String, index: String, salt: String = "cnV13Sig"): String {
+        val sd = "$index#$token#$id#$salt"
+        var h = 2166136261u
+        for (i in sd.indices) {
+            val addend = (sd[i].code + ((i * 7) and 255)).toUInt()
+            h = h xor addend
+            h *= 16777619u
+        }
+        return h.toULong().toString(36)
+    }
+
+    fun decodeCnBootFrame(fragmentHtml: String, coreToken: String = ""): String? {
         if (fragmentHtml.isBlank()) return null
+
+        // V13 (`data-cnb` + `data-cni` keyed by `coreToken + ':' + info`)
+        val cnb = Regex("""data-cnb=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .find(fragmentHtml)?.groupValues?.get(1)
+        val cni = Regex("""data-cni=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .find(fragmentHtml)?.groupValues?.get(1)
+        if (!cnb.isNullOrBlank() && !cni.isNullOrBlank() && coreToken.isNotBlank()) {
+            val ks = "$coreToken:$cni"
+            val parts = cnb.split('_')
+            val out = StringBuilder(parts.size)
+            for (j in parts.indices) {
+                val v = parts[j].toIntOrNull() ?: continue
+                val kCh = ks[j % ks.length].code
+                out.append((v xor kCh xor ((j * 19 + 11) and 255)).toChar())
+            }
+            normalizeEmbedUrl(out.toString())?.let { return it }
+        }
+
+        // V12 (`data-cnk` + `data-cna`)
         val cnk = Regex("""data-cnk=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .find(fragmentHtml)?.groupValues?.get(1)
         val cna = Regex("""data-cna=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
@@ -765,7 +1282,7 @@ object CimaNowCrypto {
                     val kCh = keyChars[j % keyChars.size].code
                     out.append((v xor kCh xor ((j * 13 + 7) and 255)).toChar())
                 }
-                return normalizeEmbedUrl(out.toString())
+                normalizeEmbedUrl(out.toString())?.let { return it }
             }
         }
 
@@ -775,8 +1292,14 @@ object CimaNowCrypto {
     }
 
     fun normalizeEmbedUrl(raw: String?): String? {
-        val t = raw?.trim() ?: return null
-        if (t.isEmpty() || t.equals("about:blank", true) || t.startsWith("javascript:", true)) return null
+        val t = raw?.trim()
+            ?.removePrefix("https://href.li/?")
+            ?.removePrefix("http://href.li/?")
+            ?.trim()
+            ?: return null
+        if (t.isEmpty() || t.startsWith("#") || t.equals("about:blank", true) || t.startsWith("javascript:", true)) {
+            return null
+        }
         return when {
             t.startsWith("//") -> "https:$t"
             t.startsWith("http://") || t.startsWith("https://") -> t

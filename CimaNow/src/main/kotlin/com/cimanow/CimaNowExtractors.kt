@@ -72,6 +72,16 @@ object CimaNowExtractors {
     internal var debugLogger: ((String) -> Unit)? = null
 
     private val byseAttestCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
+    private val unlockedSourcesCache = ConcurrentHashMap<String, Pair<Long, UnlockedSources>>()
+    private const val UNLOCKED_CACHE_TTL_MS = 12 * 60 * 1000L
+
+    private fun canonicalItemKey(url: String): String =
+        runCatching { java.net.URLDecoder.decode(url, "UTF-8") }
+            .getOrDefault(url)
+            .trim()
+            .substringBefore('?')
+            .trimEnd('/')
+            .lowercase()
 
     private data class CandidateTask(
         val dedupKey: String,
@@ -130,36 +140,41 @@ object CimaNowExtractors {
             }
         }
 
-        // Partition fast extractors vs 10s-timer Jetload tasks so fast servers emit immediately
-        // while all Jetload qualities run their 10s countdowns concurrently in one shared window.
+        // Run fast multi-quality extractors concurrently first; only invoke the 10s-timer Jetload
+        // fallback if fast watch/download hosts emitted fewer than 2 playable streams.
         val (jetloadTasks, standardTasks) = tasks.partition { hostOf(it.url).contains("jetload.") }
 
-        withTimeoutOrNull(36_000L) {
+        withTimeoutOrNull(22_000L) {
             coroutineScope {
                 val stdSem = Semaphore(6)
-                val stdJobs = standardTasks.map { task ->
+                standardTasks.map { task ->
                     async(Dispatchers.IO) {
                         stdSem.withPermit {
-                            withTimeoutOrNull(16_000L) {
+                            withTimeoutOrNull(15_000L) {
                                 dispatchCandidate(task, subtitleCallback, dedupCallback)
                             }
                         }
                     }
-                }
-                val jetJobs = jetloadTasks.take(5).map { task ->
-                    async(Dispatchers.IO) {
-                        try {
-                            withTimeoutOrNull(22_000L) {
-                                extractJetload(task.url, task.qualityHint, dedupCallback)
+                }.awaitAll()
+            }
+        }
+
+        if (totalEmitted.get() < 2 && jetloadTasks.isNotEmpty()) {
+            withTimeoutOrNull(22_000L) {
+                coroutineScope {
+                    jetloadTasks.take(4).map { task ->
+                        async(Dispatchers.IO) {
+                            try {
+                                withTimeoutOrNull(20_000L) {
+                                    extractJetload(task.url, task.qualityHint, dedupCallback)
+                                }
+                            } catch (ce: CancellationException) {
+                                throw ce
+                            } catch (_: Throwable) {
                             }
-                        } catch (ce: CancellationException) {
-                            throw ce
-                        } catch (_: Throwable) {
-                            // Isolate individual Jetload failure
                         }
-                    }
+                    }.awaitAll()
                 }
-                (stdJobs + jetJobs).awaitAll()
             }
         }
 
@@ -182,93 +197,15 @@ object CimaNowExtractors {
         }
     }
 
-    private suspend fun unlockWatchingPage(itemUrl: String, cachedShineUrl: String?): UnlockedSources? {
+    private suspend fun fetchAndDecodeWatchingUrl(
+        mintedUrl: String,
+        gatewayVaultReferer: String,
+    ): UnlockedSources? {
         return CimaNowNetwork.withStickySession { session ->
             val pTag = session.proxySpec ?: "direct"
-            var shineUrl = cachedShineUrl
-            if (shineUrl.isNullOrBlank()) {
-                val (code, html) = session.getText(itemUrl, "${CimaNowNetwork.mainUrl}/home/") ?: run {
-                    debugLogger?.invoke("[$pTag] detail fetch failed")
-                    return@withStickySession null
-                }
-                if (CimaNowNetwork.isCimaBlocked(code, html)) {
-                    debugLogger?.invoke("[$pTag] detail blocked code=$code")
-                    return@withStickySession null
-                }
-                shineUrl = extractShineUrlFromDetailHtml(html)
-            }
-            val gwEntry = shineUrl?.takeIf { it.startsWith("http") } ?: run {
-                debugLogger?.invoke("[$pTag] missing shineUrl")
-                return@withStickySession null
-            }
-            val gwOrigin = originOf(gwEntry)
-
-            // 1. Prime gateway session (`PHPSESSID`) without following `Location: https://href.li/?...`
-            val hop1 = session.getNoRedirect(gwEntry, itemUrl) ?: run {
-                debugLogger?.invoke("[$pTag] hop1 null on $gwEntry")
-                return@withStickySession null
-            }
-            if (hop1.code !in 200..399) {
-                debugLogger?.invoke("[$pTag] hop1 bad code=${hop1.code}")
-                return@withStickySession null
-            }
-            val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
-                ?.takeIf { originOf(it) == gwOrigin }
-                ?: "$gwOrigin/redirectingfree/"
-
-            // 2. Intermediate redirect hop (`redirectingfree/`) without touching `href.li`
-            val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: run {
-                debugLogger?.invoke("[$pTag] hop2 null on $hop2Url")
-                return@withStickySession null
-            }
-            if (hop2.code !in 200..399) {
-                debugLogger?.invoke("[$pTag] hop2 bad code=${hop2.code}")
-                return@withStickySession null
-            }
-            val vaultUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
-                ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
-                ?: "$gwOrigin/2020/02/blog-post.html/"
-
-            // 3. Vault page (`2020/02/blog-post.html/`)
-            val (vCode, vaultHtml) = session.getText(vaultUrl, hop2Url) ?: run {
-                debugLogger?.invoke("[$pTag] hop3 null on $vaultUrl")
-                return@withStickySession null
-            }
-            if (vCode !in 200..299 || vaultHtml.length < 512) {
-                debugLogger?.invoke("[$pTag] hop3 bad code=$vCode len=${vaultHtml.length}")
-                return@withStickySession null
-            }
-
-            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: run {
-                debugLogger?.invoke("[$pTag] solveGatewayPostBody returned null (vaultLen=${vaultHtml.length})")
-                return@withStickySession null
-            }
-
-            // 4. Server-enforced 10s countdown before minting `?token=<64hex>`
-            delay(10_400L)
-
-            val getLinkEndpoint = "${vaultUrl.trimEnd('/')}/get-link.php"
-            val (mCode, mintedBody) = session.postForm(
-                url = getLinkEndpoint,
-                rawFormBody = postBody,
-                referer = vaultUrl,
-                origin = gwOrigin,
-                extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-            ) ?: run {
-                debugLogger?.invoke("[$pTag] get-link.php post null")
-                return@withStickySession null
-            }
-
-            val mintedUrl = mintedBody.trim()
-            if (mCode !in 200..299 || !mintedUrl.startsWith("http") || !mintedUrl.contains("token=")) {
-                debugLogger?.invoke("[$pTag] get-link.php rejected code=$mCode body='${mintedUrl.take(120)}'")
-                return@withStickySession null
-            }
-
-            // 5. Fetch `/watching/?token=...` with mandatory gateway Referer
             val (wCode, watchHtml) = session.getText(
                 url = mintedUrl,
-                referer = vaultUrl,
+                referer = gatewayVaultReferer,
             ) ?: run {
                 debugLogger?.invoke("[$pTag] watching fetch null")
                 return@withStickySession null
@@ -278,10 +215,11 @@ object CimaNowExtractors {
                 return@withStickySession null
             }
 
-            val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml) ?: run {
-                debugLogger?.invoke("[$pTag] decodeWatchingVault null (watchLen=${watchHtml.length} hasP=${watchHtml.contains("id=\"p_") || watchHtml.contains("id='p_")})")
+            val vault = CimaNowCrypto.unlockWatchingVault(watchHtml) ?: run {
+                debugLogger?.invoke("[$pTag] unlockWatchingVault null (watchLen=${watchHtml.length})")
                 return@withStickySession null
             }
+            val decoded = vault.decoded
             debugLogger?.invoke(
                 "[$pTag] unlocked watching! initial=${decoded.initialEmbedUrl != null} tabs=${decoded.serverTabs.size} downloads=${decoded.downloads.size} coreTokLen=${decoded.coreToken.length}",
             )
@@ -292,30 +230,24 @@ object CimaNowExtractors {
 
             if (decoded.coreToken.isNotBlank() && decoded.serverTabs.isNotEmpty()) {
                 val switched = coroutineScope {
-                    val tabSem = Semaphore(4)
+                    val tabSem = Semaphore(5)
                     decoded.serverTabs.map { tab ->
                         async(Dispatchers.IO) {
                             tabSem.withPermit {
-                                val sig = CimaNowCrypto.calcCoreSig(
-                                    decoded.coreToken,
-                                    tab.dataId,
-                                    tab.dataIndex,
-                                    decoded.sigSalt,
-                                )
                                 val encTok = URLEncoder.encode(decoded.coreToken, "UTF-8")
                                 val encIdx = URLEncoder.encode(tab.dataIndex, "UTF-8")
                                 val encId = URLEncoder.encode(tab.dataId, "UTF-8")
-                                val encSig = URLEncoder.encode(sig, "UTF-8")
-                                val coreUrl =
+                                val rawCoreUrl =
                                     "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
-                                        "?token=$encTok&action=switch&index=$encIdx&id=$encId&_s=$encSig"
+                                        "?token=$encTok&action=switch&index=$encIdx&id=$encId"
+                                val signedCoreUrl = vault.signCoreSwitchUrl(rawCoreUrl, tab)
                                 val resp = session.getText(
-                                    url = coreUrl,
+                                    url = signedCoreUrl,
                                     referer = mintedUrl,
                                     extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
                                 ) ?: return@withPermit null
                                 if (resp.first !in 200..299) return@withPermit null
-                                val iframeUrl = CimaNowCrypto.decodeCnBootFrame(resp.second) ?: return@withPermit null
+                                val iframeUrl = vault.decodeCoreIframe(resp.second) ?: return@withPermit null
                                 tab.name to iframeUrl
                             }
                         }
@@ -327,6 +259,92 @@ object CimaNowExtractors {
             if (embeds.isEmpty() && decoded.downloads.isEmpty()) return@withStickySession null
             UnlockedSources(mintedUrl, embeds, decoded.downloads)
         }
+    }
+
+    private suspend fun unlockWatchingPage(itemUrl: String, cachedShineUrl: String?): UnlockedSources? {
+        val itemKey = canonicalItemKey(itemUrl)
+        unlockedSourcesCache[itemKey]?.let { (exp, cached) ->
+            if (exp > System.currentTimeMillis()) return cached
+            unlockedSourcesCache.remove(itemKey)
+        }
+
+        var effectiveItemUrl = itemUrl
+        var shineUrl = cachedShineUrl?.trim()?.takeIf { it.startsWith("http") }
+        if (shineUrl == null) {
+            val detailPage = CimaNowNetwork.getPage(itemUrl, "${CimaNowNetwork.mainUrl}/home/")
+            if (detailPage != null) {
+                effectiveItemUrl = detailPage.finalUrl
+                shineUrl = extractShineUrlFromDetailHtml(detailPage.html)
+            }
+        }
+        val gwEntry = shineUrl ?: run {
+            val watchTarget = "${effectiveItemUrl.trimEnd('/')}/watching/"
+            val b64 = CimaNowCrypto.b64EncodeNoWrap(watchTarget.toByteArray(Charsets.UTF_8))
+            "https://rm.freex2line.online/loadon/?link=$b64"
+        }
+        val gwOrigin = originOf(gwEntry).ifBlank { "https://rm.freex2line.online" }
+        val vaultReferer = "$gwOrigin/2020/02/blog-post.html/"
+
+        // 1. Primary path: Turnstile Gateway Solver (Android stealth WebView / CI Chromium)
+        val wasTokenCached = CimaNowGatewaySolver.getCachedWatchingUrl(effectiveItemUrl) != null
+        var mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
+        if (!mintedUrl.isNullOrBlank()) {
+            fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
+                unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
+                return unlocked
+            }
+            if (wasTokenCached) {
+                CimaNowGatewaySolver.invalidateWatchingUrl(effectiveItemUrl)
+                mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
+                if (!mintedUrl.isNullOrBlank()) {
+                    fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
+                        unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
+                        return unlocked
+                    }
+                }
+            }
+        }
+
+        // 2. Legacy static HMAC fallback (in case gateway temporarily disables Turnstile)
+        val legacyMinted = CimaNowNetwork.withStickySession { session ->
+            val hop1 = session.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withStickySession null
+            if (hop1.code !in 200..399) return@withStickySession null
+            val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
+                ?.takeIf { originOf(it) == gwOrigin }
+                ?: "$gwOrigin/redirectingfree/"
+            val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: return@withStickySession null
+            if (hop2.code !in 200..399) return@withStickySession null
+            val vUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
+                ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
+                ?: vaultReferer
+            val (vCode, vaultHtml) = session.getText(vUrl, hop2Url) ?: return@withStickySession null
+            if (vCode !in 200..299 || vaultHtml.length < 512) return@withStickySession null
+            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withStickySession null
+            delay(10_400L)
+            val (mCode, mintedBody) = session.postForm(
+                url = "${vUrl.trimEnd('/')}/get-link.php",
+                rawFormBody = postBody,
+                referer = vUrl,
+                origin = gwOrigin,
+                extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
+            ) ?: return@withStickySession null
+            if (mCode !in 200..299) return@withStickySession null
+            val trimmed = mintedBody.trim()
+            val parsedUrl = if (trimmed.startsWith("{")) {
+                runCatching { JSONObject(trimmed).optString("url").trim() }.getOrDefault("")
+            } else {
+                trimmed
+            }
+            parsedUrl.takeIf { it.startsWith("http") && it.contains("token=") }
+        }
+
+        if (!legacyMinted.isNullOrBlank()) {
+            fetchAndDecodeWatchingUrl(legacyMinted, vaultReferer)?.let { unlocked ->
+                unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
+                return unlocked
+            }
+        }
+        return null
     }
 
     internal fun extractShineUrlFromDetailHtml(html: String): String? {
@@ -439,7 +457,7 @@ object CimaNowExtractors {
                 }
             }
 
-            if (localCount.get() == 0) {
+            if (localCount.get() == 0 && android.os.Build.VERSION.SDK_INT > 0) {
                 runCatching {
                     loadExtractor(url, task.referer, subtitleCallback, countingCallback)
                 }
