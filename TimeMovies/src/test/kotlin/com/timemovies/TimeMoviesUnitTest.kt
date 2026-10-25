@@ -192,7 +192,7 @@ class TimeMoviesUnitTest {
 
     @Test
     fun testLiveAppStateConnectivityWhenOnline() {
-        val ast = TimeMoviesApi.fetchAppState() ?: return
+        val ast = TimeMoviesApi.getAppSettings() ?: return
         assertTrue(ast.has("v") || ast.has("m") || ast.length() >= 0)
     }
 }
