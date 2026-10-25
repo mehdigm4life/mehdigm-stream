@@ -1025,7 +1025,10 @@ object CimaNowGatewaySolver {
                                     val lbl = d.optString("t").ifBlank { "Download" }
                                     val q = Regex("""(2160|1440|1080|720|480|360|240)""").find("$lbl $u")
                                         ?.groupValues?.get(1)?.toIntOrNull()
-                                    downloads.putIfAbsent(u, CimaNowCrypto.DownloadEntry(u, q, lbl))
+                                    downloads.putIfAbsent(
+                                        u,
+                                        CimaNowCrypto.DownloadEntry(url = u, label = lbl, qualityHint = q),
+                                    )
                                 }
                             }
                             for (ic in interceptedEmbeds) {
