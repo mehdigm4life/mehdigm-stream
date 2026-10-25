@@ -201,10 +201,6 @@ object CimaNowGatewaySolver {
                             runCatching { view?.stopLoading() }
                             return true
                         }
-                        unwrapHrefLi(target)?.let { unwrapped ->
-                            view?.post { runCatching { view.loadUrl(unwrapped) } }
-                            return true
-                        }
                         if (target.startsWith("http") && !isAllowedGatewayNavigation(target)) {
                             return true
                         }
@@ -257,6 +253,8 @@ object CimaNowGatewaySolver {
 
                     val nowMs = SystemClock.uptimeMillis()
                     val elapsedMs = nowMs - startedMs
+                    // Once blog-post.html (#downloadbtn) appears, give Stage B 7.0s undisturbed so Turnstile solves cleanly
+                    if (firstBtnSeenMs > 0L && nowMs - firstBtnSeenMs < 7_000L) continue
                     val allowBtnForce = firstBtnSeenMs > 0L && (nowMs - firstBtnSeenMs >= 11_000L)
                     val allowTsTap = if (firstBtnSeenMs == 0L) {
                         elapsedMs >= 4_500L
@@ -524,7 +522,6 @@ object CimaNowGatewaySolver {
                     const pending = new Map();
                     let getLinkReqId = '';
                     let getLinkDone = false;
-                    let blogReqId = '';
                     let minted = '';
                     const diag = [];
                     ws.onmessage = ev => {
@@ -536,16 +533,7 @@ object CimaNowGatewaySolver {
                                 getLinkReqId = m.params.requestId;
                                 diag.push('req:get-link');
                             }
-                            if (u.includes('blog-post.html') && !u.includes('get-link')) {
-                                blogReqId = m.params.requestId;
-                            }
                             if (u.includes('/watching/') && u.includes('token=')) minted = u;
-                        }
-                        if (m.method === 'Network.responseReceived') {
-                            const u = m.params.response.url || '';
-                            if (m.params.type === 'Document' || u.includes('get-link')) {
-                                diag.push('res:' + m.params.response.status + ':' + u.slice(0, 65));
-                            }
                         }
                         if (m.method === 'Network.loadingFinished' && getLinkReqId && m.params.requestId === getLinkReqId) {
                             getLinkDone = true;
@@ -637,9 +625,7 @@ object CimaNowGatewaySolver {
                                             }
                                         }
                                     }
-                                    var domLen = document.documentElement ? document.documentElement.innerHTML.length : -1;
-                                    var snip = (!btn && domLen > 0) ? document.documentElement.innerHTML.slice(0, 140) : '';
-                                    return 'WAIT:btn=' + (!!btn) + ',wd=' + navigator.webdriver + ',dom=' + domLen + ',h=' + h + ',ttl=' + ttl + ',snip=' + snip;
+                                    return 'WAIT:btn=' + (!!btn) + ',h=' + h;
                                 } catch(e) { return 'ERR:' + e.message; }
                             })()`,
                             returnByValue: true
@@ -647,9 +633,8 @@ object CimaNowGatewaySolver {
                         const pv = (probe && probe.result && probe.result.result && probe.result.result.value) ? String(probe.result.result.value) : '';
                         if (!firstBtnMs && (pv.includes('btn=true') || pv.includes(':HASBTN') || pv.startsWith('BTN:'))) {
                             firstBtnMs = ms;
-                            diag.push('firstBtn=' + ms);
                         }
-                        if (ms === 5000 || ms % 6000 === 0) diag.push(ms + ':' + pv);
+                        if (ms % 6000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
                             return cleanup({ url: pv.slice(4), diag });
                         } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 2000) {
@@ -660,30 +645,8 @@ object CimaNowGatewaySolver {
                             lastTsClick = ms;
                             const clean = pv.slice(3).replace(':HASBTN', '');
                             const [tx, ty] = clean.split(',').map(Number);
-                            if (tx > 0 && ty > 0) {
-                                diag.push('tapTS@' + ms + '=' + tx + ',' + ty);
-                                await tap(tx, ty);
-                            }
+                            if (tx > 0 && ty > 0) await tap(tx, ty);
                         }
-                    }
-                    if (!minted && blogReqId) {
-                        try {
-                            const brb = await send('Network.getResponseBody', { requestId: blogReqId });
-                            if (brb && brb.result && typeof brb.result.body === 'string') {
-                                const btxt = brb.result.base64Encoded ? Buffer.from(brb.result.body, 'base64').toString('utf8') : brb.result.body;
-                                diag.push('blogRawLen=' + btxt.length + ',head=' + btxt.slice(0, 220));
-                                const em = btxt.match(/var e=\[([0-9,\s]+)\],k=(\d+),d='';for\(var i=0;i<e\.length;i\+\+\)\{d\+=String\.fromCharCode\(e\[i\]\^\(\(k\+\(i\*(\d+)\)\)&255\)\)/);
-                                if (em) {
-                                    const arr = em[1].split(',').map(Number);
-                                    const k = Number(em[2]), st = Number(em[3]);
-                                    let dec = '';
-                                    for (let i = 0; i < arr.length; i++) dec += String.fromCharCode(arr[i] ^ ((k + i * st) & 255));
-                                    diag.push('decStageA=' + dec.slice(0, 700) + ' || TAIL=' + dec.slice(-700));
-                                }
-                            } else {
-                                diag.push('blogRawErr=' + JSON.stringify(brb).slice(0, 180));
-                            }
-                        } catch(e) { diag.push('blogEx=' + e.message); }
                     }
                     cleanup({ url: minted, diag });
                 })().catch(e => cleanup({ url: '', diag: ['catch:' + (e && e.message)] }));
@@ -703,7 +666,7 @@ object CimaNowGatewaySolver {
                 val obj = CimaNowCrypto.safeJsonObject(jsonText)
                 val minted = obj?.optString("url")?.trim()?.takeIf { isMintedWatchingUrl(it) }
                 if (minted == null) {
-                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(3500)}")
+                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(260)}")
                 }
                 minted
             } catch (_: Throwable) {

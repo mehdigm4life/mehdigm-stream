@@ -35,7 +35,7 @@ jobs:
 
       - name: Configure Android SDK, test, and build CimaNow plugin
         env:
-          CIMANOW_LIVE_E2E: "1"
+          CIMANOW_LIVE_E2E: ${{ github.ref != 'refs/heads/main' && '1' || '0' }}
         run: |
           set -o pipefail
           chmod +x gradlew

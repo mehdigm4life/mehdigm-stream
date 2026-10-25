@@ -284,7 +284,6 @@ object CimaNowExtractors {
         }
         val gwOrigin = originOf(gwEntry).ifBlank { "https://rm.freex2line.online" }
         val vaultReferer = "$gwOrigin/2020/02/blog-post.html/"
-        debugLogger?.invoke("unlock entry item=${effectiveItemUrl.take(90)} gw=${gwEntry.take(120)}")
 
         // 1. Primary path: Turnstile Gateway Solver (Android stealth WebView / CI Chromium)
         val tMint0 = System.currentTimeMillis()
@@ -323,7 +322,6 @@ object CimaNowExtractors {
                     ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
                     ?: vaultReferer
                 val (vCode, vaultHtml) = directSession.getText(vUrl, hop2Url) ?: return@withTimeoutOrNull null
-                debugLogger?.invoke("directVault vCode=$vCode len=${vaultHtml.length} head=${vaultHtml.take(180).replace('\n', ' ')}")
                 if (vCode !in 200..299 || vaultHtml.length < 512) return@withTimeoutOrNull null
                 val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withTimeoutOrNull null
                 delay(10_400L)
