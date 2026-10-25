@@ -77,8 +77,10 @@ object CimaNowGatewaySolver {
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
                 mintViaAndroidWebView(shineUrl, itemUrl)
+                    ?: mintViaAndroidWebView(shineUrl, itemUrl)
             } else if (Build.VERSION.SDK_INT == 0) {
                 mintViaHeadlessChromiumCli(shineUrl, itemUrl)
+                    ?: mintViaHeadlessChromiumCli(shineUrl, itemUrl)
             } else {
                 null
             }
@@ -396,11 +398,13 @@ object CimaNowGatewaySolver {
 
             val port = (19200..19899).random()
             val tmpJs = File.createTempFile("cimanow_gw_", ".js")
+            val outFile = File.createTempFile("cimanow_gw_out_", ".json")
             val script = """
                 const { spawn } = require('child_process');
                 const http = require('http');
                 const fs = require('fs');
                 const port = $port;
+                const outPath = ${JSONObject.quote(outFile.absolutePath)};
                 const shineUrl = ${JSONObject.quote(CimaNowNetwork.encodeUrl(shineUrl))};
                 const refererUrl = ${JSONObject.quote(CimaNowNetwork.encodeUrl(itemUrl))};
                 const chromeBin = ${JSONObject.quote(chromeBin)};
@@ -419,9 +423,9 @@ object CimaNowGatewaySolver {
                     ? spawn(xvfb, ['-a', chromeBin, ...args], { stdio: 'ignore' })
                     : spawn(chromeBin, ['--headless=new', ...args], { stdio: 'ignore' });
                 function cleanup(out) {
+                    try { fs.writeFileSync(outPath, JSON.stringify(out), 'utf8'); } catch(e) {}
                     try { proc.kill('SIGKILL'); } catch(e) {}
                     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch(e) {}
-                    console.log(JSON.stringify(out));
                     process.exit(0);
                 }
                 function getJson(u) {
@@ -458,8 +462,16 @@ object CimaNowGatewaySolver {
                     const send = (method, params = {}) => new Promise(r => { const cid = id++; pending.set(cid, r); ws.send(JSON.stringify({ id: cid, method, params })); });
                     await send('Page.enable');
                     await send('Network.enable');
+                    await send('Runtime.enable');
                     await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
+                    let lastTsClick = 0, lastBtnClick = 0;
+                    const tap = async (x, y) => {
+                        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+                        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+                        await new Promise(r => setTimeout(r, 55));
+                        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+                    };
                     for (let ms = 0; ms < 28000; ms += 500) {
                         await new Promise(r => setTimeout(r, 500));
                         if (getLinkReqId && !minted) {
@@ -470,6 +482,50 @@ object CimaNowGatewaySolver {
                             }
                         }
                         if (minted) return cleanup({ url: minted });
+                        const probe = await send('Runtime.evaluate', {
+                            expression: `(function(){
+                                try {
+                                    var loc = String(location.href || '');
+                                    if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
+                                    var btn = document.getElementById('downloadbtn');
+                                    if (btn) {
+                                        var h = String(btn.getAttribute('href') || '');
+                                        if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
+                                        if (h === '#watch-ready' || (${'$'}{ms >= 11500} && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
+                                            if (btn.hidden || getComputedStyle(btn).display === 'none') {
+                                                btn.removeAttribute('hidden');
+                                                btn.style.setProperty('display', 'inline-block', 'important');
+                                            }
+                                            btn.scrollIntoView({block:'center', inline:'center'});
+                                            var br = btn.getBoundingClientRect();
+                                            if (br.width > 4 && br.height > 4) return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2);
+                                        }
+                                    }
+                                    var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                                    if (ts) {
+                                        ts.scrollIntoView({block:'center', inline:'center'});
+                                        var tr = ts.getBoundingClientRect();
+                                        if (tr.width > 40 && tr.height > 20 && tr.top >= 0 && tr.left >= 0) {
+                                            return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height/2);
+                                        }
+                                    }
+                                } catch(e) {}
+                                return 'WAIT';
+                            })()`,
+                            returnByValue: true
+                        });
+                        const pv = (probe && probe.result && probe.result.result && probe.result.result.value) ? String(probe.result.result.value) : '';
+                        if (pv.startsWith('URL:')) {
+                            return cleanup({ url: pv.slice(4) });
+                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 1000) {
+                            lastBtnClick = ms;
+                            const [bx, by] = pv.slice(4).split(',').map(Number);
+                            if (bx > 0 && by > 0) await tap(bx, by);
+                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 2500) {
+                            lastTsClick = ms;
+                            const [tx, ty] = pv.slice(3).split(',').map(Number);
+                            if (tx > 0 && ty > 0) await tap(tx, ty);
+                        }
                     }
                     cleanup({ url: minted });
                 })().catch(() => cleanup({ url: '' }));
@@ -479,19 +535,20 @@ object CimaNowGatewaySolver {
                 tmpJs.writeText(script, Charsets.UTF_8)
                 val p = ProcessBuilder(nodeBin, tmpJs.absolutePath)
                     .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .start()
-                val finished = p.waitFor(34L, TimeUnit.SECONDS)
+                val finished = p.waitFor(42L, TimeUnit.SECONDS)
                 if (!finished) {
                     p.destroyForcibly()
-                    return@withContext null
                 }
-                val lastLine = p.inputStream.bufferedReader().readText().trim().lines().lastOrNull().orEmpty()
-                runCatching { JSONObject(lastLine).optString("url").trim() }.getOrNull()
+                val jsonText = if (outFile.exists()) outFile.readText(Charsets.UTF_8).trim() else ""
+                runCatching { JSONObject(jsonText).optString("url").trim() }.getOrNull()
                     ?.takeIf { isMintedWatchingUrl(it) }
             } catch (_: Throwable) {
                 null
             } finally {
                 runCatching { tmpJs.delete() }
+                runCatching { outFile.delete() }
             }
         }
 }

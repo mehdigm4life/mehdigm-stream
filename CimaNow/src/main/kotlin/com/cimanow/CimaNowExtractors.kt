@@ -286,8 +286,10 @@ object CimaNowExtractors {
         val vaultReferer = "$gwOrigin/2020/02/blog-post.html/"
 
         // 1. Primary path: Turnstile Gateway Solver (Android stealth WebView / CI Chromium)
+        val tMint0 = System.currentTimeMillis()
         val wasTokenCached = CimaNowGatewaySolver.getCachedWatchingUrl(effectiveItemUrl) != null
         var mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
+        debugLogger?.invoke("mintWatchingUrl cached=$wasTokenCached ok=${!mintedUrl.isNullOrBlank()} ms=${System.currentTimeMillis() - tMint0}")
         if (!mintedUrl.isNullOrBlank()) {
             fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
                 unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
@@ -305,31 +307,32 @@ object CimaNowExtractors {
             }
         }
 
-        // 2. Legacy static HMAC fallback (only when Turnstile minter returned null)
+        // 2. Direct legacy static HMAC fallback (never through slow public SOCKS5 proxies; capped at 16s)
         val legacyMinted = if (mintedUrl.isNullOrBlank()) {
-            CimaNowNetwork.withStickySession { session ->
-                val hop1 = session.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withStickySession null
-                if (hop1.code !in 200..399) return@withStickySession null
+            withTimeoutOrNull(16_000L) {
+                val directSession = CimaNowNetwork.newDirectSession()
+                val hop1 = directSession.getNoRedirect(gwEntry, effectiveItemUrl) ?: return@withTimeoutOrNull null
+                if (hop1.code !in 200..399) return@withTimeoutOrNull null
                 val hop2Url = unwrapHrefLiLocation(hop1.location, gwOrigin)
                     ?.takeIf { originOf(it) == gwOrigin }
                     ?: "$gwOrigin/redirectingfree/"
-                val hop2 = session.getNoRedirect(hop2Url, gwEntry) ?: return@withStickySession null
-                if (hop2.code !in 200..399) return@withStickySession null
+                val hop2 = directSession.getNoRedirect(hop2Url, gwEntry) ?: return@withTimeoutOrNull null
+                if (hop2.code !in 200..399) return@withTimeoutOrNull null
                 val vUrl = unwrapHrefLiLocation(hop2.location, gwOrigin)
                     ?.takeIf { originOf(it) == gwOrigin && !it.endsWith("/redirectingfree/") }
                     ?: vaultReferer
-                val (vCode, vaultHtml) = session.getText(vUrl, hop2Url) ?: return@withStickySession null
-                if (vCode !in 200..299 || vaultHtml.length < 512) return@withStickySession null
-                val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withStickySession null
+                val (vCode, vaultHtml) = directSession.getText(vUrl, hop2Url) ?: return@withTimeoutOrNull null
+                if (vCode !in 200..299 || vaultHtml.length < 512) return@withTimeoutOrNull null
+                val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml) ?: return@withTimeoutOrNull null
                 delay(10_400L)
-                val (mCode, mintedBody) = session.postForm(
+                val (mCode, mintedBody) = directSession.postForm(
                     url = "${vUrl.trimEnd('/')}/get-link.php",
                     rawFormBody = postBody,
                     referer = vUrl,
                     origin = gwOrigin,
                     extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-                ) ?: return@withStickySession null
-                if (mCode !in 200..299) return@withStickySession null
+                ) ?: return@withTimeoutOrNull null
+                if (mCode !in 200..299) return@withTimeoutOrNull null
                 val trimmed = mintedBody.trim()
                 val parsedUrl = if (trimmed.startsWith("{")) {
                     runCatching { JSONObject(trimmed).optString("url").trim() }.getOrDefault("")

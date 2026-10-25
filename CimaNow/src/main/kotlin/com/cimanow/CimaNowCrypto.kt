@@ -895,8 +895,8 @@ object CimaNowCrypto {
                 val dataId = li.attr("data-id").trim()
                 val dataIndex = li.attr("data-index").trim()
                 val label = li.text().trim()
-                // Skip canary honeypot tab (data-index == "00") and invalid entries
-                if (dataId.isEmpty() || dataIndex.isEmpty() || dataIndex == "00" || dataIndex == "undefined") continue
+                // Skip canary honeypot tab (data-id == "00" or data-index == "00") and invalid entries
+                if (dataId.isEmpty() || dataIndex.isEmpty() || dataId == "00" || dataIndex == "00" || dataIndex == "undefined") continue
                 if (seenTabs.add("$dataId@$dataIndex")) {
                     serverTabs.add(ServerTab(label.ifBlank { "Server $dataIndex" }, dataId, dataIndex))
                 }

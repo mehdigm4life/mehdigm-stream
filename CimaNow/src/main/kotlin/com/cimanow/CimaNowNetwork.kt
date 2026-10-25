@@ -619,6 +619,11 @@ object CimaNowNetwork {
         }.getOrNull()
     }
 
+    fun newDirectSession(): StickyHttpSession {
+        val store = SessionCookieStore(false)
+        return StickyHttpSession(newIsolatedDirectClient(store), store, null)
+    }
+
     suspend fun <T> withStickySession(block: suspend (StickyHttpSession) -> T?): T? = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         if (now >= directBlockedUntilMs) {
