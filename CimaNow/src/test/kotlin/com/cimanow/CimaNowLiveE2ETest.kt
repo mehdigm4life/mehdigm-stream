@@ -190,8 +190,65 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
+    fun testInspectLiveWatchingVault(): Unit = runBlocking {
+        assumeTrue("Set CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        val api = CimaNow()
+        val beekeeperUrl = "https://cimanow.cc/%d9%81%d9%8a%d9%84%d9%85-the-beekeeper-2024-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val bkLoad = api.load(beekeeperUrl) as? MovieLoadResponse
+        assertNotNull(bkLoad)
+        val bkData = CimaNowCrypto.safeJsonObject(bkLoad!!.dataUrl)
+        val itemUrl = bkData?.optString("itemUrl") ?: beekeeperUrl
+        val shineUrl = bkData?.optString("shineUrl").orEmpty()
+        val mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(shineUrl, itemUrl)
+        println("[WATCH_DIAG] mintedUrl=$mintedUrl")
+        assertNotNull("Expected mintedUrl", mintedUrl)
+
+        val watchPage = CimaNowNetwork.withStickySession { session ->
+            val pTag = session.proxySpec ?: "direct"
+            val r = session.getText(mintedUrl!!, "https://rm.freex2line.online/2020/02/blog-post.html/")
+            println("[WATCH_DIAG] [$pTag] code=${r?.first} len=${r?.second?.length}")
+            if (r == null || CimaNowNetwork.isCimaBlocked(r.first, r.second)) {
+                throw CimaNowNetwork.CimaBlockedException("blocked")
+            }
+            r.second
+        }
+        assertNotNull("Expected watchHtml", watchPage)
+        val html = watchPage!!
+        println("[WATCH_DIAG] htmlHead=${html.take(900)}")
+        val doc = org.jsoup.Jsoup.parse(html)
+        println("[WATCH_DIAG] title=${doc.title()} bodyChildren=${doc.body().children().map { "${it.tagName()}#${it.id()}.${it.className()}(attrs=${it.attributes().map { a -> "${a.key}:${a.value.length}" }})" }}")
+        doc.select("style").forEachIndexed { idx, st ->
+            println("[WATCH_DIAG] style[$idx] len=${st.data().length} head=${st.data().take(300)}")
+        }
+        doc.select("script").forEachIndexed { idx, sc ->
+            val attrSummary = sc.attributes().map { "${it.key}=${it.value.take(35)}(len=${it.value.length})" }
+            println("[WATCH_DIAG] script[$idx] id='${sc.id()}' src='${sc.attr("src")}' dataLen=${sc.data().length} attrs=$attrSummary")
+            if (sc.data().isNotEmpty()) {
+                println("[WATCH_DIAG] script[$idx] head=${sc.data().take(1200)}")
+                if (sc.data().length > 1200) {
+                    println("[WATCH_DIAG] script[$idx] mid=${sc.data().substring(sc.data().length / 2, minOf(sc.data().length, sc.data().length / 2 + 1200))}")
+                    println("[WATCH_DIAG] script[$idx] tail=${sc.data().takeLast(1200)}")
+                }
+            }
+        }
+        // Dump full watchHtml base64 gzipped so we can inspect 100% locally!
+        val baos = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(baos).use { gz -> gz.write(html.toByteArray(Charsets.UTF_8)) }
+        val gzB64 = java.util.Base64.getEncoder().encodeToString(baos.toByteArray())
+        println("[WATCH_GZ_LEN] ${gzB64.length}")
+        var off = 0
+        var chunkIdx = 0
+        while (off < gzB64.length && chunkIdx < 6) {
+            val end = minOf(gzB64.length, off + 8000)
+            println("[WATCH_GZ_$chunkIdx] ${gzB64.substring(off, end)}")
+            off = end
+            chunkIdx++
+        }
+    }
+
+    @Test
     fun testFullLiveEndToEndSuite(): Unit = runBlocking {
-        assumeTrue("Skipping live E2E test unless CIMANOW_LIVE_E2E=1", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        assumeTrue("Skipping live E2E test unless CIMANOW_FULL_E2E=1", System.getenv("CIMANOW_FULL_E2E") == "1")
 
         val api = CimaNow()
         CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
