@@ -371,6 +371,20 @@ class CimaNowLiveE2ETest {
                 ws.onmessage = ev => {
                     const m = JSON.parse(ev.data);
                     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+                    if (m.method === 'Target.attachedToTarget' && m.params && m.params.sessionId) {
+                        const sid = m.params.sessionId;
+                        const turl = (m.params.targetInfo && m.params.targetInfo.url) || '';
+                        if (turl.includes('/watching/') && turl.includes('token=')) minted = turl;
+                        else if (turl.startsWith('http') && !turl.includes('freex2line') && !turl.includes('cimanow') && !turl.includes('href.li')) {
+                            ws.send(JSON.stringify({ id: id++, method: 'Target.closeTarget', params: { targetId: m.params.targetInfo.targetId } }));
+                        } else {
+                            ws.send(JSON.stringify({ id: id++, sessionId: sid, method: 'Network.enable', params: {} }));
+                        }
+                    }
+                    if (m.method === 'Target.targetInfoChanged' && m.params && m.params.targetInfo) {
+                        const tu = m.params.targetInfo.url || '';
+                        if (tu.includes('/watching/') && tu.includes('token=')) minted = tu;
+                    }
                     if (m.method === 'Network.requestWillBeSent') {
                         const u = m.params.request.url || '';
                         if (u.includes('/watching/') && u.includes('token=')) minted = u;
@@ -382,14 +396,15 @@ class CimaNowLiveE2ETest {
                 await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
                 await send('Emulation.setDeviceMetricsOverride', { width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true });
                 await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+                await send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
                 await send('Page.addScriptToEvaluateOnNewDocument', {
                     source: "try { Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.63 Mobile Safari/537.36', configurable: true }); Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true }); } catch(e) {}"
                 });
                 await send('Page.navigate', { url: ${org.json.JSONObject.quote(CimaNowNetwork.encodeUrl(shineUrl))}, referrer: ${org.json.JSONObject.quote(CimaNowNetwork.encodeUrl(itemUrl))} });
                 const tap = async (x, y) => {
-                    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, radiusX: 4, radiusY: 4, force: 0.68, id: 0 }] });
+                    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
                     await new Promise(r => setTimeout(r, 60));
-                    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+                    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
                 };
                 let firstBtnMs = 0, lastTsMs = 0, lastOvlMs = 0, lastBtnMs = 0;
                 const jsWait = ${org.json.JSONObject.quote(probeWait)};
