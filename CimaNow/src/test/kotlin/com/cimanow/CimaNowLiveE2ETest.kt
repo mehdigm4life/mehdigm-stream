@@ -107,9 +107,14 @@ class CimaNowLiveE2ETest {
         CimaNowNetwork.withStickySession { session ->
             val proxySpec = session.proxySpec ?: return@withStickySession null
             // Verify this proxy reaches rm.freex2line.online cleanly first
+            val t0 = System.currentTimeMillis()
             val hop1 = session.getNoRedirect(shine, detailPage.finalUrl)
-            if (hop1 == null || hop1.code !in 200..399) return@withStickySession null
-            println("[DIAG] Using verified proxy=$proxySpec")
+            val hopMs = System.currentTimeMillis() - t0
+            if (hop1 == null || hop1.code !in 200..399 || hopMs > 2500L) {
+                println("[DIAG] Skipping slow/dead proxy=$proxySpec code=${hop1?.code} ms=$hopMs")
+                return@withStickySession null
+            }
+            println("[DIAG] Using fast verified proxy=$proxySpec (${hopMs}ms)")
 
             // Use real Chromium via CDP under xvfb-run (mirrors Android WebView + MotionEvent!)
             val cdpScript = """
@@ -211,7 +216,8 @@ class CimaNowLiveE2ETest {
                     });
                                         await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
 
-                    for (let sec = 0; sec < 40; sec++) {
+                    let mintedAtSec = -1;
+                    for (let sec = 0; sec < 55; sec++) {
                         await new Promise(r => setTimeout(r, 1000));
                         const curUrl = await evalJs('location.href');
                         if (sec % 4 === 0) logs.push('t=' + sec + 's url=' + curUrl);
@@ -240,7 +246,10 @@ class CimaNowLiveE2ETest {
                                 logs.push('GET_LINK_BODY=' + getLinkBody.slice(0, 300));
                                 try {
                                     const parsed = JSON.parse(getLinkBody);
-                                    if (parsed && parsed.url) mintedUrl = parsed.url;
+                                    if (parsed && parsed.url) {
+                                        mintedUrl = parsed.url;
+                                        if (mintedAtSec < 0) mintedAtSec = sec;
+                                    }
                                 } catch(e) {}
                             }
                         }
@@ -273,6 +282,10 @@ class CimaNowLiveE2ETest {
                         if (state && state.btn && (state.btnHref === '#watch-ready' || sec >= 11)) {
                             logs.push('Tapping #downloadbtn at ' + JSON.stringify(state.btn));
                             await realTap(state.btn.x, state.btn.y);
+                        }
+                        if (mintedAtSec >= 0 && sec - mintedAtSec >= 6) {
+                            logs.push('Minted URL ready for 6s, breaking loop');
+                            break;
                         }
                     }
 
@@ -401,7 +414,7 @@ class CimaNowLiveE2ETest {
                     }
                 }
             }
-            "done"
+            if (mintedUrl.startsWith("http")) "done" else null
         }
         Unit
     }
