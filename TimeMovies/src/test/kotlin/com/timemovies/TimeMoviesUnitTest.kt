@@ -1649,7 +1649,8 @@ class TimeMoviesUnitTest {
                             .replace("__HOST__", hostOrigin)
                             .toByteArray(Charsets.UTF_8),
                     )
-                    MiniResponse(200, "text/plain", b64)
+                    // Prepend realistic ArabyPros random salt prefix before `W3s...`
+                    MiniResponse(200, "text/plain", "arabypros_salt_9f1a$b64")
                 }
 
                 req.path.startsWith("/dramaworld/subtitles/by/movie/777/") -> {

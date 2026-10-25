@@ -2701,9 +2701,11 @@ object TimeMoviesUnlimitedEngine {
             val obj = JSONObject(trimmed)
             obj.optJSONArray("sources") ?: obj.optJSONArray("posters") ?: obj.optJSONArray("data")
         }.getOrNull()
-        // ArabyPros `movie/source/by` & `episode/source/by` return Base64-encoded JSON arrays (`W3s...`)
+        // ArabyPros `movie/source/by` & `episode/source/by` prepend a token before the Base64 of `[{` ("W3s...")
         return runCatching {
-            val decoded = String(TimeMoviesCrypto.base64DecodeFlexible(trimmed), StandardCharsets.UTF_8).trim()
+            val w3sIdx = trimmed.indexOf("W3s")
+            val b64Slice = if (w3sIdx >= 0) trimmed.substring(w3sIdx) else trimmed
+            val decoded = String(TimeMoviesCrypto.base64DecodeFlexible(b64Slice), StandardCharsets.UTF_8).trim()
             if (decoded.startsWith("[")) JSONArray(decoded) else null
         }.getOrNull()
     }
