@@ -142,13 +142,47 @@ object TimeMoviesPool {
         }
     }
 
+    internal fun extractJwtExpSeconds(token: String?): Long {
+        val claims = TimeMoviesPrefs.decodeJwtClaims(token) ?: return 0L
+        val exp = claims.optLong("exp", 0L)
+        if (exp > 0L) return exp
+        return claims.optLong("iat", 0L)
+    }
+
+    internal fun pickFresherJwt(primary: String?, secondary: String): String {
+        val cleanPrimary = primary?.trim()?.takeIf { it.isNotEmpty() } ?: return secondary
+        if (secondary.isBlank()) return cleanPrimary
+        val expPrimary = extractJwtExpSeconds(cleanPrimary)
+        val expSecondary = extractJwtExpSeconds(secondary)
+        return if (expSecondary > 0L && expPrimary > 0L && expSecondary > expPrimary) {
+            secondary
+        } else {
+            cleanPrimary
+        }
+    }
+
+    private fun mergeFresherBundle(
+        map: LinkedHashMap<String, PoolAccountBundle>,
+        incoming: PoolAccountBundle,
+    ) {
+        val existing = map[incoming.slotId]
+        if (existing == null) {
+            map[incoming.slotId] = incoming
+            return
+        }
+        val fresherTk = pickFresherJwt(existing.authToken, incoming.authToken)
+        if (fresherTk != existing.authToken) {
+            map[incoming.slotId] = incoming
+        }
+    }
+
     data class EffectivePoolSlot(
         val bundle: PoolAccountBundle,
         val runtime: PoolSlotRuntimeState,
     ) {
         val slotId: String get() = bundle.slotId
         val label: String get() = bundle.label
-        val effectiveToken: String get() = runtime.refreshedAuthToken ?: bundle.authToken
+        val effectiveToken: String get() = pickFresherJwt(runtime.refreshedAuthToken, bundle.authToken)
         val effectiveDeviceKeyId: String? get() = runtime.enrolledDeviceKeyId ?: bundle.deviceKeyId
         val effectiveProfileId: String get() = (runtime.resolvedProfileId ?: bundle.profileId).orEmpty()
         val effectiveMaturity: String
@@ -344,7 +378,12 @@ object TimeMoviesPool {
      */
     fun loadAllSlots(allowNetworkFetch: Boolean = true): List<EffectivePoolSlot> {
         val localBundles = parseBundleLines(TimeMoviesPrefs.localPoolBundlesRaw)
-        val embeddedBundles = TimeMoviesEmbeddedPool.BUNDLES.mapNotNull { PoolAccountBundle.unseal(it) }
+        val includeEmbedded = !TimeMoviesPrefs.isUnitTestMode || TimeMoviesPrefs.includeEmbeddedPoolInUnitTests
+        val embeddedBundles = if (includeEmbedded) {
+            TimeMoviesEmbeddedPool.BUNDLES.mapNotNull { PoolAccountBundle.unseal(it) }
+        } else {
+            emptyList()
+        }
         var remoteBundles = parseBundleLines(TimeMoviesPrefs.remotePoolBundlesRaw)
 
         if (allowNetworkFetch) {
@@ -357,9 +396,9 @@ object TimeMoviesPool {
         }
 
         val mergedById = LinkedHashMap<String, PoolAccountBundle>()
-        for (b in localBundles) mergedById.putIfAbsent(b.slotId, b)
-        for (b in remoteBundles) mergedById.putIfAbsent(b.slotId, b)
-        for (b in embeddedBundles) mergedById.putIfAbsent(b.slotId, b)
+        for (b in localBundles) mergeFresherBundle(mergedById, b)
+        for (b in remoteBundles) mergeFresherBundle(mergedById, b)
+        for (b in embeddedBundles) mergeFresherBundle(mergedById, b)
 
         if (mergedById.isEmpty()) return emptyList()
 
@@ -423,24 +462,18 @@ object TimeMoviesPool {
         val quotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs, action) })
         if (quotaHealthy.isNotEmpty()) return quotaHealthy
 
-        // All known pool accounts hit quota — check OTA `pool.enc` once in case new accounts were added
-        refreshRemotePool(force = true)
-        all = loadAllSlots(allowNetworkFetch = false)
-            .filter { excludeUserId.isNullOrBlank() || it.userId != excludeUserId }
-        val freshQuotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs, action) })
-        if (freshQuotaHealthy.isNotEmpty()) return freshQuotaHealthy
+        // All known pool accounts hit quota — check OTA `pool.enc` once (unless recently checked) in case new accounts were added
+        if ((nowMs - TimeMoviesPrefs.remotePoolFetchedAtMs) >= NEGATIVE_FETCH_COOLDOWN_MS) {
+            refreshRemotePool(force = true)
+            all = loadAllSlots(allowNetworkFetch = false)
+                .filter { excludeUserId.isNullOrBlank() || it.userId != excludeUserId }
+            val freshQuotaHealthy = rotateListFromCursor(all.filter { it.isMediaQuotaHealthy(nowMs, action) })
+            if (freshQuotaHealthy.isNotEmpty()) return freshQuotaHealthy
+        }
 
-        // Fallback: try auth-healthy slot whose quota cooldown is closest to expiring (in case server UTC day rolled over)
-        return all
-            .filter { it.isAuthHealthy(nowMs) }
-            .sortedBy {
-                if (action == "download" || action == "season_download") {
-                    it.runtime.downloadQuotaExhaustedUntilMs
-                } else {
-                    it.runtime.quotaExhaustedUntilMs
-                }
-            }
-            .take(1)
+        // Respect active daily quota cooldown (`QUOTA_COOLDOWN_MS`) so exhausted pool slots skip `/media/grant`
+        // and fall through instantaneously (`0 ms`) to `TimeMoviesUnlimitedEngine`!
+        return emptyList()
     }
 
     /**

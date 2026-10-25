@@ -411,6 +411,39 @@ object TimeMoviesApi {
             lower.contains("invalid signature")
     }
 
+    internal fun isJwtExpiredOrNearExpiry(
+        token: String?,
+        nowMs: Long = serverNowMs(),
+        leewayMs: Long = 60_000L,
+    ): Boolean {
+        if (token.isNullOrBlank()) return false
+        val expSec = TimeMoviesPool.extractJwtExpSeconds(token)
+        if (expSec <= 0L) return false
+        return (expSec * 1000L) <= (nowMs + leewayMs)
+    }
+
+    /**
+     * Background startup warm-up for 100% permanent zero-login access:
+     * 1. Syncs OTA `TimeMovies/pool.enc` from GitHub Raw / jsDelivr mirror.
+     * 2. Proactively renews any pool slot whose JWT expires within 48 hours so users never hit an expired token.
+     */
+    fun warmUpAndRefreshPoolIfNeeded() {
+        runCatching {
+            syncServerClockIfNeeded(force = false)
+            TimeMoviesPool.refreshRemotePool(force = false)
+            val now = serverNowMs()
+            val leeway48h = 48L * 60L * 60L * 1000L
+            for (slot in TimeMoviesPool.loadAllSlots(allowNetworkFetch = false)) {
+                if (isJwtExpiredOrNearExpiry(slot.effectiveToken, nowMs = now, leewayMs = leeway48h)) {
+                    val slotSession = PoolSlotSessionContext(slot.slotId)
+                    if (tryRefreshSessionAuthToken(slotSession)) {
+                        TimeMoviesPool.markSlotHealthy(slot.slotId)
+                    }
+                }
+            }
+        }
+    }
+
     private fun executeV47RequestWithSession(
         url: String,
         method: String = "GET",
@@ -421,6 +454,19 @@ object TimeMoviesApi {
         allowRetry: Boolean = true,
     ): RawHttpResult {
         val httpUrl = url.toHttpUrl()
+        if (
+            !noAuth &&
+            allowRetry &&
+            session.canRefreshToken &&
+            !TimeMoviesCrypto.isExemptFromDeviceVerification(httpUrl) &&
+            isJwtExpiredOrNearExpiry(session.authToken, nowMs = serverNowMs(), leewayMs = 60_000L)
+        ) {
+            syncServerClockIfNeeded(force = true)
+            if (isJwtExpiredOrNearExpiry(session.authToken, nowMs = serverNowMs(), leewayMs = 60_000L)) {
+                tryRefreshSessionAuthToken(session)
+            }
+        }
+
         val tk = if (noAuth) "" else session.authToken
         val profileId = if (noAuth || tk.isEmpty()) "" else session.profileId
         val maturity = if (profileId.isNotEmpty()) session.profileMaturity else ""
@@ -507,7 +553,7 @@ object TimeMoviesApi {
 
                 val retryToken = session.authToken
                 if (retryToken.isNotBlank()) {
-                    ensureSessionDeviceKeyEnrolled(session)
+                    ensureSessionDeviceKeyEnrolled(session, forceReEnroll = true)
                     return executeV47RequestWithSession(
                         url = url,
                         method = method,
@@ -529,12 +575,19 @@ object TimeMoviesApi {
      * Never rotates the keypair unless `400` bad-key was explicitly returned (`a.java:1121`),
      * preventing `409 rotation_requires_signin` (`a.java:1126`).
      */
-    internal fun ensureSessionDeviceKeyEnrolled(session: AuthSessionContext): String? {
+    internal fun ensureSessionDeviceKeyEnrolled(
+        session: AuthSessionContext,
+        forceReEnroll: Boolean = false,
+    ): String? {
         if (session.authToken.isBlank()) return null
-        session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+        if (!forceReEnroll) {
+            session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
 
         synchronized(enrollmentLock) {
-            session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+            if (!forceReEnroll) {
+                session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }?.let { return it }
+            }
 
             syncServerClockIfNeeded(force = false)
             val first = enrollSessionOnce(session)
@@ -554,7 +607,7 @@ object TimeMoviesApi {
             }
 
             lastEnrollmentError = second.errorMessage ?: first.errorMessage ?: "HTTP ${second.httpCode}"
-            return null
+            return session.getCachedDeviceKeyId()?.takeIf { it.isNotBlank() }
         }
     }
 
@@ -650,7 +703,7 @@ object TimeMoviesApi {
      * Refreshes JWT via `POST d4f34a2a4f0249bbb3c92a7e45f3e1c2` with `RefreshTokenBody(sid, rasplab_install_id)`
      * using `session`'s own isolated `rasplabInstallId`!
      */
-    private fun tryRefreshSessionAuthToken(session: AuthSessionContext): Boolean = synchronized(refreshLock) {
+    internal fun tryRefreshSessionAuthToken(session: AuthSessionContext): Boolean = synchronized(refreshLock) {
         runCatching {
             val currentToken = session.authToken.takeIf { it.isNotBlank() } ?: return@runCatching false
             val claims = TimeMoviesPrefs.decodeJwtClaims(currentToken)
@@ -697,6 +750,24 @@ object TimeMoviesApi {
                 return result
             }
             TimeMoviesPool.markSlotAuthFailed(slot.slotId)
+        }
+
+        // Self-healing pass if all cached slots transiently failed (e.g., clock drift or long offline gap)
+        if (!TimeMoviesPrefs.isUnitTestMode || TimeMoviesPrefs.includeEmbeddedPoolInUnitTests) {
+            syncServerClockIfNeeded(force = true)
+            TimeMoviesPool.refreshRemotePool(force = true)
+            TimeMoviesPool.clearAllCooldowns()
+            val refreshedSlots = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false)
+            for (slot in refreshedSlots) {
+                val slotSession = PoolSlotSessionContext(slot.slotId)
+                tryRefreshSessionAuthToken(slotSession)
+                ensureSessionProfileInitialized(slotSession)
+                val recovered = block(slotSession)
+                if (recovered != null) {
+                    TimeMoviesPool.markSlotHealthy(slot.slotId)
+                    return recovered
+                }
+            }
         }
         return null
     }

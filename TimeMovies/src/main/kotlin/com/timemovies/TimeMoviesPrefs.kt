@@ -54,6 +54,9 @@ object TimeMoviesPrefs {
         KEY_DEVICE_KEY_SCOPE,
         KEY_VIRTUAL_DEVICE_JSON,
         KEY_LOCAL_POOL_BUNDLES,
+        KEY_REMOTE_POOL_BUNDLES,
+        KEY_REMOTE_POOL_FETCHED_MS,
+        KEY_POOL_RUNTIME_STATE,
     )
 
     data class VirtualDeviceProfile(
@@ -441,9 +444,36 @@ object TimeMoviesPrefs {
     @Volatile
     internal var forceUnlimitedInMockTests: Boolean = false
 
+    @Volatile
+    internal var includeEmbeddedPoolInUnitTests: Boolean = false
+
+    internal val isUnitTestMode: Boolean
+        get() = unitTestIsolatedMode
+
     fun init(context: Context) {
         unitTestIsolatedMode = false
         appContext = context.applicationContext ?: resolveHostApplicationContext() ?: context
+    }
+
+    /**
+     * Ensures 100% automatic zero-setup mode on every user device:
+     * clears any stale personal/OTP tokens left over from legacy plugin versions (`v1`–`v6`)
+     * so all users seamlessly run on the built-in official pool + Unlimited engine out-of-the-box.
+     */
+    @Synchronized
+    fun activateZeroAccountModeOnStartup() {
+        if (!authToken.isNullOrBlank() || !pendingOtpToken.isNullOrBlank() || !pendingOtpEmail.isNullOrBlank()) {
+            authToken = null
+            pendingOtpToken = null
+            pendingOtpEmail = null
+            userEmail = null
+            profileId = null
+            profileName = null
+            putString(KEY_PROFILE_MATURITY, null)
+            deviceKeyId = null
+            deviceKeyScope = null
+        }
+        unlimitedBypassEnabled = true
     }
 
     private fun resolveHostApplicationContext(): Context? {
@@ -777,6 +807,7 @@ object TimeMoviesPrefs {
         unlimitedDramaWorldApiOverride = null
         unlimitedScraperOverride = null
         forceUnlimitedInMockTests = false
+        includeEmbeddedPoolInUnitTests = false
         TimeMoviesGrantCache.clearAll()
     }
 

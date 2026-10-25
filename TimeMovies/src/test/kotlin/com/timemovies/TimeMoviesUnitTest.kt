@@ -1762,4 +1762,187 @@ class TimeMoviesUnitTest {
             resolvedMovies >= 10,
         )
     }
+
+    @Test
+    fun testV7EmbeddedOfficialPoolZeroSetupFreshestJwtSelectionAndProactiveExpiredRefresh() = runBlocking {
+        // 1. Out-of-the-box embedded pool verification (brand-new user install, zero personal login)
+        TimeMoviesPrefs.includeEmbeddedPoolInUnitTests = true
+        assertTrue("TimeMoviesEmbeddedPool.BUNDLES must contain the official sealed bundle", TimeMoviesEmbeddedPool.BUNDLES.isNotEmpty())
+        val slots = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false)
+        assertEquals(1, slots.size)
+        val officialSlot = slots.first()
+        assertEquals("Official", officialSlot.label)
+        assertFalse("Pool label must never expose email", officialSlot.label.contains("@"))
+        assertTrue("Official bundle must include pre-enrolled dk", !officialSlot.effectiveDeviceKeyId.isNullOrBlank())
+        assertTrue("Official bundle must include pre-resolved main profile", officialSlot.effectiveProfileId.isNotBlank())
+        assertTrue("hasUsableAuth must be true out-of-the-box with zero login", TimeMoviesApi.hasUsableAuth(allowNetworkFetch = false))
+
+        // 2. Upgrading from legacy v1-v6 with a stale/broken personal token must auto-clean to zero-account mode
+        TimeMoviesPrefs.authToken = "eyJ_broken_legacy_token"
+        TimeMoviesPrefs.pendingOtpToken = "eyJ_pending_legacy"
+        TimeMoviesPrefs.pendingOtpEmail = "legacy@example.com"
+        TimeMoviesPrefs.unlimitedBypassEnabled = false
+        TimeMoviesPrefs.activateZeroAccountModeOnStartup()
+        assertFalse("Legacy personal token must be cleared on startup", TimeMoviesPrefs.isSignedIn)
+        assertNull(TimeMoviesPrefs.pendingOtpToken)
+        assertNull(TimeMoviesPrefs.pendingOtpEmail)
+        assertTrue("Unlimited mode must always be active", TimeMoviesPrefs.unlimitedBypassEnabled)
+        assertTrue("Built-in official pool must remain active after legacy cleanup", TimeMoviesApi.hasUsableAuth(allowNetworkFetch = false))
+
+        // 3. `pickFresherJwt` must always pick whichever token (runtime vs OTA bundle) has the later `exp`
+        val hdr = TimeMoviesCrypto.base64UrlEncodeNoPad("""{"alg":"HS256","typ":"JWT"}""".toByteArray())
+        val olderJwt = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad("""{"_id":"u1","exp":1700000000}""".toByteArray())}.s1"
+        val newerJwt = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad("""{"_id":"u1","exp":1900000000}""".toByteArray())}.s2"
+        assertEquals(newerJwt, TimeMoviesPool.pickFresherJwt(olderJwt, newerJwt))
+        assertEquals(newerJwt, TimeMoviesPool.pickFresherJwt(newerJwt, olderJwt))
+
+        // 4. Proactive auto-refresh when a user reopens the app months later with an expired local JWT
+        TimeMoviesPrefs.resetAllForTests()
+        TimeMoviesApi.resetRuntimeStateForTests()
+
+        val kp = TimeMoviesCrypto.generateP256KeyPair()
+        val nowSec = System.currentTimeMillis() / 1000L
+        val expiredTk = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(JSONObject().put("_id", "u_exp").put("ia", true).put("iat", nowSec - 30 * 86400L).put("exp", nowSec - 23 * 86400L).toString().toByteArray())}.sig_old"
+        val freshTk = "$hdr.${TimeMoviesCrypto.base64UrlEncodeNoPad(JSONObject().put("_id", "u_exp").put("ia", true).put("iat", nowSec).put("exp", nowSec + 7 * 86400L).toString().toByteArray())}.sig_new"
+        val refreshCount = AtomicInteger(0)
+        val homeUnauthorizedCount = AtomicInteger(0)
+
+        MiniHttpServer { req ->
+            when {
+                req.path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) ->
+                    jsonResp(200, """{"success":true,"result":{"v":1092}}""")
+
+                req.path.endsWith(TimeMoviesApi.PATH_REFRESH_TOKEN) -> {
+                    refreshCount.incrementAndGet()
+                    jsonResp(200, JSONObject().put("success", true).put("status", 1).put("result", freshTk).toString())
+                }
+
+                req.path.endsWith(TimeMoviesApi.PATH_HOME) -> {
+                    if (req.header("x-t") != freshTk) {
+                        homeUnauthorizedCount.incrementAndGet()
+                        jsonResp(401, """{"success":false,"message":"jwt expired"}""")
+                    } else {
+                        val shelf = JSONObject().apply {
+                            put("category", JSONObject().put("_id", "c1").put("n", "Featured").put("nr", "مميز"))
+                            put("works", JSONArray().put(JSONObject().put("_id", "w1").put("tl", "Interstellar").put("ism", true)))
+                        }
+                        val homeRes = JSONObject().put("featured", JSONArray()).put("categories", JSONArray().put(shelf))
+                        jsonResp(200, JSONObject().put("success", true).put("result", homeRes).toString())
+                    }
+                }
+
+                else -> jsonResp(404, """{"success":false}""")
+            }
+        }.use { server ->
+            TimeMoviesPrefs.apiBaseUrlOverride = "${server.baseOrigin}/api/v4.7/app/"
+            val expiredBundle = TimeMoviesPool.PoolAccountBundle(
+                slotId = "slot_exp_test",
+                label = "Official",
+                authToken = expiredTk,
+                deviceKeyId = "dk_exp_1",
+                keyPair = kp,
+                virtualDevice = TimeMoviesPrefs.buildSyntheticDevice(),
+                profileId = "prof_exp_1",
+                profileName = "Main",
+                profileMaturity = 5,
+            ).seal()
+            TimeMoviesPool.addLocalPoolBundles(expiredBundle)
+
+            val home = TimeMoviesApi.getHome()
+            assertNotNull("Home must succeed automatically even when cached pool token expired weeks ago", home)
+            assertEquals("Proactive expiry check must refresh token BEFORE sending GET Home (0 wasted 401s)", 0, homeUnauthorizedCount.get())
+            assertEquals(1, refreshCount.get())
+            val persistedTk = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false).first().effectiveToken
+            assertEquals("Refreshed 7-day JWT must be persisted in runtime state", freshTk, persistedTk)
+        }
+    }
+
+    @Test(timeout = 120_000L)
+    fun testLiveV7EmbeddedOfficialPoolZeroSetupHomeSearchDetailsAndWatchLinksWhenOnline() = runBlocking {
+        // Simulate a brand-new user installing TimeMovies v7 for the very first time (0 login, 0 settings)
+        TimeMoviesPrefs.resetAllForTests()
+        TimeMoviesApi.resetRuntimeStateForTests()
+        TimeMoviesPrefs.includeEmbeddedPoolInUnitTests = true
+        TimeMoviesPrefs.activateZeroAccountModeOnStartup()
+
+        // Skip gracefully if running in an offline sandbox where api.apks.lol is unreachable
+        if (TimeMoviesApi.getAppSettings() == null) return@runBlocking
+
+        val provider = TimeMovies()
+        val homePage = provider.getMainPage(1, com.lagradost.cloudstream3.MainPageRequest("الرئيسية", "home", false))
+        assertTrue("Zero-login Home page must return live shelves immediately", homePage.items.isNotEmpty())
+
+        val searchResults = provider.search("Oppenheimer")
+        assertTrue("Zero-login Search must return live TimeMovies results", searchResults.isNotEmpty())
+
+        val targetCard = searchResults.firstOrNull { it.name.contains("Oppenheimer", true) || it.name.contains("أوبنهايمر") }
+            ?: searchResults.first()
+        val loadResp = provider.load(targetCard.url) as com.lagradost.cloudstream3.MovieLoadResponse
+        assertTrue("Zero-login WorkDetails load() must succeed", loadResp.dataUrl.isNotBlank())
+
+        val links = Collections.synchronizedList(ArrayList<ExtractorLink>())
+        val subs = Collections.synchronizedList(ArrayList<SubtitleFile>())
+        val ok = provider.loadLinks(
+            data = loadResp.dataUrl,
+            isCasting = false,
+            subtitleCallback = { subs.add(it) },
+            callback = { links.add(it) },
+        )
+        println("LIVE_V7_ZERO_SETUP [homeShelves=${homePage.items.size}, searchHits=${searchResults.size}, links=${links.size}, subs=${subs.size}]")
+        assertTrue("Zero-login loadLinks() must return playable streams out-of-the-box", ok && links.isNotEmpty())
+    }
+
+    @Test(timeout = 90_000L)
+    fun testAutoRenewPoolEncWhenRequested() {
+        if (System.getProperty("tmRenewPool") != "true") return
+        val poolPath = System.getProperty("tmPoolEncPath")?.takeIf { it.isNotBlank() } ?: return
+        val poolFile = java.io.File(poolPath)
+        assertTrue("pool.enc file must exist at $poolPath", poolFile.exists())
+
+        val existingLines = poolFile.readLines(Charsets.UTF_8)
+            .map { it.trim() }
+            .filter { it.startsWith(TimeMoviesCrypto.POOL_BUNDLE_PREFIX) }
+        assertTrue("pool.enc must contain at least one sealed bundle", existingLines.isNotEmpty())
+
+        val renewedBundles = ArrayList<String>(existingLines.size)
+        for (rawLine in existingLines) {
+            TimeMoviesPrefs.resetAllForTests()
+            TimeMoviesApi.resetRuntimeStateForTests()
+            assertEquals(1, TimeMoviesPool.addLocalPoolBundles(rawLine))
+            val slot = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false).first()
+            val session = TimeMoviesApi.PoolSlotSessionContext(slot.slotId)
+
+            TimeMoviesApi.syncServerClockIfNeeded(force = true)
+            val refreshed = TimeMoviesApi.tryRefreshSessionAuthToken(session)
+            assertTrue("Scheduled pool RefreshToken must succeed", refreshed)
+            val dk = TimeMoviesApi.ensureSessionDeviceKeyEnrolled(session)
+            assertTrue("Scheduled pool dk must be valid", !dk.isNullOrBlank())
+            val home = TimeMoviesApi.getHome()
+            assertNotNull("Renewed pool bundle must pass live getHome() verification", home)
+            assertTrue("Renewed pool bundle must return non-empty shelves", home!!.shelves.isNotEmpty() || home.featured.isNotEmpty())
+
+            val updatedSlot = TimeMoviesPool.loadAllSlots(allowNetworkFetch = false).first()
+            val resealed = TimeMoviesPool.PoolAccountBundle(
+                slotId = updatedSlot.slotId,
+                label = "Official",
+                authToken = updatedSlot.effectiveToken,
+                deviceKeyId = updatedSlot.effectiveDeviceKeyId,
+                keyPair = updatedSlot.bundle.keyPair,
+                virtualDevice = updatedSlot.bundle.virtualDevice,
+                profileId = updatedSlot.effectiveProfileId.ifBlank { null },
+                profileName = updatedSlot.bundle.profileName,
+                profileMaturity = updatedSlot.bundle.profileMaturity,
+            ).seal()
+            renewedBundles.add(resealed)
+        }
+
+        val updatedText = buildString {
+            append("# TimeMovies Encrypted Session Pool (AES-256-GCM)\n")
+            for (b in renewedBundles) {
+                append(b).append('\n')
+            }
+        }
+        poolFile.writeText(updatedText, Charsets.UTF_8)
+        println("POOL_AUTO_RENEW_OK count=${renewedBundles.size}")
+    }
 }

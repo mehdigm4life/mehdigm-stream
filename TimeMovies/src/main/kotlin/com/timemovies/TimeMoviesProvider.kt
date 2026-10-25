@@ -115,16 +115,7 @@ class TimeMovies : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse =
         withContext(Dispatchers.IO) {
             if (!TimeMoviesApi.hasUsableAuth()) {
-                if (page > 1) return@withContext newHomePageResponse(emptyList(), hasNext = false)
-                val noticeItem = newMovieSearchResponse(
-                    name = "⚙️ اضغط على إعدادات إضافة TimeMovies لتسجيل الدخول أو تحديث الحسابات التلقائية",
-                    url = "$mainUrl/auth-required",
-                    type = TvType.Movie,
-                )
-                return@withContext newHomePageResponse(
-                    listOf(HomePageList("تفعيل الجلسة مطلوب (TimeMovies)", listOf(noticeItem))),
-                    hasNext = false,
-                )
+                return@withContext newHomePageResponse(emptyList(), hasNext = false)
             }
 
             val preferAr = TimeMoviesPrefs.preferArabic
@@ -285,23 +276,13 @@ class TimeMovies : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse = withContext(Dispatchers.IO) {
-        if (url.endsWith("/auth-required")) {
-            throw ErrorLoadingException("يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية")
-        }
-
         val workId = extractWorkIdFromUrl(url)
         if (workId.isBlank()) {
             throw ErrorLoadingException("معرف العمل غير صالح")
         }
 
         val details = TimeMoviesApi.getWorkDetails(workId)
-            ?: throw ErrorLoadingException(
-                if (!TimeMoviesApi.hasUsableAuth()) {
-                    "يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية"
-                } else {
-                    "تعذر تحميل تفاصيل العمل ($workId)"
-                }
-            )
+            ?: throw ErrorLoadingException("تعذر تحميل تفاصيل العمل حالياً — يرجى التحقق من اتصال الإنترنت والمحاولة مجدداً")
 
         val preferAr = TimeMoviesPrefs.preferArabic
         val title = details.displayTitle(preferAr)
@@ -439,7 +420,6 @@ class TimeMovies : MainAPI() {
         val hasCachedStream = TimeMoviesGrantCache.getValidEntry(initialPayload, verifyNetworkLiveness = false) != null
 
         if (!TimeMoviesApi.hasUsableAuth() && !unlimitedActive && !hasCachedStream) {
-            TimeMoviesPlugin.notifyUserAr("يرجى فتح إعدادات إضافة TimeMovies ⚙️ لتسجيل الدخول أو مزامنة الحسابات التلقائية")
             return false
         }
 
@@ -492,31 +472,22 @@ class TimeMovies : MainAPI() {
             return false
         }
 
-        val ok = TimeMoviesExtractors.extractAllLinks(
+        return extractAllLinksOk(
             payload = resolvedPayload,
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
-        if (!ok) {
-            val reason = TimeMoviesApi.lastMediaRefusalReason
-            if (!reason.isNullOrBlank()) {
-                TimeMoviesPlugin.notifyUserAr(translateRefusalReasonAr(reason))
-            }
-        }
-        return ok
     }
 
-    private fun translateRefusalReasonAr(reason: String): String {
-        return when (reason.lowercase(Locale.US)) {
-            "account_not_activated", "email_not_verified", "not_activated" ->
-                "هذا الحساب غير مفعّل بعد — افتح إعدادات TimeMovies ⚙️ وأدخل رمز التفعيل المرسل لبريدك"
-            "quota_exhausted", "insufficient_quota" ->
-                "انتهى الرصيد اليومي المجاني لهذا الحساب في TimeMovies"
-            "blocked_by_plan" ->
-                "هذه الميزة تتطلب اشتراك VIP في TimeMovies"
-            "target_over_limit", "device_limit", "max_devices" ->
-                "تم تجاوز الحد الأقصى للأجهزة المسموح بها في هذا الحساب"
-            else -> "تعذر جلب الرابط من خادم TimeMovies ($reason)"
-        }
+    private suspend fun extractAllLinksOk(
+        payload: LinkPayload,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        return TimeMoviesExtractors.extractAllLinks(
+            payload = payload,
+            subtitleCallback = subtitleCallback,
+            callback = callback,
+        )
     }
 }

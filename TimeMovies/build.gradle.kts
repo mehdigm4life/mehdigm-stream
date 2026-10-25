@@ -2,7 +2,7 @@ import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
-version = 6
+version = 7
 
 val generatedPoolDir = layout.buildDirectory.dir("generated/source/timemoviesPool/kotlin")
 val poolEncFile = layout.projectDirectory.file("pool.enc")
@@ -80,6 +80,12 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            if (project.findProperty("tmRenewPool") == "true") {
+                it.systemProperty("tmRenewPool", "true")
+                it.systemProperty("tmPoolEncPath", poolEncFile.asFile.absolutePath)
+            }
+        }
     }
 }
 
