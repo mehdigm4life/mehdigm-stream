@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  checks: write
 
 jobs:
   build:
@@ -29,35 +28,10 @@ jobs:
           cache: 'gradle'
 
       - name: Configure Android SDK, test, and build TimeMovies plugin
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          set +e
-          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace > /tmp/gradle_out.txt 2>&1
-          RC=$?
-          cat /tmp/gradle_out.txt
-          if [ $RC -ne 0 ]; then
-            python3 - <<'PY'
-          import json, os, subprocess
-          txt = open("/tmp/gradle_out.txt", encoding="utf-8", errors="replace").read()
-          payload = {
-              "name": "Gradle Failure Log",
-              "head_sha": os.environ["GITHUB_SHA"],
-              "status": "completed",
-              "conclusion": "failure",
-              "output": {
-                  "title": "Gradle Build & Test Output",
-                  "summary": "```\n" + txt[-60000:] + "\n```",
-              },
-          }
-          with open("/tmp/cr.json", "w", encoding="utf-8") as f:
-              json.dump(payload, f)
-          subprocess.run(["gh", "api", "--method", "POST", f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", "--input", "/tmp/cr.json"], check=False)
-          PY
-            exit $RC
-          fi
+          ./gradlew :TimeMovies:testDebugUnitTest :TimeMovies:make --no-daemon --stacktrace
 
       - name: Upload TimeMovies.cs3 artifact
         uses: actions/upload-artifact@v4

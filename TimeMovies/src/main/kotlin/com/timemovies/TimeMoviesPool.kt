@@ -83,12 +83,13 @@ object TimeMoviesPool {
                 val o = JSONObject(jsonStr)
                 val tk = o.optString("tk", "").trim()
                 if (tk.count { it == '.' } < 2) return null
-                val priv = o.optString("priv", "").trim()
-                val pub = o.optString("pub", "").trim()
+                val priv = o.optString("priv", "").ifBlank { o.optString("sk", "") }.trim()
+                val pub = o.optString("pub", "").ifBlank { o.optString("pk", "") }.trim()
                 val kp = TimeMoviesCrypto.normalizeOrValidateKeyPair(priv, pub) ?: return null
-                val devObj = o.optJSONObject("dev") ?: return null
-                val vDev = TimeMoviesPrefs.VirtualDeviceProfile.fromStorageJson(devObj.toString()) ?: return null
-                val computedSlotId = o.optString("slotId", "").trim().ifEmpty {
+                val vDev = o.optJSONObject("dev")?.let {
+                    TimeMoviesPrefs.VirtualDeviceProfile.fromStorageJson(it.toString())
+                } ?: TimeMoviesPrefs.VirtualDeviceProfile.generateRandom()
+                val computedSlotId = o.optString("slotId", "").ifBlank { o.optString("id", "") }.trim().ifEmpty {
                     val scope = TimeMoviesPrefs.computeTokenScope(tk, vDev.deviceId)
                     TimeMoviesCrypto.sha256Hex("$scope|${kp.publicKeySpkiB64Url}").take(16)
                 }

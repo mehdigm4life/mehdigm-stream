@@ -214,7 +214,7 @@ class TimeMoviesUnitTest {
         assertEquals("SPKI must be strictly canonical 91 bytes", 91, spkiBytes.size)
         assertEquals("PKCS#8 must be canonical 138 bytes", 138, pkcs8Bytes.size)
         assertTrue(kp.publicKeySpkiB64Url.startsWith("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE"))
-        assertNotNull(TimeMoviesCrypto.normalizeOrValidateKeyPair(kp.publicKeySpkiB64Url, kp.privateKeyPkcs8B64Url))
+        assertNotNull(TimeMoviesCrypto.normalizeOrValidateKeyPair(kp.privateKeyPkcs8B64Url, kp.publicKeySpkiB64Url))
 
         val sample = """{"_id":"674e4e33ecd3e83dbef4adaa","e":"mehdi@gmail.com","sid":"sess_01","fq":5,"dcr":2,"iv":false}"""
         val sig = TimeMoviesCrypto.signEcdsaSha256DerB64Url(kp.privateKeyPkcs8B64Url, sample.toByteArray(Charsets.UTF_8))
