@@ -19,8 +19,8 @@ function getJson(u) {
 }
 
 (async () => {
-  const port = 19370;
-  const profDir = '/tmp/cn_diag5h_' + process.pid;
+  const port = 19375;
+  const profDir = '/tmp/cn_diag5i_' + process.pid;
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -56,7 +56,7 @@ function getJson(u) {
       if (m.method === 'Debugger.scriptParsed') {
         const u = m.params.url || '';
         const len = m.params.length || 0;
-        if (!u && len >= 135000 && len <= 225000) {
+        if (!u && len >= 140000 && len <= 144500) {
           candidates.push({ id: m.params.scriptId, len });
         }
       }
@@ -73,43 +73,16 @@ function getJson(u) {
     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
     await new Promise(r => setTimeout(r, 7500));
 
-    // Find the script whose source contains XMLHttpRequest or turnstile or get-link or استخدم after decoding!
-    const found = [];
-    for (const c of candidates) {
+    let picked = null;
+    for (const c of candidates.slice(0, 1)) {
       const sr = await send('Debugger.getScriptSource', { scriptId: c.id });
       const src = (sr && sr.result && sr.result.scriptSource) ? sr.result.scriptSource : '';
-      if (!src) continue;
-      // Extract only the string blob + const table + alphabets (~12KB instead of 145KB!) AND gzip!
-      const tblM = src.match(/const\s+[A-Za-z0-9_$]+\s*=\s*\[[^\]]{40,3500}\]/);
-      const bigBlobs = [];
-      const bigRe = /"((?:\\.|[^"\\]){1200,25000})"/g;
-      let bm;
-      while ((bm = bigRe.exec(src)) !== null) bigBlobs.push(bm[0]);
-      const alphas = [];
-      const aRe = /"((?:\\.|[^"\\]){85,105})"/g;
-      let am;
-      while ((am = aRe.exec(src)) !== null) {
-        try {
-          const s = JSON.parse(am[0]);
-          if (s.length === 91 && new Set(s).size === 91) alphas.push(s);
-        } catch (e) {}
+      if (src) {
+        picked = { len: src.length, brB64: zlib.brotliCompressSync(Buffer.from(src, 'utf8')).toString('base64') };
       }
-      const calls = [];
-      const cRe = /\b[A-Za-z0-9_$]+\(\s*([A-Za-z0-9_$]+\[(?:0x[0-9a-fA-F]+|\d+)\]|0x[0-9a-fA-F]+|\d+)\s*,\s*([A-Za-z0-9_$]+\[(?:0x[0-9a-fA-F]+|\d+)\]|0x[0-9a-fA-F]+|\d+)\s*\)/g;
-      let cm;
-      while ((cm = cRe.exec(src)) !== null) calls.push([cm[1], cm[2]]);
-      found.push({
-        len: src.length,
-        tbl: tblM ? tblM[0] : '',
-        blobsCount: bigBlobs.length,
-        blobsGz: zlib.gzipSync(Buffer.from(JSON.stringify(bigBlobs), 'utf8')).toString('base64'),
-        alphas,
-        callsCount: calls.length,
-        callsGz: zlib.gzipSync(Buffer.from(JSON.stringify(calls), 'utf8')).toString('base64')
-      });
     }
 
-    fs.writeFileSync(outPath, JSON.stringify({ found }, null, 2), 'utf8');
+    fs.writeFileSync(outPath, JSON.stringify({ candidatesCount: candidates.length, picked }), 'utf8');
   } finally {
     try { proc.kill('SIGKILL'); } catch (e) {}
     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch (e) {}
