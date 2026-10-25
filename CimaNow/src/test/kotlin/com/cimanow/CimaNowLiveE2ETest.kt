@@ -594,7 +594,29 @@ class CimaNowLiveE2ETest {
                         cx2.evaluateString(scope2, code, "inner_$idx.js", 1, null)
                         println("[DIAG][$pTag] Rhino ran inner_$idx.js OK in ${System.currentTimeMillis() - tS}ms")
                     }.onFailure { e ->
-                        println("[DIAG][$pTag] Rhino inner_$idx.js err (${System.currentTimeMillis() - tS}ms): ${e.javaClass.simpleName}: ${e.message?.take(220)}")
+                        val col = (e as? org.mozilla.javascript.RhinoException)?.columnNumber() ?: -1
+                        val lineSrc = (e as? org.mozilla.javascript.RhinoException)?.lineSource().orEmpty()
+                        val around = if (col > 0 && lineSrc.isNotEmpty()) {
+                            val s0 = maxOf(0, col - 80)
+                            val s1 = minOf(lineSrc.length, col + 80)
+                            lineSrc.substring(s0, s1)
+                        } else {
+                            // Extract inner Function("arg", "BODY") string and compile directly to get exact column!
+                            val fnBody = runCatching {
+                                val q1 = code.indexOf(","")
+                                val q2 = code.lastIndexOf("")")
+                                if (q1 > 0 && q2 > q1) org.json.JSONTokener(code.substring(q1 + 1, q2 + 1)).nextValue() as String else ""
+                            }.getOrDefault("")
+                            var subAround = ""
+                            if (fnBody.isNotEmpty()) {
+                                runCatching { cx2.compileString(fnBody, "fn_$idx.js", 1, null) }.onFailure { ce ->
+                                    val cCol = (ce as? org.mozilla.javascript.RhinoException)?.columnNumber() ?: -1
+                                    if (cCol >= 0) subAround = "col=$cCol slice='${fnBody.substring(maxOf(0, cCol - 90), minOf(fnBody.length, cCol + 90))}'"
+                                }
+                            }
+                            subAround
+                        }
+                        println("[DIAG][$pTag] Rhino inner_$idx.js err (${System.currentTimeMillis() - tS}ms): ${e.message?.take(140)} | $around")
                     }
                 }
 
@@ -624,6 +646,260 @@ class CimaNowLiveE2ETest {
             println("[DIAG][$pTag] StageB Rhino total=${System.currentTimeMillis() - tStageB0}ms logs=${jsLogs.size} http=${capturedRequests.size}")
             println("[DIAG][$pTag] JS_LOGS:\n${jsLogs.joinToString("\n")}")
             println("[DIAG][$pTag] CAPTURED_HTTP:\n${capturedRequests.joinToString("\n")}")
+
+            if (capturedRequests.isEmpty()) {
+                java.io.File("/tmp/inner_gw.html").writeText(innerHtml, Charsets.UTF_8)
+                java.io.File("/tmp/body_tree.json").writeText(bodyTreeJson, Charsets.UTF_8)
+                val v8Script = """
+                    const fs = require('fs');
+                    const vm = require('vm');
+                    const cryptoNode = require('crypto');
+                    const html = fs.readFileSync('/tmp/inner_gw.html', 'utf8');
+                    const bodyTreeJson = fs.readFileSync('/tmp/body_tree.json', 'utf8');
+                    const scripts = [];
+                    const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+                    let m;
+                    while ((m = re.exec(html)) !== null) scripts.push(m[1]);
+
+                    const captured = [];
+                    const logs = [];
+                    const hostBridge = {
+                        log: s => { if (logs.length < 100) logs.push(String(s).slice(0, 300)); },
+                        onHttp: (kind, method, url, hdrs, body) => {
+                            captured.push({ kind, method, url, headersJson: hdrs, body });
+                            logs.push('V8_HTTP[' + kind + '] ' + method + ' ' + url + ' hdr=' + hdrs + ' body=' + String(body).slice(0, 400));
+                            return '{"ok":true,"url":"https://cimanow.cc/watching/?token=dummy"}';
+                        },
+                        webcrypto: cryptoNode.webcrypto,
+                        atob: s => Buffer.from(String(s), 'base64').toString('binary'),
+                        btoa: s => Buffer.from(String(s), 'binary').toString('base64'),
+                        TextEncoder, TextDecoder, URLSearchParams
+                    };
+
+                    const context = vm.createContext({ __host: hostBridge });
+                    const bootInRealm = `
+                        var window = globalThis, self = globalThis, top = globalThis, parent = globalThis;
+                        var __virtNow = Date.now();
+                        const __RealDate = Date;
+                        Date.now = function() { return __virtNow; };
+                        var performance = { now: function() { return __virtNow % 1000000; }, timing: { navigationStart: __virtNow - 500 } };
+                        var location = {
+                            _href: '${vaultUrl}', origin: '${gwOrigin}', protocol: 'https:', host: '${u.host}', hostname: '${u.host}',
+                            pathname: '/2020/02/blog-post.html/', search: '', hash: '',
+                            assign(v){ this._href = String(v); __host.log('loc.assign=' + v); },
+                            replace(v){ this._href = String(v); __host.log('loc.replace=' + v); },
+                            get href(){ return this._href; },
+                            set href(v){ this._href = String(v); __host.log('loc.href=' + v); }
+                        };
+                        var navigator = { userAgent: '${CimaNowNetwork.MOBILE_UA}', platform: 'Linux armv81', language: 'ar', languages: ['ar','en-US'], webdriver: false, hardwareConcurrency: 8, deviceMemory: 8, maxTouchPoints: 5, cookieEnabled: true };
+                        var screen = { width: 412, height: 915, availWidth: 412, availHeight: 915, colorDepth: 24, pixelDepth: 24 };
+                        var devicePixelRatio = 2.625, innerWidth = 412, innerHeight = 815, outerWidth = 412, outerHeight = 915;
+                        var console = { log: (...a)=>__host.log('log:'+a.join(' ')), warn(){}, error: (...a)=>__host.log('err:'+a.join(' ')), debug(){} };
+                        function atob(s){ return __host.atob(s); }
+                        function btoa(s){ return __host.btoa(s); }
+                        var crypto = __host.webcrypto;
+                        var TextEncoder = __host.TextEncoder, TextDecoder = __host.TextDecoder, URLSearchParams = __host.URLSearchParams;
+
+                        var __timers = [], __nextTid = 1;
+                        function setTimeout(fn, ms){ var id = __nextTid++; __timers.push({id, fn, due: __virtNow + (Number(ms)||0), iv: 0, active: true}); return id; }
+                        function setInterval(fn, ms){ var id = __nextTid++; var st = Math.max(50, Number(ms)||50); __timers.push({id, fn, due: __virtNow + st, iv: st, active: true}); return id; }
+                        function clearTimeout(id){ for (var t of __timers) if (t.id===id) t.active=false; }
+                        function clearInterval(id){ clearTimeout(id); }
+                        function requestAnimationFrame(fn){ return setTimeout(fn, 16); }
+
+                        function XMLHttpRequest(){ this._h={}; this._m='GET'; this._u=''; this.readyState=0; this.status=200; this.responseText=''; }
+                        XMLHttpRequest.prototype.open = function(m,u){ this._m=String(m); this._u=String(u); this.readyState=1; };
+                        XMLHttpRequest.prototype.setRequestHeader = function(k,v){ this._h[String(k)]=String(v); };
+                        XMLHttpRequest.prototype.addEventListener = function(ev,fn){ this['on'+ev]=fn; };
+                        XMLHttpRequest.prototype.send = function(body){
+                            var bStr = body==null ? '' : String(body);
+                            var r = __host.onHttp('xhr', this._m, this._u, JSON.stringify(this._h), bStr);
+                            this.status=200; this.readyState=4; this.responseText=r; this.response=r;
+                            if (typeof this.onload==='function') this.onload();
+                            if (typeof this.onreadystatechange==='function') this.onreadystatechange();
+                        };
+                        XMLHttpRequest.prototype.send.toString = function(){ return 'function send() { [native code] }'; };
+
+                        function fetch(url, opts){
+                            opts = opts || {};
+                            var bStr = opts.body==null ? '' : String(opts.body);
+                            var r = __host.onHttp('fetch', String(opts.method||'GET'), String(url), JSON.stringify(opts.headers||{}), bStr);
+                            return Promise.resolve({ ok: true, status: 200, text: ()=>Promise.resolve(r), json: ()=>Promise.resolve(JSON.parse(r)) });
+                        }
+                        fetch.toString = function(){ return 'function fetch() { [native code] }'; };
+
+                        var __allEls = [], __elsById = {}, __docListeners = {};
+                        function __matches(el, sel) {
+                            if (!el || !sel) return false;
+                            for (var raw of String(sel).split(',')) {
+                                var s = raw.trim();
+                                if (!s) continue;
+                                if (s[0]==='#' && el.id===s.slice(1)) return true;
+                                if (s[0]==='.' && (' '+el.className+' ').includes(' '+s.slice(1)+' ')) return true;
+                                if (el.tagName===s.toUpperCase()) return true;
+                            }
+                            return false;
+                        }
+                        function __makeEl(tag) {
+                            var el = {
+                                tagName: String(tag||'DIV').toUpperCase(), nodeType: 1, id: '', className: '',
+                                style: { cssText: '', display: '', visibility: 'visible', opacity: '1', setProperty(k,v){this[k]=v;}, getPropertyValue(k){return this[k]||'';}, removeProperty(k){delete this[k];} },
+                                dataset: {}, attributes: [], childNodes: [], children: [], parentNode: null, firstChild: null,
+                                textContent: '', innerText: '', _innerHTML: '', value: '', disabled: false, hidden: false, _href: '', _listeners: {},
+                                classList: { add(){}, remove(){}, contains(){return false;}, toggle(){} },
+                                setAttribute(k,v){
+                                    k=String(k); v=String(v);
+                                    var ex = this.attributes.find(a=>a.name===k);
+                                    if (ex) ex.value=v; else this.attributes.push({name:k, value:v});
+                                    if (k==='id'){ this.id=v; __elsById[v]=this; }
+                                    if (k==='class') this.className=v;
+                                    if (k==='style') this.style.cssText=v;
+                                    if (k==='hidden') this.hidden=true;
+                                    if (k==='href') this._href=v;
+                                    if (k.startsWith('data-')) this.dataset[k.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())] = v;
+                                },
+                                getAttribute(k){ var ex=this.attributes.find(a=>a.name===String(k)); return ex?ex.value:null; },
+                                hasAttribute(k){ return this.getAttribute(k)!==null; },
+                                removeAttribute(k){ k=String(k); this.attributes=this.attributes.filter(a=>a.name!==k); if(k==='hidden') this.hidden=false; if(k==='style') this.style.cssText=''; },
+                                appendChild(c){ if(c){ c.parentNode=this; this.childNodes.push(c); this.children.push(c); this.firstChild=this.childNodes[0]||null; if(c.id) __elsById[c.id]=c; if(c.src) __host.log('append '+c.tagName+' src='+c.src); __allEls.push(c); } return c; },
+                                removeChild(c){ var i=this.childNodes.indexOf(c); if(i>=0) this.childNodes.splice(i,1); return c; },
+                                remove(){ if(this.parentNode) this.parentNode.removeChild(this); },
+                                insertBefore(n){ return this.appendChild(n); },
+                                replaceChild(n){ return this.appendChild(n); },
+                                contains(){ return true; },
+                                matches(s){ return __matches(this,s); },
+                                closest(s){ var cur=this; while(cur&&cur.nodeType===1){ if(__matches(cur,s)) return cur; cur=cur.parentNode; } return null; },
+                                getElementsByTagName(t){ t=String(t).toUpperCase(); return __allEls.filter(x=>t==='*'||x.tagName===t); },
+                                querySelector(s){ return document.querySelector(s); },
+                                querySelectorAll(s){ return document.querySelectorAll(s); },
+                                addEventListener(ev,fn){ (this._listeners[ev]=this._listeners[ev]||[]).push(fn); },
+                                removeEventListener(){},
+                                click(){
+                                    var evObj = { type:'click', isTrusted:true, target:this, currentTarget:this, bubbles:true, cancelable:true, clientX:120, clientY:115, button:0, buttons:1, preventDefault(){}, stopPropagation(){}, stopImmediatePropagation(){} };
+                                    for (var fn of (this._listeners['click']||[]).slice()) fn.call(this, evObj);
+                                    if (typeof this.onclick==='function') this.onclick(evObj);
+                                    for (var dfn of (__docListeners['click']||[]).slice()) dfn.call(document, evObj);
+                                },
+                                getBoundingClientRect(){ return {width:220, height:48, top:100, left:50, right:270, bottom:148, x:50, y:100}; },
+                                get href(){ return this._href; },
+                                set href(v){ this._href=String(v); __host.log('el#'+this.id+'.href='+v); },
+                                get offsetWidth(){ return 220; }, get offsetHeight(){ return 48; }, get clientWidth(){ return 220; }, get clientHeight(){ return 48; },
+                                get offsetParent(){ return document.body; },
+                                get innerHTML(){ return this._innerHTML; }, set innerHTML(v){ this._innerHTML=String(v); }
+                            };
+                            return el;
+                        }
+                        function getComputedStyle(el){ return { display:(el&&el.style&&el.style.display)||'block', visibility:'visible', opacity:'1', getPropertyValue:p=>p==='display'?((el&&el.style&&el.style.display)||'block'):'visible' }; }
+                        class MutationObserver { observe(){} disconnect(){} }
+                        var document = {
+                            nodeType:9, readyState:'complete', hidden:false, visibilityState:'visible', cookie:'', referrer:'${gwOrigin}/redirectingfree/', domain:'${u.host}',
+                            documentElement:__makeEl('HTML'), head:__makeEl('HEAD'), body:__makeEl('BODY'),
+                            createElement:t=>__makeEl(t), createTextNode:t=>{var n=__makeEl('TEXT');n.nodeType=3;n.textContent=String(t);return n;}, createDocumentFragment:()=>__makeEl('FRAG'),
+                            getElementById:id=>__elsById[String(id)]||null,
+                            getElementsByTagName:t=>{t=String(t).toUpperCase();return __allEls.filter(x=>t==='*'||x.tagName===t);},
+                            getElementsByClassName:c=>__allEls.filter(x=>(' '+x.className+' ').includes(' '+c+' ')),
+                            querySelectorAll:sel=>__allEls.filter(x=>__matches(x,sel)),
+                            querySelector:sel=>{var a=document.querySelectorAll(sel);return a.length?a[0]:null;},
+                            addEventListener:(ev,fn)=>{(__docListeners[ev]=__docListeners[ev]||[]).push(fn);},
+                            removeEventListener(){}
+                        };
+                        document.documentElement.appendChild(document.head);
+                        document.documentElement.appendChild(document.body);
+                        window.addEventListener = (ev,fn)=>{(__docListeners['win_'+ev]=__docListeners['win_'+ev]||[]).push(fn);};
+                        window.removeEventListener = ()=>{};
+                        function __hydrate(sp, parent){
+                            var n = parent ? __makeEl(sp.tag) : document.body;
+                            if (sp.txt){ n.textContent=sp.txt; n.innerText=sp.txt; }
+                            for (var k of Object.keys(sp.attrs||{})) n.setAttribute(k, sp.attrs[k]);
+                            if (parent) parent.appendChild(n);
+                            for (var ch of (sp.kids||[])) __hydrate(ch, n);
+                        }
+                        __hydrate(${bodyTreeJson}, null);
+                        function $(sel){
+                            var els = typeof sel==='string' ? document.querySelectorAll(sel) : [sel];
+                            return {
+                                ready(fn){ setTimeout(fn,0); return this; },
+                                click(fn){ if(fn) els.forEach(e=>e&&e.addEventListener&&e.addEventListener('click',fn)); else els.forEach(e=>e&&e.click&&e.click()); return this; },
+                                hide(){ els.forEach(e=>{if(e&&e.style)e.style.display='none';}); return this; },
+                                show(){ els.forEach(e=>{if(e){e.hidden=false;e.removeAttribute('hidden');if(e.style){e.style.cssText='';e.style.display='inline-block';}}}); return this; },
+                                remove(){ els.forEach(e=>e&&e.remove&&e.remove()); return this; },
+                                countdown360(o){ if(o&&o.onComplete) setTimeout(o.onComplete,(o.seconds||10)*1000); return {start(){}}; }
+                            };
+                        }
+                        var jQuery = $;
+                        delete globalThis.__host_tmp;
+                    `;
+                    vm.runInContext(bootInRealm, context);
+
+                    scripts.forEach((code, idx) => {
+                        if (!code.trim()) return;
+                        try {
+                            vm.runInContext(code, context, { filename: 's_' + idx + '.js', timeout: 5000 });
+                            logs.push('V8 ran s_' + idx + ' OK');
+                        } catch (e) {
+                            logs.push('V8 s_' + idx + ' err: ' + String(e && e.message ? e.message : e).slice(0, 180));
+                        }
+                    });
+
+                    (async () => {
+                        vm.runInContext(`
+                            for (var fn of (__docListeners['DOMContentLoaded']||[])) try{fn({type:'DOMContentLoaded'});}catch(e){}
+                            for (var fn of (__docListeners['win_load']||[])) try{fn({type:'load'});}catch(e){}
+                        `, context);
+                        for (let step = 0; step < 50; step++) {
+                            vm.runInContext(`
+                                __virtNow += 250;
+                                for (var tm of __timers.slice()) {
+                                    if (tm.active && tm.due <= __virtNow) {
+                                        if (tm.iv > 0) tm.due = __virtNow + tm.iv; else tm.active = false;
+                                        try { if (typeof tm.fn === 'function') tm.fn(); } catch(e) { __host.log('tmE:'+e.message); }
+                                    }
+                                }
+                            `, context, { timeout: 3000 });
+                            await new Promise(r => setImmediate(r));
+                        }
+                        vm.runInContext(`
+                            var b = document.getElementById('downloadbtn');
+                            __host.log('V8 pre-click btn hidden=' + (b&&b.hidden) + ' style=' + (b&&b.style.cssText) + ' listeners=' + Object.keys(b?b._listeners:{}) + ' onclick=' + typeof(b&&b.onclick));
+                            if (b) b.click();
+                        `, context, { timeout: 3000 });
+                        await new Promise(r => setTimeout(r, 150));
+                        for (let step = 0; step < 12; step++) {
+                            vm.runInContext(`
+                                __virtNow += 250;
+                                for (var tm of __timers.slice()) {
+                                    if (tm.active && tm.due <= __virtNow) {
+                                        if (tm.iv > 0) tm.due = __virtNow + tm.iv; else tm.active = false;
+                                        try { if (typeof tm.fn === 'function') tm.fn(); } catch(e) {}
+                                    }
+                                }
+                            `, context, { timeout: 3000 });
+                            await new Promise(r => setImmediate(r));
+                        }
+                        vm.runInContext(`
+                            var b = document.getElementById('downloadbtn');
+                            __host.log('V8 post-click btn href=' + (b&&b.href) + ' loc=' + location.href + ' winKeys=' + Object.keys(globalThis).slice(-25).join(','));
+                        `, context);
+                        console.log(JSON.stringify({ logs, captured }));
+                        process.exit(0);
+                    })();
+                """.trimIndent()
+                java.io.File("/tmp/v8_clean.js").writeText(v8Script, Charsets.UTF_8)
+                val p = ProcessBuilder("node", "/tmp/v8_clean.js").redirectErrorStream(true).start()
+                val v8Out = p.inputStream.bufferedReader().readText()
+                p.waitFor()
+                val v8Json = runCatching { org.json.JSONObject(v8Out.trim().lines().last()) }.getOrNull()
+                println("[DIAG][$pTag] V8_CLEAN_LOGS:
+${v8Json?.optJSONArray("logs")?.let { a -> (0 until a.length()).joinToString("
+") { a.getString(it) } } ?: v8Out.take(4000)}")
+                val capArr = v8Json?.optJSONArray("captured")
+                if (capArr != null) {
+                    for (ci in 0 until capArr.length()) {
+                        val co = capArr.getJSONObject(ci)
+                        capturedRequests.add(CapturedHttp(co.optString("kind"), co.optString("method"), co.optString("url"), co.optString("headersJson"), co.optString("body")))
+                    }
+                }
+            }
 
             val glReq = capturedRequests.firstOrNull { it.url.contains("get-link") || it.method.equals("POST", true) }
             if (glReq != null) {
