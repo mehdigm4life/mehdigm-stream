@@ -74,7 +74,9 @@ object CimaNowGatewaySolver {
 
         return solverMutex.withLock {
             getCachedWatchingUrl(itemUrl)?.let { return@withLock it }
-            val cleanShine = unwrapHrefLi(shineUrl) ?: return@withLock null
+            val cleanShine = unwrapHrefLi(shineUrl)
+                ?: shineUrl.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                ?: return@withLock null
 
             val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
                 mintViaAndroidWebView(cleanShine, itemUrl)
@@ -137,13 +139,16 @@ object CimaNowGatewaySolver {
                 val wv = WebView(activity)
                 webViewRef = wv
 
-                // Keep View.VISIBLE with 600x900 and alpha=0.01f so requestAnimationFrame (s_9) and
-                // CSS layout dimension checks (DECODED_D[0]) run unthrottled with positive geometry.
+                // Keep View.VISIBLE with MATCH_PARENT geometry translated off-screen so user touches
+                // never hit WebView, while direct wv.dispatchTouchEvent(MotionEvent) operates in local
+                // coordinates and requestAnimationFrame / layout checks run unthrottled.
                 wv.alpha = 0.01f
                 wv.visibility = View.VISIBLE
+                wv.translationX = 10_000f
+                wv.translationY = 10_000f
                 wv.isFocusable = false
                 wv.isFocusableInTouchMode = false
-                wv.setOnTouchListener { _, _ -> true }
+                wv.isClickable = false
 
                 val rawDefaultUa = runCatching { WebSettings.getDefaultUserAgent(activity) }
                     .getOrDefault(CimaNowNetwork.MOBILE_UA)
@@ -157,11 +162,13 @@ object CimaNowGatewaySolver {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     @Suppress("DEPRECATION")
-                databaseEnabled = true
-                    loadsImagesAutomatically = false
-                    blockNetworkImage = true
+                    databaseEnabled = true
+                    useWideViewPort = true
+                    loadWithOverviewMode = true
+                    loadsImagesAutomatically = true
+                    blockNetworkImage = false
                     mediaPlaybackRequiresUserGesture = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     cacheMode = WebSettings.LOAD_DEFAULT
                     userAgentString = cleanChromeUa
                 }
@@ -210,7 +217,10 @@ object CimaNowGatewaySolver {
                     }
                 }
 
-                val params = FrameLayout.LayoutParams(600, 900)
+                val params = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
                 root.addView(wv, params)
                 wv.loadUrl(
                     CimaNowNetwork.encodeUrl(shineUrl),
@@ -261,11 +271,19 @@ object CimaNowGatewaySolver {
                         }
                         probeResult.startsWith("TS:") -> {
                             val now = SystemClock.uptimeMillis()
-                            if (now - lastTsTapMs >= 2_200L) {
+                            if (now - lastTsTapMs >= 2_600L) {
                                 lastTsTapMs = now
-                                val coords = parseCssCoords(probeResult.removePrefix("TS:"))
-                                if (coords != null) {
-                                    dispatchTrustedTap(webViewRef, coords.first, coords.second)
+                                val sides = probeResult.removePrefix("TS:").split('|')
+                                val leftCoords = sides.getOrNull(0)?.let { parseCssCoords(it) }
+                                val rightCoords = sides.getOrNull(1)?.let { parseCssCoords(it) }
+                                if (leftCoords != null) {
+                                    dispatchTrustedTap(webViewRef, leftCoords.first, leftCoords.second)
+                                }
+                                if (rightCoords != null) {
+                                    delay(220L)
+                                    if (!deferred.isCompleted) {
+                                        dispatchTrustedTap(webViewRef, rightCoords.first, rightCoords.second)
+                                    }
                                 }
                             }
                         }
@@ -325,7 +343,10 @@ object CimaNowGatewaySolver {
                             ts.scrollIntoView({block: 'center', inline: 'center'});
                             tr = ts.getBoundingClientRect();
                             if (tr.top >= 0 && tr.left >= 0) {
-                                return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height / 2);
+                                var cy = Math.round(tr.top + tr.height / 2);
+                                var lx = Math.round(tr.left + 28);
+                                var rx = Math.round(tr.right - 28);
+                                return 'TS:' + lx + ',' + cy + '|' + rx + ',' + cy;
                             }
                         }
                     }
