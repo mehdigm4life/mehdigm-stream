@@ -104,19 +104,9 @@ class CimaNowLiveE2ETest {
         val shine = CimaNowExtractors.extractShineUrlFromDetailHtml(detailPage.html) ?: return@runBlocking
         println("[DIAG] Movie=${firstCard.name} url=${detailPage.finalUrl} shine=$shine")
 
-        CimaNowNetwork.withStickySession { session ->
-            val proxySpec = session.proxySpec ?: return@withStickySession null
-            // Verify this proxy reaches rm.freex2line.online cleanly first
-            val t0 = System.currentTimeMillis()
-            val cCheck = session.getText(detailPage.finalUrl, "${CimaNowNetwork.mainUrl}/home/")
-            if (cCheck == null || CimaNowNetwork.isCimaBlocked(cCheck.first, cCheck.second)) return@withStickySession null
-            val hop1 = session.getNoRedirect(shine, detailPage.finalUrl)
-            val hopMs = System.currentTimeMillis() - t0
-            if (hop1 == null || hop1.code !in 200..399 || hopMs > 4000L) {
-                println("[DIAG] Skipping slow/dead proxy=$proxySpec code=${hop1?.code} ms=$hopMs")
-                return@withStickySession null
-            }
-            println("[DIAG] Using fast verified proxy=$proxySpec (${hopMs}ms)")
+        run {
+            val proxySpec = "direct"
+            println("[DIAG] Running direct 10Gbps gateway mint")
 
             // Use real Chromium via CDP under xvfb-run (mirrors Android WebView + MotionEvent!)
             val cdpScript = """
@@ -308,7 +298,7 @@ class CimaNowLiveE2ETest {
             val cdpJson = runCatching { org.json.JSONObject(cdpOut.trim().lines().last()) }.getOrNull()
             if (cdpJson == null) {
                 println("[DIAG] Raw cdpOut:\n${cdpOut.take(4000)}")
-                return@withStickySession "cdp_parse_err"
+                return@run "cdp_parse_err"
             }
             println("[DIAG] CDP logs:\n" + (cdpJson.optJSONArray("logs")?.let { a -> (0 until a.length()).joinToString("\n") { a.getString(it) } } ?: ""))
             val mintedUrl = cdpJson.optString("mintedUrl")
@@ -465,6 +455,10 @@ class CimaNowLiveE2ETest {
                             org.mozilla.javascript.ScriptableObject.putProperty(scope2, "__h", org.mozilla.javascript.Context.javaToJS(bridge2, scope2))
                             val s2Shim = """
                                 var window = this, self = this, globalThis = this;
+                                function setTimeout() { return 1; }
+                                function setInterval() { return 1; }
+                                function clearTimeout() {}
+                                function clearInterval() {}
                                 var navigator = { webdriver: false, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' };
                                 function atob(s) { return String(__h.b64(String(s))); }
                                 function TextDecoder() {}
