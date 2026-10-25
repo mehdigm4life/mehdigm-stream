@@ -257,6 +257,8 @@ object CimaNowExtractors {
             }
 
             if (embeds.isEmpty() && decoded.downloads.isEmpty()) return@withStickySession null
+            debugLogger?.invoke("[$pTag] watchEmbeds=${embeds.map { "${it.first}:${it.second.take(70)}" }}")
+            debugLogger?.invoke("[$pTag] downloads=${decoded.downloads.map { "${it.label}:${it.url.take(70)}" }}")
             UnlockedSources(mintedUrl, embeds, decoded.downloads)
         }
     }

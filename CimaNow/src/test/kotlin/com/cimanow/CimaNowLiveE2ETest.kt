@@ -181,27 +181,9 @@ class CimaNowLiveE2ETest {
                 .redirectErrorStream(true)
                 .redirectOutput(java.io.File("/dev/null"))
                 .start()
-            proc.waitFor(60L, java.util.concurrent.TimeUnit.SECONDS)
+            proc.waitFor(75L, java.util.concurrent.TimeUnit.SECONDS)
             val repStr = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
-            val rep = org.json.JSONObject(repStr)
-            println("[DIAG][Gateway] blogHtmlLen=${rep.optInt("blogHtmlLen")} allJsLen=${rep.optInt("allJsLen")} htmlDir='${rep.optString("htmlDir")}' bodyDir='${rep.optString("bodyDir")}'")
-            println("[DIAG][Gateway] btnHtmlInitial=${rep.optString("btnHtmlInitial")}")
-            println("[DIAG][Gateway] phase1Err=${rep.optString("phase1Err")} phase2Err=${rep.optString("phase2Err")}")
-            val snippets = rep.optJSONArray("stageSnippets")
-            if (snippets != null) {
-                println("[DIAG][StageSnippets] count=${snippets.length()}")
-                for (i in 0 until snippets.length()) {
-                    println("  SNIP[$i]: ${snippets.optString(i)}")
-                }
-            }
-            val simLogs = rep.optJSONArray("simLogs")
-            if (simLogs != null) {
-                println("[DIAG][SimLogs] count=${simLogs.length()}")
-                for (i in 0 until simLogs.length()) {
-                    println("  SIM[$i]: ${simLogs.optString(i)}")
-                }
-            }
-            println("[DIAG][FinalMinted] ${rep.optString("finalMinted")}")
+            println("[DIAG][RawReport]\n$repStr")
         } finally {
             tmpScript.delete()
             tmpOut.delete()
