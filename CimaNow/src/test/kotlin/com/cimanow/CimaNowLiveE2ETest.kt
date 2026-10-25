@@ -348,8 +348,8 @@ class CimaNowLiveE2ETest {
                             "&_s=${java.net.URLEncoder.encode(sig, "UTF-8")}"
                         val resp = session.getText(coreUrl, mintedUrl, mapOf("X-Requested-With" to "XMLHttpRequest"))
                         val emb = resp?.second?.let { CimaNowCrypto.decodeCnBootFrame(it) }
-                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} len=${resp?.second?.length} embed=$emb raw='${resp?.second?.take(140)?.replace("
-", " ")}'")
+                        val rawSample = resp?.second?.take(140)?.replace('\n', ' ')
+                        println("[DIAG] core.php tab='${tab.name}' (id=${tab.dataId}, idx=${tab.dataIndex}) -> code=${resp?.first} len=${resp?.second?.length} embed=$emb raw='$rawSample'")
                     }
                 }
             }
