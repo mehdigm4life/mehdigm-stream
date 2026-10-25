@@ -116,7 +116,7 @@ class CimaNowLiveE2ETest {
             val vaultUrl = "$gwOrigin/2020/02/blog-post.html/"
             val hop3 = session.getText(vaultUrl, "$gwOrigin/redirectingfree/")
             val vaultHtml = hop3?.second.orEmpty()
-            if (vaultHtml.length < 200) return@withStickySession null
+            if (vaultHtml.length < 5000 || vaultHtml.contains("redirectingfree")) return@withStickySession null
 
             // Inspect structure of vaultHtml outside huge literals
             val compactedHtml = vaultHtml
