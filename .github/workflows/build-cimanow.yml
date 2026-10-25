@@ -40,7 +40,7 @@ jobs:
           set -o pipefail
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew :CimaNow:testDebugUnitTest :CimaNow:make --no-daemon --stacktrace 2>&1 | tee gradle.log
+          ./gradlew :CimaNow:testDebugUnitTest :CimaNow:make --no-daemon 2>&1 | tee gradle.log
 
       - name: Report Gradle Build & Test Summary
         if: always()

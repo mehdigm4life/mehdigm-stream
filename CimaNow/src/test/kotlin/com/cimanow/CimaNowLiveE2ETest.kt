@@ -889,9 +889,7 @@ class CimaNowLiveE2ETest {
                 val v8Out = p.inputStream.bufferedReader().readText()
                 p.waitFor()
                 val v8Json = runCatching { org.json.JSONObject(v8Out.trim().lines().last()) }.getOrNull()
-                println("[DIAG][$pTag] V8_CLEAN_LOGS:
-${v8Json?.optJSONArray("logs")?.let { a -> (0 until a.length()).joinToString("
-") { a.getString(it) } } ?: v8Out.take(4000)}")
+                println("[DIAG][$pTag] V8_CLEAN_LOGS:\n" + (v8Json?.optJSONArray("logs")?.let { a -> (0 until a.length()).joinToString("\n") { a.getString(it) } } ?: v8Out.take(4000)))
                 val capArr = v8Json?.optJSONArray("captured")
                 if (capArr != null) {
                     for (ci in 0 until capArr.length()) {
