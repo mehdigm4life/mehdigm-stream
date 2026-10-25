@@ -471,7 +471,7 @@ object TimeMoviesApi {
 
     // ---- Synthetic Virtual Device Telemetry (`UserDevice.java` + `wh7.java`) ----
 
-    fun buildUserDeviceJson(): JSONObject = TimeMoviesPrefs.getOrCreateVirtualDevice().toUserDeviceJson()
+    fun buildUserDeviceJson(): JSONObject = TimeMoviesPrefs.getOrCreateVirtualDevice().toApiUserDeviceJson()
 
     // ---- Authentication (`SignIn`, `SignUp`, `ActivateOtp`, `ResendOtp`, `ManualToken`) ----
 
