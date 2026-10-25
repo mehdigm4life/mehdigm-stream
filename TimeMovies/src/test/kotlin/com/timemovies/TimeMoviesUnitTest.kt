@@ -451,8 +451,8 @@ class TimeMoviesUnitTest {
             val path = req.path
             val rawQuery = req.rawQuery
 
-            // Verify ECDSA v4.7 signature on every protected pool request!
-            if (!path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS) && !path.startsWith("/v2/media/")) {
+            // Verify ECDSA v4.7 signature on every protected v4.7 pool request!
+            if (path.startsWith("/api/v4.7/") && !path.endsWith(TimeMoviesApi.PATH_APP_SETTINGS)) {
                 val dk = req.header("dk").orEmpty()
                 val ds = req.header("ds").orEmpty()
                 val xt = req.header("x-t").orEmpty()
