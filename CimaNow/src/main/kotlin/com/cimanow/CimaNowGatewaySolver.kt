@@ -246,7 +246,7 @@ object CimaNowGatewaySolver {
                                 return@withContext "DONE"
                             }
                         }
-                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(elapsedMs >= 10_500L))
+                        evalJsSuspend(wv, buildReadOnlyGatewayProbeJs(elapsedMs >= 10_500L, elapsedMs >= 4_500L))
                     }
 
                     if (deferred.isCompleted || probeResult == "DONE") break
@@ -261,7 +261,7 @@ object CimaNowGatewaySolver {
                         }
                         probeResult.startsWith("BTN:") -> {
                             val now = SystemClock.uptimeMillis()
-                            if (now - lastBtnTapMs >= 950L) {
+                            if (now - lastBtnTapMs >= 1_800L) {
                                 lastBtnTapMs = now
                                 val coords = parseCssCoords(probeResult.removePrefix("BTN:"))
                                 if (coords != null) {
@@ -271,7 +271,7 @@ object CimaNowGatewaySolver {
                         }
                         probeResult.startsWith("TS:") -> {
                             val now = SystemClock.uptimeMillis()
-                            if (now - lastTsTapMs >= 2_600L) {
+                            if (now - lastTsTapMs >= 5_500L) {
                                 lastTsTapMs = now
                                 val sides = probeResult.removePrefix("TS:").split('|')
                                 val leftCoords = sides.getOrNull(0)?.let { parseCssCoords(it) }
@@ -311,20 +311,23 @@ object CimaNowGatewaySolver {
         }
     }
 
-    private fun buildReadOnlyGatewayProbeJs(countdownElapsed: Boolean): String {
+    private fun buildReadOnlyGatewayProbeJs(countdownElapsed: Boolean, allowTurnstileTap: Boolean): String {
         val forceFlag = if (countdownElapsed) "true" else "false"
+        val tsTapFlag = if (allowTurnstileTap) "true" else "false"
         return """
             (function(){
                 try {
                     var loc = String(location.href || '');
                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
+                    var tsInput = document.querySelector('input[name="cf-turnstile-response"]');
+                    var tsSolved = !!(tsInput && tsInput.value && tsInput.value.length > 20);
                     var btn = document.getElementById('downloadbtn');
                     if (btn) {
                         var h = String(btn.getAttribute('href') || '');
                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) {
                             return 'URL:' + h;
                         }
-                        if (h === '#watch-ready' || ($forceFlag && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
+                        if (h === '#watch-ready' || ($forceFlag && tsSolved && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
                             if (btn.hidden || getComputedStyle(btn).display === 'none') {
                                 btn.removeAttribute('hidden');
                                 btn.style.setProperty('display', 'inline-block', 'important');
@@ -336,17 +339,19 @@ object CimaNowGatewaySolver {
                             }
                         }
                     }
-                    var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-                    if (ts) {
-                        var tr = ts.getBoundingClientRect();
-                        if (tr.width > 40 && tr.height > 20) {
-                            ts.scrollIntoView({block: 'center', inline: 'center'});
-                            tr = ts.getBoundingClientRect();
-                            if (tr.top >= 0 && tr.left >= 0) {
-                                var cy = Math.round(tr.top + tr.height / 2);
-                                var lx = Math.round(tr.left + 28);
-                                var rx = Math.round(tr.right - 28);
-                                return 'TS:' + lx + ',' + cy + '|' + rx + ',' + cy;
+                    if ($tsTapFlag && !tsSolved) {
+                        var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                        if (ts) {
+                            var tr = ts.getBoundingClientRect();
+                            if (tr.width > 40 && tr.height > 20) {
+                                ts.scrollIntoView({block: 'center', inline: 'center'});
+                                tr = ts.getBoundingClientRect();
+                                if (tr.top >= 0 && tr.left >= 0) {
+                                    var cy = Math.round(tr.top + tr.height / 2);
+                                    var lx = Math.round(tr.left + 28);
+                                    var rx = Math.round(tr.right - 28);
+                                    return 'TS:' + lx + ',' + cy + '|' + rx + ',' + cy;
+                                }
                             }
                         }
                     }
@@ -487,10 +492,10 @@ object CimaNowGatewaySolver {
                     await send('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(navigator, 'webdriver', { get: () => false });" });
                     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
                     let lastTsClick = 0, lastBtnClick = 0;
+                    const diag = [];
                     const tap = async (x, y) => {
-                        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
                         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-                        await new Promise(r => setTimeout(r, 55));
+                        await new Promise(r => setTimeout(r, 60));
                         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
                     };
                     for (let ms = 0; ms < 28000; ms += 500) {
@@ -499,20 +504,25 @@ object CimaNowGatewaySolver {
                             const rb = await send('Network.getResponseBody', { requestId: getLinkReqId });
                             if (rb && rb.result && rb.result.body) {
                                 const txt = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
+                                diag.push('glBody=' + txt.slice(0, 120));
                                 try { const j = JSON.parse(txt); if (j && j.url) minted = j.url; } catch(e) { if (txt.trim().startsWith('http')) minted = txt.trim(); }
                             }
                         }
-                        if (minted) return cleanup({ url: minted });
+                        if (minted) return cleanup({ url: minted, diag });
+                        const allowTs = ms >= 4500 ? 'true' : 'false';
+                        const forceBtn = ms >= 11500 ? 'true' : 'false';
                         const probe = await send('Runtime.evaluate', {
                             expression: `(function(){
                                 try {
                                     var loc = String(location.href || '');
                                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
+                                    var tsInput = document.querySelector('input[name="cf-turnstile-response"]');
+                                    var tsSolved = !!(tsInput && tsInput.value && tsInput.value.length > 20);
                                     var btn = document.getElementById('downloadbtn');
                                     if (btn) {
                                         var h = String(btn.getAttribute('href') || '');
                                         if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) return 'URL:' + h;
-                                        if (h === '#watch-ready' || (${'$'}{ms >= 11500} && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
+                                        if (h === '#watch-ready' || (` + forceBtn + ` && tsSolved && h && h !== '#' && h.indexOf('blog-post_75') === -1)) {
                                             if (btn.hidden || getComputedStyle(btn).display === 'none') {
                                                 btn.removeAttribute('hidden');
                                                 btn.style.setProperty('display', 'inline-block', 'important');
@@ -522,34 +532,37 @@ object CimaNowGatewaySolver {
                                             if (br.width > 4 && br.height > 4) return 'BTN:' + Math.round(br.left + br.width/2) + ',' + Math.round(br.top + br.height/2);
                                         }
                                     }
-                                    var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-                                    if (ts) {
-                                        ts.scrollIntoView({block:'center', inline:'center'});
-                                        var tr = ts.getBoundingClientRect();
-                                        if (tr.width > 40 && tr.height > 20 && tr.top >= 0 && tr.left >= 0) {
-                                            return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height/2);
+                                    if (` + allowTs + ` && !tsSolved) {
+                                        var ts = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                                        if (ts) {
+                                            ts.scrollIntoView({block:'center', inline:'center'});
+                                            var tr = ts.getBoundingClientRect();
+                                            if (tr.width > 40 && tr.height > 20 && tr.top >= 0 && tr.left >= 0) {
+                                                return 'TS:' + Math.round(tr.left + 28) + ',' + Math.round(tr.top + tr.height/2);
+                                            }
                                         }
                                     }
-                                } catch(e) {}
-                                return 'WAIT';
+                                    return 'WAIT:solved=' + tsSolved + ',loc=' + loc.slice(0, 45);
+                                } catch(e) { return 'ERR:' + e.message; }
                             })()`,
                             returnByValue: true
                         });
                         const pv = (probe && probe.result && probe.result.result && probe.result.result.value) ? String(probe.result.result.value) : '';
+                        if (ms % 3000 === 0) diag.push(ms + ':' + pv);
                         if (pv.startsWith('URL:')) {
-                            return cleanup({ url: pv.slice(4) });
-                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 1000) {
+                            return cleanup({ url: pv.slice(4), diag });
+                        } else if (pv.startsWith('BTN:') && ms - lastBtnClick >= 2000) {
                             lastBtnClick = ms;
                             const [bx, by] = pv.slice(4).split(',').map(Number);
                             if (bx > 0 && by > 0) await tap(bx, by);
-                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 2500) {
+                        } else if (pv.startsWith('TS:') && ms - lastTsClick >= 5500) {
                             lastTsClick = ms;
                             const [tx, ty] = pv.slice(3).split(',').map(Number);
                             if (tx > 0 && ty > 0) await tap(tx, ty);
                         }
                     }
-                    cleanup({ url: minted });
-                })().catch(() => cleanup({ url: '' }));
+                    cleanup({ url: minted, diag });
+                })().catch(e => cleanup({ url: '', diag: ['catch:' + (e && e.message)] }));
             """.trimIndent()
 
             try {
@@ -563,8 +576,12 @@ object CimaNowGatewaySolver {
                     p.destroyForcibly()
                 }
                 val jsonText = if (outFile.exists()) outFile.readText(Charsets.UTF_8).trim() else ""
-                runCatching { JSONObject(jsonText).optString("url").trim() }.getOrNull()
-                    ?.takeIf { isMintedWatchingUrl(it) }
+                val obj = CimaNowCrypto.safeJsonObject(jsonText)
+                val minted = obj?.optString("url")?.trim()?.takeIf { isMintedWatchingUrl(it) }
+                if (minted == null) {
+                    CimaNowExtractors.debugLogger?.invoke("gwCli miss json=${jsonText.take(260)}")
+                }
+                minted
             } catch (_: Throwable) {
                 null
             } finally {
