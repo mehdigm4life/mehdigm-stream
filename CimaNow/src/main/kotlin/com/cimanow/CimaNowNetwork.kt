@@ -80,7 +80,6 @@ object CimaNowNetwork {
 
     private val PROXY_FEEDS = listOf(
         "socks5" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
-        "http" to "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/https.txt",
         "socks5" to "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
         "socks5" to "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
         "socks5" to "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
@@ -286,6 +285,21 @@ object CimaNowNetwork {
         return false
     }
 
+    internal fun isSoftRedirectedToHome(requestedEncodedUrl: String, finalUrl: String): Boolean {
+        val reqPath = requestedEncodedUrl.toHttpUrlOrNull()?.encodedPath?.trim('/') ?: return false
+        val finPath = finalUrl.toHttpUrlOrNull()?.encodedPath?.trim('/') ?: return false
+        return reqPath.isNotEmpty() &&
+            !reqPath.equals("home", ignoreCase = true) &&
+            (finPath.isEmpty() || finPath.equals("home", ignoreCase = true))
+    }
+
+    private fun isValidPageResponse(requestedEncodedUrl: String, code: Int, finalUrl: String, body: String): Boolean {
+        if (code !in 200..399) return false
+        if (isCimaBlocked(code, body)) return false
+        if (isSoftRedirectedToHome(requestedEncodedUrl, finalUrl)) return false
+        return true
+    }
+
     fun encodeUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
         if (trimmed.isEmpty()) return trimmed
@@ -432,17 +446,23 @@ object CimaNowNetwork {
                                     connectSec = 6L,
                                     readSec = 8L,
                                 )
+                                val probeUrl = "$mainUrl/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A%D8%A9/"
                                 val t0 = System.currentTimeMillis()
                                 val ok = runCatching {
                                     val req = Request.Builder()
-                                        .url("$mainUrl/home/")
+                                        .url(probeUrl)
                                         .header("User-Agent", MOBILE_UA)
                                         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                                         .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                                        .header("Referer", "$mainUrl/home/")
                                         .build()
                                     probeClient.newCall(req).execute().use { res ->
                                         val body = res.body?.string().orEmpty()
-                                        res.code in 200..299 && !isCimaBlocked(res.code, body) && body.contains("cimanow", true)
+                                        val fin = res.request.url.toString()
+                                        res.code in 200..299 &&
+                                            isValidPageResponse(probeUrl, res.code, fin, body) &&
+                                            body.contains("cimanow", true) &&
+                                            body.contains("pagination", true)
                                     }
                                 }.getOrDefault(false)
                                 if (ok) {
@@ -494,11 +514,13 @@ object CimaNowNetwork {
         // 1. Direct path (instant on normal residential/mobile networks)
         if (now >= directBlockedUntilMs) {
             executeGet(directNoProxyClient, encodedUrl, referer)?.let { (code, finalUrl, body) ->
-                if (!isCimaBlocked(code, body)) {
+                if (isValidPageResponse(encodedUrl, code, finalUrl, body)) {
                     updateDomainIfRedirected(finalUrl)
                     return@withContext PageResult(body, finalUrl, Jsoup.parse(body, finalUrl))
                 }
-                if (code == 403 || body.contains("ستوب! المخرج عايز كدة") || body.contains("مشهد محذوف")) {
+                if (code == 403 || isSoftRedirectedToHome(encodedUrl, finalUrl) ||
+                    body.contains("ستوب! المخرج عايز كدة") || body.contains("مشهد محذوف")
+                ) {
                     directBlockedUntilMs = now + 300_000L
                 }
             }
@@ -514,7 +536,7 @@ object CimaNowNetwork {
         for (spec in pool.take(6)) {
             val pClient = getSharedProxyClient(spec) ?: continue
             val res = executeGet(pClient, encodedUrl, referer)
-            if (res != null && !isCimaBlocked(res.first, res.third)) {
+            if (res != null && isValidPageResponse(encodedUrl, res.first, res.second, res.third)) {
                 proxyFailCounts.remove(spec)
                 updateDomainIfRedirected(res.second)
                 return@withContext PageResult(res.third, res.second, Jsoup.parse(res.third, res.second))
@@ -528,7 +550,7 @@ object CimaNowNetwork {
         for (spec in refreshed.take(5)) {
             val pClient = getSharedProxyClient(spec) ?: continue
             val res = executeGet(pClient, encodedUrl, referer)
-            if (res != null && !isCimaBlocked(res.first, res.third)) {
+            if (res != null && isValidPageResponse(encodedUrl, res.first, res.second, res.third)) {
                 proxyFailCounts.remove(spec)
                 updateDomainIfRedirected(res.second)
                 return@withContext PageResult(res.third, res.second, Jsoup.parse(res.third, res.second))
