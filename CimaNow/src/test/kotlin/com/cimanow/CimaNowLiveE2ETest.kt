@@ -647,6 +647,16 @@ class CimaNowLiveE2ETest {
             println("[DIAG][$pTag] JS_LOGS:\n${jsLogs.joinToString("\n")}")
             println("[DIAG][$pTag] CAPTURED_HTTP:\n${capturedRequests.joinToString("\n")}")
 
+            // Check direct cimanow endpoints first
+            val rawLinkB64 = shine.substringAfter("link=", "")
+            val rawWatchingUrl = runCatching { String(CimaNowCrypto.b64Decode(java.net.URLDecoder.decode(rawLinkB64, "UTF-8")), Charsets.UTF_8) }.getOrDefault("")
+            val shortlink = detailPage.doc.selectFirst("link[rel=shortlink]")?.attr("href")
+            println("[DIAG][$pTag] rawWatchingUrl=$rawWatchingUrl shortlink=$shortlink")
+            if (rawWatchingUrl.startsWith("http")) {
+                val directW = CimaNowNetwork.getPage(rawWatchingUrl, vaultUrl)
+                println("[DIAG] Direct /watching/ (no token, ref=vaultUrl) -> finalUrl=${directW?.finalUrl} len=${directW?.html?.length} hasVault=${directW?.html?.contains("vault_script") == true} snippet='${directW?.html?.take(260)?.replace("\n", " ")}'")
+            }
+
             if (capturedRequests.isEmpty()) {
                 java.io.File("/tmp/inner_gw.html").writeText(innerHtml, Charsets.UTF_8)
                 java.io.File("/tmp/body_tree.json").writeText(bodyTreeJson, Charsets.UTF_8)
@@ -664,10 +674,10 @@ class CimaNowLiveE2ETest {
                     const captured = [];
                     const logs = [];
                     const hostBridge = {
-                        log: s => { if (logs.length < 100) logs.push(String(s).slice(0, 300)); },
+                        log: s => { if (logs.length < 140) logs.push(String(s).slice(0, 350)); },
                         onHttp: (kind, method, url, hdrs, body) => {
                             captured.push({ kind, method, url, headersJson: hdrs, body });
-                            logs.push('V8_HTTP[' + kind + '] ' + method + ' ' + url + ' hdr=' + hdrs + ' body=' + String(body).slice(0, 400));
+                            logs.push('V8_HTTP[' + kind + '] ' + method + ' ' + url + ' hdr=' + hdrs + ' body=' + String(body).slice(0, 450));
                             return '{"ok":true,"url":"https://cimanow.cc/watching/?token=dummy"}';
                         },
                         webcrypto: {
@@ -675,17 +685,17 @@ class CimaNowLiveE2ETest {
                             subtle: {
                                 importKey: async (fmt, keyData, algo, ext, usages) => {
                                     const b = Buffer.from(keyData instanceof ArrayBuffer ? keyData : keyData.buffer, keyData.byteOffset || 0, keyData.byteLength || keyData.length);
-                                    logs.push('SUBTLE.importKey fmt=' + fmt + ' algo=' + JSON.stringify(algo) + ' keyHex=' + b.toString('hex') + ' keyUtf8=' + b.toString('utf8'));
+                                    logs.push('SUBTLE.importKey algo=' + JSON.stringify(algo) + ' keyHex=' + b.toString('hex') + ' keyUtf8=' + b.toString('utf8'));
                                     return cryptoNode.webcrypto.subtle.importKey(fmt, keyData, algo, ext, usages);
                                 },
                                 sign: async (algo, key, data) => {
                                     const b = Buffer.from(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, data.byteLength || data.length);
-                                    logs.push('SUBTLE.sign algo=' + JSON.stringify(algo) + ' msgUtf8=' + b.toString('utf8'));
+                                    logs.push('SUBTLE.sign msgUtf8=' + b.toString('utf8'));
                                     return cryptoNode.webcrypto.subtle.sign(algo, key, data);
                                 },
                                 digest: async (algo, data) => {
                                     const b = Buffer.from(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset || 0, data.byteLength || data.length);
-                                    logs.push('SUBTLE.digest algo=' + JSON.stringify(algo) + ' msgUtf8=' + b.toString('utf8').slice(0, 200));
+                                    logs.push('SUBTLE.digest msgUtf8=' + b.toString('utf8').slice(0, 200));
                                     return cryptoNode.webcrypto.subtle.digest(algo, data);
                                 }
                             }
@@ -699,8 +709,19 @@ class CimaNowLiveE2ETest {
                     const context = vm.createContext({ __host: hostBridge });
                     const bootInRealm = `
                         var window = globalThis, self = globalThis, top = globalThis, parent = globalThis;
+                        class EventTarget { addEventListener(){} removeEventListener(){} dispatchEvent(){return true;} }
+                        class Node extends EventTarget {}
+                        class Element extends Node {}
+                        class HTMLElement extends Element {}
+                        class HTMLAnchorElement extends HTMLElement {}
+                        class HTMLButtonElement extends HTMLElement {}
+                        class HTMLDivElement extends HTMLElement {}
+                        class HTMLIFrameElement extends HTMLElement {}
+                        class HTMLScriptElement extends HTMLElement {}
+                        class Document extends Node { write(){} }
+                        class Window extends EventTarget {}
+
                         var __virtNow = Date.now();
-                        const __RealDate = Date;
                         Date.now = function() { return __virtNow; };
                         var performance = { now: function() { return __virtNow % 1000000; }, timing: { navigationStart: __virtNow - 500 } };
                         var location = {
@@ -726,6 +747,25 @@ class CimaNowLiveE2ETest {
                         function clearTimeout(id){ for (var t of __timers) if (t.id===id) t.active=false; }
                         function clearInterval(id){ clearTimeout(id); }
                         function requestAnimationFrame(fn){ return setTimeout(fn, 16); }
+
+                        var __tsRenders = [];
+                        var __curTsToken = '';
+                        var turnstile = {
+                            render(container, opts) {
+                                opts = opts || {};
+                                __host.log('TURNSTILE.render container=' + (typeof container==='string'?container:(container&&container.id)) + ' keys=' + Object.keys(opts).join(',') + ' sitekey=' + opts.sitekey + ' action=' + opts.action + ' cData=' + opts.cData);
+                                __tsRenders.push(opts);
+                                return 'wid_1';
+                            },
+                            execute(container, opts) {
+                                __host.log('TURNSTILE.execute keys=' + Object.keys(opts||{}).join(','));
+                                if (opts) __tsRenders.push(opts);
+                            },
+                            reset() { __host.log('TURNSTILE.reset'); },
+                            remove() {},
+                            getResponse() { return __curTsToken; }
+                        };
+                        window.turnstile = turnstile;
 
                         function XMLHttpRequest(){ this._h={}; this._m='GET'; this._u=''; this.readyState=0; this.status=200; this.responseText=''; }
                         XMLHttpRequest.prototype.open = function(m,u){ this._m=String(m); this._u=String(u); this.readyState=1; };
@@ -761,11 +801,12 @@ class CimaNowLiveE2ETest {
                             return false;
                         }
                         function __makeEl(tag) {
-                            var el = {
+                            var el = Object.create(HTMLElement.prototype);
+                            Object.assign(el, {
                                 tagName: String(tag||'DIV').toUpperCase(), nodeType: 1, id: '', className: '',
                                 style: { cssText: '', display: '', visibility: 'visible', opacity: '1', setProperty(k,v){this[k]=v;}, getPropertyValue(k){return this[k]||'';}, removeProperty(k){delete this[k];} },
                                 dataset: {}, attributes: [], childNodes: [], children: [], parentNode: null, firstChild: null,
-                                textContent: '', innerText: '', _innerHTML: '', value: '', disabled: false, hidden: false, _href: '', _listeners: {},
+                                textContent: '', innerText: '', _innerHTML: '', value: '', disabled: false, hidden: false, _href: '', _src: '', _listeners: {},
                                 classList: { add(){}, remove(){}, contains(){return false;}, toggle(){} },
                                 setAttribute(k,v){
                                     k=String(k); v=String(v);
@@ -776,12 +817,26 @@ class CimaNowLiveE2ETest {
                                     if (k==='style') this.style.cssText=v;
                                     if (k==='hidden') this.hidden=true;
                                     if (k==='href') this._href=v;
+                                    if (k==='src') this._src=v;
                                     if (k.startsWith('data-')) this.dataset[k.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())] = v;
                                 },
                                 getAttribute(k){ var ex=this.attributes.find(a=>a.name===String(k)); return ex?ex.value:null; },
                                 hasAttribute(k){ return this.getAttribute(k)!==null; },
                                 removeAttribute(k){ k=String(k); this.attributes=this.attributes.filter(a=>a.name!==k); if(k==='hidden') this.hidden=false; if(k==='style') this.style.cssText=''; },
-                                appendChild(c){ if(c){ c.parentNode=this; this.childNodes.push(c); this.children.push(c); this.firstChild=this.childNodes[0]||null; if(c.id) __elsById[c.id]=c; if(c.src) __host.log('append '+c.tagName+' src='+c.src); __allEls.push(c); } return c; },
+                                appendChild(c){
+                                    if(c){
+                                        c.parentNode=this; this.childNodes.push(c); this.children.push(c); this.firstChild=this.childNodes[0]||null;
+                                        if(c.id) __elsById[c.id]=c;
+                                        if(c.src){
+                                            __host.log('append '+c.tagName+' src='+c.src);
+                                            if (String(c.src).includes('turnstile') && typeof c.onload === 'function') {
+                                                setTimeout(() => { try { c.onload(); } catch(e){ __host.log('tsOnloadErr:'+e.message); } }, 10);
+                                            }
+                                        }
+                                        __allEls.push(c);
+                                    }
+                                    return c;
+                                },
                                 removeChild(c){ var i=this.childNodes.indexOf(c); if(i>=0) this.childNodes.splice(i,1); return c; },
                                 remove(){ if(this.parentNode) this.parentNode.removeChild(this); },
                                 insertBefore(n){ return this.appendChild(n); },
@@ -800,18 +855,25 @@ class CimaNowLiveE2ETest {
                                     if (typeof this.onclick==='function') this.onclick(evObj);
                                     for (var dfn of (__docListeners['click']||[]).slice()) dfn.call(document, evObj);
                                 },
-                                getBoundingClientRect(){ return {width:220, height:48, top:100, left:50, right:270, bottom:148, x:50, y:100}; },
-                                get href(){ return this._href; },
-                                set href(v){ this._href=String(v); __host.log('el#'+this.id+'.href='+v); },
-                                get offsetWidth(){ return 220; }, get offsetHeight(){ return 48; }, get clientWidth(){ return 220; }, get clientHeight(){ return 48; },
-                                get offsetParent(){ return document.body; },
-                                get innerHTML(){ return this._innerHTML; }, set innerHTML(v){ this._innerHTML=String(v); }
-                            };
+                                getBoundingClientRect(){ return {width:220, height:48, top:100, left:50, right:270, bottom:148, x:50, y:100}; }
+                            });
+                            Object.defineProperty(el, 'href', { get(){return this._href;}, set(v){this._href=String(v); __host.log('el#'+this.id+'.href='+v);} });
+                            Object.defineProperty(el, 'src', { get(){return this._src;}, set(v){this._src=String(v);} });
+                            Object.defineProperty(el, 'offsetWidth', { get:()=>220 });
+                            Object.defineProperty(el, 'offsetHeight', { get:()=>48 });
+                            Object.defineProperty(el, 'clientWidth', { get:()=>220 });
+                            Object.defineProperty(el, 'clientHeight', { get:()=>48 });
+                            Object.defineProperty(el, 'offsetParent', { get:()=>document.body });
+                            Object.defineProperty(el, 'innerHTML', { get(){return this._innerHTML;}, set(v){this._innerHTML=String(v);} });
+                            if (el.tagName === 'IFRAME') {
+                                el.contentWindow = window;
+                                el.contentDocument = null;
+                            }
                             return el;
                         }
                         function getComputedStyle(el){ return { display:(el&&el.style&&el.style.display)||'block', visibility:'visible', opacity:'1', getPropertyValue:p=>p==='display'?((el&&el.style&&el.style.display)||'block'):'visible' }; }
                         class MutationObserver { observe(){} disconnect(){} }
-                        var document = {
+                        var document = Object.assign(new Document(), {
                             nodeType:9, readyState:'complete', hidden:false, visibilityState:'visible', cookie:'', referrer:'${gwOrigin}/redirectingfree/', domain:'${u.host}',
                             documentElement:__makeEl('HTML'), head:__makeEl('HEAD'), body:__makeEl('BODY'),
                             createElement:t=>__makeEl(t), createTextNode:t=>{var n=__makeEl('TEXT');n.nodeType=3;n.textContent=String(t);return n;}, createDocumentFragment:()=>__makeEl('FRAG'),
@@ -822,7 +884,7 @@ class CimaNowLiveE2ETest {
                             querySelector:sel=>{var a=document.querySelectorAll(sel);return a.length?a[0]:null;},
                             addEventListener:(ev,fn)=>{(__docListeners[ev]=__docListeners[ev]||[]).push(fn);},
                             removeEventListener(){}
-                        };
+                        });
                         document.documentElement.appendChild(document.head);
                         document.documentElement.appendChild(document.body);
                         window.addEventListener = (ev,fn)=>{(__docListeners['win_'+ev]=__docListeners['win_'+ev]||[]).push(fn);};
@@ -847,7 +909,6 @@ class CimaNowLiveE2ETest {
                             };
                         }
                         var jQuery = $;
-                        delete globalThis.__host_tmp;
                     `;
                     vm.runInContext(bootInRealm, context);
 
@@ -878,13 +939,39 @@ class CimaNowLiveE2ETest {
                             `, context, { timeout: 3000 });
                             await new Promise(r => setImmediate(r));
                         }
+                        // 1) Click button BEFORE turnstile callback (to see if click triggers turnstile.render / execute!)
                         vm.runInContext(`
                             var b = document.getElementById('downloadbtn');
-                            __host.log('V8 pre-click btn hidden=' + (b&&b.hidden) + ' style=' + (b&&b.style.cssText) + ' listeners=' + Object.keys(b?b._listeners:{}) + ' onclick=' + typeof(b&&b.onclick));
+                            __host.log('Step1 click btn tsRenders=' + __tsRenders.length + ' listeners=' + Object.keys(b?b._listeners:{}) + ' docClickListeners=' + (__docListeners['click']||[]).length);
                             if (b) b.click();
                         `, context, { timeout: 3000 });
-                        await new Promise(r => setTimeout(r, 150));
-                        for (let step = 0; step < 12; step++) {
+                        await new Promise(r => setTimeout(r, 100));
+                        // 2) Fire error-callback if any
+                        vm.runInContext(`
+                            __host.log('After Step1 tsRenders=' + __tsRenders.length);
+                            for (var o of __tsRenders) {
+                                var ecb = o['error-callback'] || o.errorCallback;
+                                if (typeof ecb === 'function') {
+                                    __host.log('Calling Turnstile error-callback...');
+                                    try { ecb('110200'); } catch(e) { __host.log('ecbErr:' + e.message); }
+                                }
+                            }
+                        `, context, { timeout: 3000 });
+                        await new Promise(r => setTimeout(r, 100));
+                        // 3) Fire success callback with dummy token & click again so we capture exact POST schema!
+                        vm.runInContext(`
+                            __curTsToken = '0.DUMMY_TURNSTILE_TOKEN';
+                            for (var o of __tsRenders) {
+                                if (typeof o.callback === 'function') {
+                                    __host.log('Calling Turnstile callback(0.DUMMY_TURNSTILE_TOKEN)...');
+                                    try { o.callback(__curTsToken); } catch(e) { __host.log('cbErr:' + e.message); }
+                                }
+                            }
+                            var b = document.getElementById('downloadbtn');
+                            if (b) b.click();
+                        `, context, { timeout: 3000 });
+                        await new Promise(r => setTimeout(r, 200));
+                        for (let step = 0; step < 10; step++) {
                             vm.runInContext(`
                                 __virtNow += 250;
                                 for (var tm of __timers.slice()) {
@@ -896,10 +983,6 @@ class CimaNowLiveE2ETest {
                             `, context, { timeout: 3000 });
                             await new Promise(r => setImmediate(r));
                         }
-                        vm.runInContext(`
-                            var b = document.getElementById('downloadbtn');
-                            __host.log('V8 post-click btn href=' + (b&&b.href) + ' loc=' + location.href + ' winKeys=' + Object.keys(globalThis).slice(-25).join(','));
-                        `, context);
                         console.log(JSON.stringify({ logs, captured }));
                         process.exit(0);
                     })();
