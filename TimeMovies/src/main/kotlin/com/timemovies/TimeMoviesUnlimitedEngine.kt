@@ -515,6 +515,7 @@ object TimeMoviesUnlimitedEngine {
     )
 
     private fun mapSequelToken(token: String, index: Int): String = when (token) {
+        "اولاد" -> "ولاد"
         "ii", "two", "الثاني", "ثاني" -> "2"
         "iii", "three", "الثالث", "ثالث" -> "3"
         "iv", "four", "الرابع", "رابع" -> "4"
@@ -860,7 +861,8 @@ object TimeMoviesUnlimitedEngine {
                 diff == 1 -> score += 22
                 diff == 2 -> score += 10
                 diff == 3 -> score -= 8
-                payload.isMovie -> score -= 38
+                payload.isMovie && diff >= 6 -> score -= 65
+                payload.isMovie -> score -= 45
                 else -> score -= 15
             }
         }
@@ -885,13 +887,14 @@ object TimeMoviesUnlimitedEngine {
     }
 
     internal fun buildSearchQueries(payload: TimeMoviesModels.LinkPayload): List<String> {
-        val queries = LinkedHashSet<String>()
+        val queries = ArrayList<String>(8)
+        val seenLower = HashSet<String>()
 
         fun addIfValid(q: String?) {
             val trimmed = q?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
             if (trimmed.isNotEmpty() && !trimmed.equals("TimeMovies", ignoreCase = true)) {
                 // Allow 1-char movie titles like "X" as well as numeric titles like "1917"
-                if (trimmed.length >= 2 || trimmed.any { it.isLetterOrDigit() }) {
+                if ((trimmed.length >= 2 || trimmed.any { it.isLetterOrDigit() }) && seenLower.add(trimmed.lowercase())) {
                     queries.add(trimmed)
                 }
             }
@@ -901,56 +904,56 @@ object TimeMoviesUnlimitedEngine {
         val cleanAr = payload.titleAr?.replace(TRAILING_YEAR_PARENS_REGEX, "")?.trim().orEmpty()
         val cleanOrig = payload.originalTitle?.replace(TRAILING_YEAR_PARENS_REGEX, "")?.trim().orEmpty()
 
-        // 1. Primary English & Arabic titles
+        // 1. Primary English, Original, & Punctuation-clean Arabic titles
         addIfValid(cleanEn)
-        if (!cleanAr.equals(cleanEn, ignoreCase = true)) {
-            addIfValid(cleanAr)
-        }
-        if (cleanOrig.isNotEmpty() && !cleanOrig.equals(cleanEn, ignoreCase = true) && !cleanOrig.equals(cleanAr, ignoreCase = true)) {
+        if (cleanOrig.isNotEmpty()) {
             addIfValid(cleanOrig)
         }
-
-        // 2. Punctuation-stripped & hamza-normalized Arabic query (critical for SQL LIKE search on "ولاد رزق 3: القاضية" / "أوبنهايمر")
         if (cleanAr.isNotEmpty()) {
             val bareAr = ARABIC_DIACRITICS_REGEX.replace(cleanAr, "")
                 .replace(Regex("[:\\-–—،,?!؟\"'()]"), " ")
                 .trim()
-            addIfValid(bareAr)
             val hamzaFreeAr = bareAr
                 .replace('أ', 'ا')
                 .replace('إ', 'ا')
                 .replace('آ', 'ا')
                 .replace('ى', 'ي')
             addIfValid(hamzaFreeAr)
+            addIfValid(bareAr)
+            addIfValid(cleanAr)
         }
 
-        // 3. Punctuation/hyphen-normalized English query ("Spider-Man: No Way Home" -> "Spider Man No Way Home" & "Spiderman")
+        // 2. Shortened franchise prefix before `:` or ` - ` (Arabic & English — critical for "ولاد رزق 3: القاضية" & "Furiosa: A Mad Max Saga")
+        for (src in listOf(cleanAr, cleanEn, cleanOrig)) {
+            if (src.isEmpty()) continue
+            val beforeColon = src.substringBefore(':').substringBefore(" - ").substringBefore(" – ").trim()
+            if (beforeColon.length >= 4 && beforeColon.length < src.length) {
+                val cleanPrefix = ARABIC_DIACRITICS_REGEX.replace(beforeColon, "")
+                    .replace('أ', 'ا')
+                    .replace('إ', 'ا')
+                    .replace('آ', 'ا')
+                addIfValid(cleanPrefix)
+                addIfValid(beforeColon)
+            }
+        }
+
+        // 3. Punctuation/hyphen/sequel-normalized English query ("Spider-Man: No Way Home" -> "Spiderman", "Dune: Part Two" -> "Dune 2")
         if (cleanEn.isNotEmpty()) {
+            if (HYPHENATED_WORDS_REGEX.containsMatchIn(cleanEn)) {
+                addIfValid(HYPHENATED_WORDS_REGEX.replace(cleanEn, "$1$2").substringBefore(':').trim())
+            }
+            val normEn = normalizeCompareTitle(cleanEn, stripSeasonSuffix = !payload.isMovie)
+            if (normEn.isNotEmpty()) {
+                addIfValid(normEn)
+            }
             val noPunctEn = Normalizer.normalize(cleanEn, Normalizer.Form.NFD)
                 .let { COMBINING_MARKS_REGEX.replace(it, "") }
                 .replace("&", " and ")
                 .replace(Regex("[:\\-–—.,?!'\"()]"), " ")
             addIfValid(noPunctEn)
-            if (HYPHENATED_WORDS_REGEX.containsMatchIn(cleanEn)) {
-                addIfValid(HYPHENATED_WORDS_REGEX.replace(cleanEn, "$1$2").substringBefore(':').trim())
-            }
-            // Roman <-> Digit sequel query variant ("Dune: Part Two" -> "Dune 2", "Gladiator II" -> "Gladiator 2")
-            val normEn = normalizeCompareTitle(cleanEn, stripSeasonSuffix = !payload.isMovie)
-            if (normEn.isNotEmpty() && !normEn.equals(cleanEn, ignoreCase = true)) {
-                addIfValid(normEn)
-            }
         }
 
-        // 4. Shortened franchise prefix before `:` or ` - ` (both English & Arabic)
-        for (src in listOf(cleanEn, cleanAr)) {
-            if (src.isEmpty()) continue
-            val beforeColon = src.substringBefore(':').substringBefore(" - ").substringBefore(" – ").trim()
-            if (beforeColon.length >= 4 && beforeColon.length < src.length) {
-                addIfValid(beforeColon)
-            }
-        }
-
-        return queries.take(6)
+        return queries.take(8)
     }
 
     private fun parseServerArray(json: JSONObject?, backendLabel: String): List<UnlimitedServerEmbed> {
@@ -2559,7 +2562,7 @@ object TimeMoviesUnlimitedEngine {
         if (TimeMoviesPrefs.apiBaseUrlOverride != null && override.isNullOrBlank()) return emptyList()
         val bases = if (!override.isNullOrBlank()) listOf(override) else EGYWATCH_BASES
 
-        val queries = buildSearchQueries(payload).take(4)
+        val queries = buildSearchQueries(payload).take(6)
         val targetNorms = buildPrimaryTargetNorms(payload)
         if (queries.isEmpty() || targetNorms.isEmpty()) return emptyList()
 
@@ -2717,7 +2720,7 @@ object TimeMoviesUnlimitedEngine {
             else -> DRAMAWORLD_BASES
         }
 
-        val queries = buildSearchQueries(payload).take(4)
+        val queries = buildSearchQueries(payload).take(6)
         val targetNorms = buildPrimaryTargetNorms(payload)
         if (queries.isEmpty() || targetNorms.isEmpty()) return emptyList()
 
@@ -2975,7 +2978,7 @@ object TimeMoviesUnlimitedEngine {
         if (now < cimawbasBlockedUntilMs) return emptyList()
 
         val targetNorms = buildPrimaryTargetNorms(payload)
-        val queries = buildSearchQueries(payload).take(2)
+        val queries = buildSearchQueries(payload).take(5)
         if (targetNorms.isEmpty() || queries.isEmpty()) return emptyList()
 
         var bestVid: String? = null
@@ -3063,7 +3066,7 @@ object TimeMoviesUnlimitedEngine {
         if (now < topCinemaBlockedUntilMs) return emptyList()
 
         val targetNorms = buildPrimaryTargetNorms(payload)
-        val queries = buildSearchQueries(payload).take(2)
+        val queries = buildSearchQueries(payload).take(5)
         if (targetNorms.isEmpty() || queries.isEmpty()) return emptyList()
 
         var matchedUrl: String? = null
