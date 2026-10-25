@@ -95,8 +95,148 @@ class CimaNowLiveE2ETest {
     }
 
     @Test
+    fun testLiveDiagnosticDump() = runBlocking {
+        System.setProperty("kotlinx.coroutines.debug", "off")
+        val tStart = System.currentTimeMillis()
+        val api = CimaNow()
+
+        // 0. Check direct connectivity to cimanow.cc
+        runCatching {
+            val req = Request.Builder()
+                .url("https://cimanow.cc/home/")
+                .header("User-Agent", CimaNowNetwork.MOBILE_UA)
+                .build()
+            CimaNowNetwork.directNoProxyClient.newCall(req).execute().use { res ->
+                val b = res.body?.string().orEmpty()
+                println("[DIAG] Direct cimanow.cc/home/ -> code=${res.code} finalUrl=${res.request.url} len=${b.length} blocked=${CimaNowNetwork.isCimaBlocked(res.code, b)} snippet='${b.take(180).replace("\n", " ")}'")
+            }
+        }.onFailure { println("[DIAG] Direct cimanow.cc/home/ error: $it") }
+
+        // 1. Fetch page 1 of foreign movies
+        val fm = api.getMainPage(1, MainPageRequest("أفلام أجنبية", "category/افلام-اجنبية", false))
+        val firstCard = fm.items.firstOrNull()?.list?.firstOrNull()
+        println("[DIAG] Shelf items=${fm.items.firstOrNull()?.list?.size ?: 0} first=${firstCard?.name} url=${firstCard?.url} elapsed=${System.currentTimeMillis() - tStart}ms")
+        if (firstCard == null) return@runBlocking
+
+        val detailPage = CimaNowNetwork.getPage(firstCard.url, "${CimaNowNetwork.mainUrl}/home/")
+        println("[DIAG] detailPage null=${detailPage == null} finalUrl=${detailPage?.finalUrl} htmlLen=${detailPage?.html?.length}")
+        if (detailPage == null) return@runBlocking
+
+        val shine = CimaNowExtractors.extractShineUrlFromDetailHtml(detailPage.html)
+        println("[DIAG] extracted shineUrl=$shine")
+        val allInterestingLinks = detailPage.doc.select("a[href*=load], a[href*=watch], a.shine, #watch a[href], section a[class]")
+            .take(15)
+            .map { "class='${it.className()}' text='${it.text().take(30)}' href='${it.attr("href")}'" }
+        println("[DIAG] detail interesting <a>: $allInterestingLinks")
+
+        // 2. Step-by-step trace inside withStickySession
+        CimaNowNetwork.withStickySession { session ->
+            val pTag = session.proxySpec ?: "direct"
+            val gwEntry = shine ?: return@withStickySession "no_shine"
+            val u = java.net.URI(CimaNowNetwork.encodeUrl(gwEntry))
+            val gwOrigin = "${u.scheme}://${u.host}"
+
+            val hop1 = session.getNoRedirect(gwEntry, detailPage.finalUrl)
+            println("[DIAG][$pTag] hop1 code=${hop1?.code} loc=${hop1?.location} bodyLen=${hop1?.body?.length}")
+            if (hop1 == null || hop1.code !in 200..399) return@withStickySession null
+
+            val loc1 = hop1.location?.removePrefix("https://href.li/?")?.removePrefix("http://href.li/?")?.trim()
+            val hop2Url = when {
+                loc1 == null || loc1.isEmpty() -> "$gwOrigin/redirectingfree/"
+                loc1.startsWith("http") -> loc1
+                loc1.startsWith("/") -> "$gwOrigin$loc1"
+                else -> "$gwOrigin/redirectingfree/"
+            }
+            val hop2 = session.getNoRedirect(hop2Url, gwEntry)
+            println("[DIAG][$pTag] hop2 ($hop2Url) code=${hop2?.code} loc=${hop2?.location} bodyLen=${hop2?.body?.length}")
+            if (hop2 == null || hop2.code !in 200..399) return@withStickySession null
+
+            val loc2 = hop2.location?.removePrefix("https://href.li/?")?.removePrefix("http://href.li/?")?.trim()
+            val vaultUrl = when {
+                loc2 == null || loc2.isEmpty() -> "$gwOrigin/2020/02/blog-post.html/"
+                loc2.startsWith("http") -> loc2
+                loc2.startsWith("/") -> "$gwOrigin$loc2"
+                else -> "$gwOrigin/2020/02/blog-post.html/"
+            }
+            val hop3 = session.getText(vaultUrl, hop2Url)
+            println("[DIAG][$pTag] hop3 ($vaultUrl) code=${hop3?.first} len=${hop3?.second?.length}")
+            val vaultHtml = hop3?.second.orEmpty()
+            if (vaultHtml.length < 200) {
+                println("[DIAG][$pTag] vaultHtml short: '${vaultHtml}'")
+                return@withStickySession null
+            }
+
+            val postBody = CimaNowCrypto.solveGatewayPostBody(vaultHtml)
+            println("[DIAG][$pTag] solveGatewayPostBody -> ${postBody?.take(140)}")
+            if (postBody == null) {
+                println("[DIAG][$pTag] VAULT_HTML_HEAD:\n${vaultHtml.take(3500)}")
+                return@withStickySession "vault_solve_null"
+            }
+
+            kotlinx.coroutines.delay(10_400L)
+            val getLinkEndpoint = "${vaultUrl.trimEnd('/')}/get-link.php"
+            val mRes = session.postForm(
+                url = getLinkEndpoint,
+                rawFormBody = postBody,
+                referer = vaultUrl,
+                origin = gwOrigin,
+                extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
+            )
+            println("[DIAG][$pTag] get-link.php -> code=${mRes?.first} body='${mRes?.second?.take(200)}'")
+            val mintedUrl = mRes?.second?.trim().orEmpty()
+            if (!mintedUrl.startsWith("http")) {
+                println("[DIAG][$pTag] VAULT_HTML_HEAD_ON_REJECT:\n${vaultHtml.take(2500)}")
+                return@withStickySession "mint_failed"
+            }
+
+            val wRes = session.getText(mintedUrl, vaultUrl)
+            val wCode = wRes?.first ?: 0
+            val watchHtml = wRes?.second.orEmpty()
+            println("[DIAG][$pTag] watching -> code=$wCode len=${watchHtml.length} blocked=${CimaNowNetwork.isCimaBlocked(wCode, watchHtml)}")
+            if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) {
+                println("[DIAG][$pTag] WATCH_BLOCKED_SNIPPET: ${watchHtml.take(600)}")
+                return@withStickySession null
+            }
+
+            val outerDoc = org.jsoup.Jsoup.parse(watchHtml)
+            val scriptsInfo = outerDoc.select("script").mapIndexed { idx, s ->
+                val attrs = s.attributes().joinToString(",") { "${it.key}(${it.value.length})" }
+                "#$idx id='${s.id()}' attrs=[$attrs] dataLen=${s.data().length} dataHead='${s.data().take(120).replace("\n", " ")}'"
+            }
+            println("[DIAG][$pTag] WATCH_SCRIPTS:\n${scriptsInfo.joinToString("\n")}")
+
+            val decoded = CimaNowCrypto.decodeWatchingVault(watchHtml)
+            println("[DIAG][$pTag] decodeWatchingVault -> null=${decoded == null} coreTok='${decoded?.coreToken?.take(24)}' salt='${decoded?.sigSalt}' initEmbed='${decoded?.initialEmbedUrl}' tabs=${decoded?.serverTabs} dls=${decoded?.downloads?.size}")
+
+            // Always dump stage-2 JS if present so we can inspect the exact live script!
+            val gEl = outerDoc.selectFirst("script[id^=g_]") ?: outerDoc.select("script").firstOrNull { it.attributes().any { a -> a.key.startsWith("data-") && a.value.length > 64 } && it.data().isNotBlank() }
+            if (gEl != null) {
+                val rawG = gEl.attributes().first { it.key.startsWith("data-") && it.value.length > 64 }.value
+                val gBootJs = gEl.data()
+                println("[DIAG][$pTag] gBootJs:\n$gBootJs")
+                val modG = Regex("""%\s*(\d+)""").find(gBootJs)?.groupValues?.get(1)?.toIntOrNull() ?: 6
+                val s2 = runCatching { String(CimaNowCrypto.b64Decode(CimaNowCrypto.uninterleave(rawG, modG)), Charsets.UTF_8) }.getOrNull()
+                println("[DIAG][$pTag] UNPACKED_S2 (len=${s2?.length}):\n$s2")
+            } else {
+                println("[DIAG][$pTag] RAW_WATCH_HEAD:\n${watchHtml.take(4000)}")
+            }
+            "done"
+        }
+
+        // 3. Also test loadLinks end-to-end on the loaded movie and log timing!
+        val tLoad0 = System.currentTimeMillis()
+        val loadResp = api.load(firstCard.url) as? MovieLoadResponse
+        if (loadResp != null) {
+            CimaNowExtractors.debugLogger = { println("[DIAG][ExtractorTrace] $it") }
+            val links = CopyOnWriteArrayList<ExtractorLink>()
+            val ok = api.loadLinks(loadResp.dataUrl, false, {}, { links.add(it) })
+            println("[DIAG] v2 loadLinks result: ok=$ok count=${links.size} elapsed=${System.currentTimeMillis() - tLoad0}ms links=${links.map { "${it.source}:${it.quality}:${it.type}" }}")
+        }
+    }
+
+    @Test
     fun testFullLiveEndToEndSuite() = runBlocking {
-        assumeTrue("Set CIMANOW_LIVE_E2E=1 to run live network E2E verification", System.getenv("CIMANOW_LIVE_E2E") == "1")
+        assumeTrue("Skip full suite during quick diag", System.getenv("CIMANOW_FULL_E2E") == "1")
 
         val api = CimaNow()
 
