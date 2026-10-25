@@ -123,7 +123,7 @@ object TimeMoviesUnlimitedEngine {
     // Engine 6: Web Multi-Mirror Movie Harvesters + Universal 50-Host Server Scraper
     private const val DEFAULT_REMOTE_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/extractor.php"
     private const val MAWDHOU3_SCRAPER_BASE = "https://mawdhou3.com/"
-    private const val SHAHID4U_SEED_URL = "https://shaaheid4u.net"
+    private const val SHAHID4U_SEED_URL = "https://shaahidd4u.net"
     private const val CIMAWBAS_BASE_URL = "https://vid.mycima.cc"
     private const val TOPCINEMA_BASE_URL = "https://topcinema.film"
     private const val CIMANOW_BASE_URL = "https://cimanow.cc"
@@ -3226,11 +3226,11 @@ object TimeMoviesUnlimitedEngine {
                     } else null
                 } ?: break
                 cur = nextLoc
-                if (!cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) {
+                if (!cur.contains("shaahid", true) && !cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) {
                     return cur
                 }
             }
-            if (!cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) cur else null
+            if (!cur.contains("shaahid", true) && !cur.contains("shaaheid", true) && !cur.contains("shahid4u", true)) cur else null
         }.getOrNull()
 
         var activeOrigin = SHAHID4U_SEED_URL
