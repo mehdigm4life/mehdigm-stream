@@ -234,6 +234,13 @@ class CimaNowLiveE2ETest {
                                     rawWatchNetworkBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
                                 }
                             }
+                            const idlDump = await evalJs(`JSON.stringify({
+                                tk: window.tk || '',
+                                iframes: Array.from(document.querySelectorAll('iframe')).map(f => ({ srcProp: f.src, cnb: f.getAttribute('data-cnb'), cni: f.getAttribute('data-cni') })),
+                                tabs: Array.from(document.querySelectorAll('li[data-id]')).map(li => ({ name: (li.textContent || '').trim(), id: li.getAttribute('data-id'), idx: li.getAttribute('data-index') })),
+                                dls: Array.from(document.querySelectorAll('#download a, li a')).map(a => ({ txt: (a.textContent || '').trim().slice(0, 40), hrefProp: a.href })).filter(x => x.hrefProp && x.hrefProp.startsWith('http') && !x.hrefProp.includes('cimanow.cc/category') && !x.hrefProp.includes('facebook') && !x.hrefProp.includes('twitter') && !x.hrefProp.includes('telegram'))
+                            })`);
+                            logs.push('IDL_DUMP=' + (idlDump || '').slice(0, 4000));
                             const domHtml = await evalJs('document.documentElement.outerHTML');
                             watchHtml = domHtml || '';
                             require('fs').writeFileSync('/tmp/raw_watch.html', rawWatchNetworkBody || '', 'utf8');
@@ -379,7 +386,8 @@ class CimaNowLiveE2ETest {
                     }
                     println("[DIAG] Rhino boot captured count=${capturedScripts.size}")
                     capturedScripts.distinct().forEachIndexed { ci, cs ->
-                        println("[DIAG] UNPACKED_S2[$ci] len=${cs.length}:\n${cs.take(15000)}")
+                        println("[DIAG] UNPACKED_S2[$ci] len=${cs.length} HEAD:\n${cs.take(3200)}")
+                        println("[DIAG] UNPACKED_S2[$ci] TAIL:\n${cs.takeLast(8000)}")
                     }
                 }
             }
