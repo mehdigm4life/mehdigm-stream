@@ -381,8 +381,256 @@ class CimaNowLiveE2ETest {
                     }
                     println("[DIAG] Rhino boot captured count=${capturedScripts.size}")
                     capturedScripts.distinct().forEachIndexed { ci, cs ->
-                        println("[DIAG] UNPACKED_S2[$ci] len=${cs.length} HEAD:\n${cs.take(3200)}")
-                        println("[DIAG] UNPACKED_S2[$ci] TAIL:\n${cs.takeLast(8000)}")
+                        val gridEnd = cs.indexOf("</x-grid>")
+                        if (gridEnd > 0) {
+                            println("[DIAG] UNPACKED_S2 AFTER_GRID:\n${cs.substring(gridEnd, minOf(cs.length, gridEnd + 2500))}")
+                        }
+                        // Now test executing full UNPACKED_S2 in Rhino with generalized computeFlexHeight!
+                        val tRhino0 = System.currentTimeMillis()
+                        val cx2 = org.mozilla.javascript.Context.enter()
+                        try {
+                            cx2.languageVersion = org.mozilla.javascript.Context.VERSION_ECMASCRIPT
+                            cx2.isInterpretedMode = true
+                            val scope2 = cx2.initStandardObjects()
+                            var decryptedDoc: org.jsoup.nodes.Document? = null
+                            val bridge2 = object {
+                                fun getOuterAttr(id: String, attr: String): String =
+                                    rawDoc.getElementById(id)?.let { el ->
+                                        el.attributes().firstOrNull { it.key.equals(attr, true) }?.value
+                                    } ?: ""
+                                fun hasOuterEl(id: String): Boolean = rawDoc.getElementById(id) != null
+                                fun b64(s: String): String = String(CimaNowCrypto.b64Decode(s), Charsets.ISO_8859_1)
+                                fun utf8FromLatin1(s: String): String = String(s.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
+                                fun flexHeight(html: String): Int {
+                                    val cStyle = Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]*display\s*:\s*flex[^'"]*)['"]""").find(html)?.groupValues?.get(1) ?: return 0
+                                    fun px(st: String, p: String): Int = Regex("""(?:^|;)\s*${Regex.escape(p)}:(-?\d+)px""").find(st)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                                    fun pairPx(st: String, p: String): Pair<Int, Int> {
+                                        val m = Regex("""(?:^|;)\s*${Regex.escape(p)}:(\d+)px(?:\s+(\d+)px)?""").find(st) ?: return 0 to 0
+                                        val v = m.groupValues[1].toIntOrNull() ?: 0
+                                        val h = m.groupValues[2].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: v
+                                        return v to h
+                                    }
+                                    val fxW = px(cStyle, "width")
+                                    val (fxPadV, fxPadH) = pairPx(cStyle, "padding")
+                                    val colGap = px(cStyle, "column-gap")
+                                    val rowGap = px(cStyle, "row-gap")
+                                    val availW = fxW - 2 * fxPadH
+                                    data class FItem(val order: Int, val idx: Int, val w: Int, val h: Int)
+                                    val items = ArrayList<FItem>()
+                                    val afterContainer = html.substringAfter('>')
+                                    var dIdx = 0
+                                    for (m in Regex("""<[A-Za-z0-9-]+\s+style=['"]([^'"]+)['"]""").findAll(afterContainer)) {
+                                        val st = m.groupValues[1]
+                                        dIdx++
+                                        if (st.contains("display:none")) continue
+                                        val ord = Regex("""order:(-?\d+)""").find(st)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                                        val bb = st.contains("box-sizing:border-box")
+                                        val w = px(st, "width")
+                                        val h = px(st, "height")
+                                        val (pv, ph) = pairPx(st, "padding")
+                                        val (mv, mh) = pairPx(st, "margin")
+                                        val bw = if (bb) w else w + 2 * ph
+                                        val bh = if (bb) h else h + 2 * pv
+                                        items.add(FItem(ord, dIdx, bw + 2 * mh, bh + 2 * mv))
+                                    }
+                                    items.sortWith(compareBy<FItem> { it.order }.thenBy { it.idx })
+                                    val rows = ArrayList<Int>()
+                                    var cw = 0; var ch = 0; var cnt = 0
+                                    for (it in items) {
+                                        val need = if (cnt == 0) it.w else cw + colGap + it.w
+                                        if (cnt > 0 && need > availW) { rows.add(ch); cw = it.w; ch = it.h; cnt = 1 }
+                                        else { cw = need; if (it.h > ch) ch = it.h; cnt++ }
+                                    }
+                                    if (cnt > 0) rows.add(ch)
+                                    return 2 * fxPadV + rows.sum() + maxOf(0, rows.size - 1) * rowGap
+                                }
+                                fun onDocWrite(html: String) {
+                                    decryptedDoc = org.jsoup.Jsoup.parse(html)
+                                }
+                                fun qsaCount(sel: String): Int = decryptedDoc?.select(sel)?.size ?: 0
+                                fun qsaGetAttr(sel: String, idx: Int, attr: String): String =
+                                    decryptedDoc?.select(sel)?.getOrNull(idx)?.let { el ->
+                                        el.attributes().firstOrNull { it.key.equals(attr, true) }?.value
+                                    } ?: ""
+                                fun qsaSetAttr(sel: String, idx: Int, attr: String, v: String) {
+                                    decryptedDoc?.select(sel)?.getOrNull(idx)?.attr(attr, v)
+                                }
+                                fun qsaRemoveAttr(sel: String, idx: Int, attr: String) {
+                                    decryptedDoc?.select(sel)?.getOrNull(idx)?.let { el ->
+                                        val realKey = el.attributes().firstOrNull { it.key.equals(attr, true) }?.key ?: attr
+                                        el.removeAttr(realKey)
+                                    }
+                                }
+                            }
+                            org.mozilla.javascript.ScriptableObject.putProperty(scope2, "__h", org.mozilla.javascript.Context.javaToJS(bridge2, scope2))
+                            val s2Shim = """
+                                var window = this, self = this, globalThis = this;
+                                var navigator = { webdriver: false, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' };
+                                function atob(s) { return String(__h.b64(String(s))); }
+                                function TextDecoder() {}
+                                TextDecoder.prototype.decode = function(u8) {
+                                    var CHUNK = 8192, parts = [];
+                                    for (var i = 0; i < u8.length; i += CHUNK) {
+                                        var sub = u8.subarray ? u8.subarray(i, Math.min(i + CHUNK, u8.length)) : Array.prototype.slice.call(u8, i, i + CHUNK);
+                                        parts.push(String.fromCharCode.apply(null, sub));
+                                    }
+                                    return String(__h.utf8FromLatin1(parts.join('')));
+                                };
+                                window.TextDecoder = TextDecoder;
+                                function XMLHttpRequest() { this._url = ''; }
+                                XMLHttpRequest.prototype.open = function(m, u) { this._url = String(u); };
+                                XMLHttpRequest.prototype.send = function() {};
+                                window.XMLHttpRequest = XMLHttpRequest;
+                                function makeStyleObj() {
+                                    return {
+                                        _css: '',
+                                        set cssText(v) { this._css = String(v); },
+                                        get cssText() { return this._css; },
+                                        setProperty: function() {}
+                                    };
+                                }
+                                function makeFlexChild(h) {
+                                    return {
+                                        offsetHeight: h, clientHeight: h, scrollHeight: h, offsetWidth: 403,
+                                        style: makeStyleObj(),
+                                        getBoundingClientRect: function() { return { height: h, width: 403, top: 0, bottom: h, left: 0, right: 403 }; }
+                                    };
+                                }
+                                function makeMockEl(tag, id) {
+                                    return {
+                                        tagName: String(tag || 'DIV').toUpperCase(),
+                                        id: String(id || ''),
+                                        style: makeStyleObj(),
+                                        _ih: '',
+                                        _fh: 0,
+                                        parentNode: { removeChild: function() {}, insertBefore: function() {} },
+                                        appendChild: function(c) { return c; },
+                                        removeChild: function(c) { return c; },
+                                        set innerHTML(v) {
+                                            this._ih = String(v);
+                                            if (this._ih.indexOf('display:flex') !== -1) {
+                                                this._fh = Number(__h.flexHeight(this._ih));
+                                            }
+                                        },
+                                        get innerHTML() { return this._ih; },
+                                        get offsetHeight() { return this._fh; },
+                                        get clientHeight() { return this._fh; },
+                                        get firstChild() { return makeFlexChild(this._fh); },
+                                        get firstElementChild() { return makeFlexChild(this._fh); },
+                                        querySelector: function() { return makeFlexChild(this._fh); },
+                                        getBoundingClientRect: function() { return { height: this._fh, width: 403, top: 0, bottom: this._fh, left: 0, right: 403 }; },
+                                        getAttribute: function(n) { return String(__h.getOuterAttr(this.id, String(n))); },
+                                        setAttribute: function() {},
+                                        removeAttribute: function() {}
+                                    };
+                                }
+                                window.getComputedStyle = function(el) {
+                                    var css = (el && el.style && el.style._css) ? el.style._css : '';
+                                    var res = { height: (el && el._fh ? el._fh : 0) + 'px' };
+                                    var re = /([a-z-]+)\s*:\s*([^;!]+)/gi, m;
+                                    while ((m = re.exec(css)) !== null) { res[m[1].trim()] = m[2].trim(); }
+                                    return res;
+                                };
+                                function Document() {}
+                                Document.prototype.write = function(html) { __h.onDocWrite(String(html)); };
+                                var document = new Document();
+                                document.documentElement = makeMockEl('HTML', '');
+                                document.body = makeMockEl('BODY', '');
+                                document.addEventListener = function() {};
+                                document.createDocumentFragment = function() { return makeMockEl('FRAG', ''); };
+                                document.createElement = function(tag) { return makeMockEl(tag, ''); };
+                                document.getElementById = function(id) {
+                                    var sid = String(id);
+                                    if (__h.hasOuterEl(sid)) return makeMockEl('SCRIPT', sid);
+                                    return null;
+                                };
+                                document.querySelectorAll = function(sel) {
+                                    var s = String(sel);
+                                    var n = Number(__h.qsaCount(s));
+                                    var arr = [];
+                                    for (var i = 0; i < n; i++) {
+                                        (function(idx) {
+                                            arr.push({
+                                                getAttribute: function(a) { return String(__h.qsaGetAttr(s, idx, String(a))); },
+                                                setAttribute: function(a, v) { __h.qsaSetAttr(s, idx, String(a), String(v)); },
+                                                removeAttribute: function(a) { __h.qsaRemoveAttr(s, idx, String(a)); }
+                                            });
+                                        })(i);
+                                    }
+                                    return arr;
+                                };
+                            """.trimIndent()
+                            cx2.evaluateString(scope2, s2Shim, "s2shim.js", 1, null)
+                            cx2.evaluateString(scope2, cs, "unpacked_s2.js", 1, null)
+                            val rhinoMs = System.currentTimeMillis() - tRhino0
+                            println("[DIAG] Rhino S2 executed in ${rhinoMs}ms! decryptedDocNull=${decryptedDoc == null}")
+                            val dDoc = decryptedDoc
+                            if (dDoc != null) {
+                                // Print scripts inside decryptedDoc (like #vault_script and cimanowtv rewriter!)
+                                dDoc.select("script").forEachIndexed { si, sc ->
+                                    val data = sc.data().trim()
+                                    if (data.isNotEmpty() && data.length < 4000) {
+                                        println("[DIAG] DECRYPTED_SCRIPT[$si] id='${sc.id()}' len=${data.length}: ${data.replace('\n', ' ').take(600)}")
+                                    }
+                                }
+                                // Execute #vault_script (or any small script calling window['_...']) in scope2!
+                                for (sc in dDoc.select("script")) {
+                                    val code = sc.data()
+                                    if (sc.id() == "vault_script" || (code.length in 10..2000 && code.contains("window["))) {
+                                        runCatching { cx2.evaluateString(scope2, code, "vault_inline.js", 1, null) }
+                                    }
+                                }
+                                val tkVal = cx2.evaluateString(scope2, "String(window.tk || '')", "tk.js", 1, null)?.toString().orEmpty()
+                                val tabs = dDoc.select("li[data-id][data-index]").map { "${it.text().trim()}:${it.attr("data-id")}@${it.attr("data-index")}" }
+                                val dls = dDoc.select("#download a[href], li[aria-label=download] a[href], li[aria-label=quality] a[href], a[href*=.mp4]").map { "${it.text().trim().take(35)} -> ${it.attr("href")}" }
+                                println("[DIAG] UNLOCKED tkLen=${tkVal.length} tk='${tkVal.take(32)}' tabs=$tabs")
+                                println("[DIAG] UNLOCKED downloads (${dls.size}):\n" + dls.joinToString("\n"))
+
+                                // Test signing & switching ALL server tabs via scope2 XMLHttpRequest + __cnBootFrame*!!
+                                val watchOrigin = java.net.URI(mintedUrl).let { "${it.scheme}://${it.host}" }
+                                for (li in dDoc.select("li[data-id][data-index]")) {
+                                    val tName = li.text().trim()
+                                    val dId = li.attr("data-id")
+                                    val dIdx = li.attr("data-index")
+                                    val rawCore = "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php?token=${java.net.URLEncoder.encode(tkVal, "UTF-8")}&action=switch&index=${java.net.URLEncoder.encode(dIdx, "UTF-8")}&id=${java.net.URLEncoder.encode(dId, "UTF-8")}"
+                                    org.mozilla.javascript.ScriptableObject.putProperty(scope2, "__rawCore", rawCore)
+                                    val signedCore = cx2.evaluateString(scope2, "(function(){ var x = new XMLHttpRequest(); x.open('GET', String(__rawCore)); return x._url; })()", "sign.js", 1, null).toString()
+                                    val cResp = CimaNowNetwork.getPage(signedCore, mintedUrl)
+                                    // Decrypt iframe via window.__cnBootFrame* in scope2!
+                                    val ifDoc = org.jsoup.Jsoup.parse(cResp?.html.orEmpty())
+                                    val ifEl = ifDoc.selectFirst("iframe")
+                                    var resolvedSrc = ifEl?.attr("src").orEmpty()
+                                    if (ifEl != null && (resolvedSrc.isBlank() || resolvedSrc.startsWith("javascript:"))) {
+                                        val ifBridge = object {
+                                            var outSrc: String = ""
+                                            fun getAttr(k: String): String? = ifEl.attributes().firstOrNull { it.key.equals(k, true) }?.value
+                                        }
+                                        org.mozilla.javascript.ScriptableObject.putProperty(scope2, "__ifb", org.mozilla.javascript.Context.javaToJS(ifBridge, scope2))
+                                        cx2.evaluateString(scope2, """
+                                            (function(){
+                                                var fakeF = {
+                                                    src: '',
+                                                    getAttribute: function(k) { var v = __ifb.getAttr(String(k)); return v === null ? null : String(v); },
+                                                    removeAttribute: function() {}
+                                                };
+                                                for (var k in window) {
+                                                    if (k.indexOf('__cnBootFrame') === 0 && typeof window[k] === 'function') {
+                                                        try { window[k](fakeF); } catch(e) {}
+                                                    }
+                                                }
+                                                __ifb.outSrc = String(fakeF.src || '');
+                                            })();
+                                        """.trimIndent(), "bootf.js", 1, null)
+                                        resolvedSrc = ifBridge.outSrc
+                                    }
+                                    println("[DIAG] LIVE TAB '$tName' (id=$dId, idx=$dIdx) -> embed='$resolvedSrc' (signed='${signedCore.takeLast(35)}')")
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            println("[DIAG] Rhino S2 ERR: ${e.javaClass.simpleName}: ${e.message}")
+                        } finally {
+                            org.mozilla.javascript.Context.exit()
+                        }
                     }
                 }
             }
