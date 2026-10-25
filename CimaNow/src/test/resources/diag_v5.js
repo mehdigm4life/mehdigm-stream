@@ -18,8 +18,8 @@ function getJson(u) {
   });
 }
 
-async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
-  const profDir = '/tmp/cn_diag5c_' + process.pid + '_' + port;
+async function runScenario(name, port, winSize, setupCdpFn, captureMidScripts) {
+  const profDir = '/tmp/cn_diag5d_' + process.pid + '_' + port;
   const args = [
     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -35,8 +35,8 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
 
   let getLinkStatus = 0;
   let getLinkBody = '';
+  let getLinkPostData = '';
   const gzipScripts = [];
-  const netErrors = [];
 
   try {
     let targets = null;
@@ -63,18 +63,21 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
       if (m.method === 'Debugger.scriptParsed') {
         const u = m.params.url || '';
         const len = m.params.length || 0;
-        if (u.includes('blog-post') && len > 4000 && len < 250000) {
+        // Capture ONLY the 55KB-57KB get-link / browser-check script!
+        if (len >= 40000 && len <= 70000 && (!u || u.includes('blog-post'))) {
           scriptIds.push({ id: m.params.scriptId, url: u, len });
         }
       }
       if (m.method === 'Network.requestWillBeSent') {
         const u = m.params.request.url || '';
-        if (u.includes('get-link.php')) glReqId = m.params.requestId;
+        if (u.includes('get-link.php')) {
+          glReqId = m.params.requestId;
+          getLinkPostData = (m.params.request.postData || '').slice(0, 300);
+        }
       }
       if (m.method === 'Network.responseReceived') {
         const u = m.params.response.url || '';
         if (u.includes('get-link.php')) getLinkStatus = m.params.response.status;
-        if (m.params.response.status >= 400) netErrors.push(m.params.response.status + ':' + u.slice(0, 100));
       }
     };
 
@@ -90,7 +93,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
 
     await send('Page.enable');
     await send('Network.enable');
-    if (captureScripts) {
+    if (captureMidScripts) {
       await send('Debugger.enable');
       await send('Debugger.setBreakpointsActive', { active: false });
     }
@@ -98,7 +101,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
 
     await send('Page.navigate', { url: shineUrl, referrer: refererUrl });
 
-    for (let ms = 0; ms < 14000; ms += 1000) {
+    for (let ms = 0; ms < 13000; ms += 1000) {
       await new Promise(r => setTimeout(r, 1000));
       if (glReqId && !getLinkBody) {
         const rb = await send('Network.getResponseBody', { requestId: glReqId });
@@ -110,12 +113,15 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
       }
     }
 
-    if (captureScripts) {
-      for (const s of scriptIds) {
+    if (captureMidScripts) {
+      // Only keep the inner Function script (or first one if only 1) so output stays < 25KB!
+      const chosen = scriptIds.slice(-1);
+      for (const s of chosen) {
         const sr = await send('Debugger.getScriptSource', { scriptId: s.id });
         const src = (sr && sr.result && sr.result.scriptSource) ? sr.result.scriptSource : '';
         if (!src) continue;
         gzipScripts.push({
+          url: s.url,
           len: src.length,
           gzB64: zlib.gzipSync(Buffer.from(src, 'utf8')).toString('base64')
         });
@@ -130,10 +136,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
           loc: location.href,
           btnHref: btn ? btn.getAttribute('href') : null,
           tsLen: (inp && inp.value) ? inp.value.length : -1,
-          bodyTxt: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 160),
-          ua: navigator.userAgent,
-          hasChrome: typeof window.chrome,
-          hasNotif: typeof window.Notification
+          bodyTxt: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 160)
         });
       })()`,
       returnByValue: true
@@ -142,7 +145,7 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
       ? JSON.parse(snap.result.result.value)
       : {};
 
-    return { name, fullVer, getLinkStatus, getLinkBody: getLinkBody.slice(0, 180), netErrors: netErrors.slice(0, 10), finalState, gzipScripts };
+    return { name, fullVer, getLinkStatus, getLinkPostData, getLinkBody: getLinkBody.slice(0, 180), finalState, gzipScripts };
   } finally {
     try { proc.kill('SIGKILL'); } catch (e) {}
     try { fs.rmSync(profDir, { recursive: true, force: true }); } catch (e) {}
@@ -152,31 +155,24 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
 (async () => {
   const out = {};
 
-  // 1. Capture gzipped Stage B scripts (56KB + 144KB)
-  out.s1_decode = await runScenario('1_DecodeStageB', 19320, '412,915', null, true);
+  // 1. Capture ONLY the 55KB get-link / browser-check script!
+  out.t1_script3 = await runScenario('1_Capture55KB', 19330, '412,915', null, true);
 
-  // 2. Native Desktop UA + Touch enabled (isolates touch/maxTouchPoints)
-  out.s2_touchOnly = await runScenario('2_TouchOnly_NativeUA', 19321, '360,800', async (send) => {
-    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  }, false);
-
-  // 3. Matched Chrome/155 Android UA + Matched Brands + Touch
-  out.s3_matchedAndroid = await runScenario('3_MatchedVerAndroid', 19322, '360,800', async (send, major, full) => {
-    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-    await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 2, mobile: true });
+  // 2. Matched-version default Android WebView UA + Android WebView brands
+  out.t2_matchedWvDefault = await runScenario('2_MatchedWvDefault', 19331, '360,800', async (send, major, full) => {
     await send('Emulation.setUserAgentOverride', {
-      userAgent: `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Mobile Safari/537.36`,
-      platform: 'Linux armv8l',
+      userAgent: `Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/${full} Mobile Safari/537.36`,
+      platform: 'Linux armv81',
       userAgentMetadata: {
         brands: [
-          { brand: 'Google Chrome', version: major },
+          { brand: 'Not(A:Brand', version: '8' },
           { brand: 'Chromium', version: major },
-          { brand: 'Not(A:Brand', version: '24' }
+          { brand: 'Android WebView', version: major }
         ],
         fullVersionList: [
-          { brand: 'Google Chrome', version: full },
+          { brand: 'Not(A:Brand', version: '8.0.0.0' },
           { brand: 'Chromium', version: full },
-          { brand: 'Not(A:Brand', version: '24.0.0.0' }
+          { brand: 'Android WebView', version: full }
         ],
         platform: 'Android',
         platformVersion: '14.0.0',
@@ -187,26 +183,29 @@ async function runScenario(name, port, winSize, setupCdpFn, captureScripts) {
     });
   }, false);
 
-  // 4. Desktop Windows UA with MATCHED Chrome/155 + empty low-entropy brands (what Android WebView sends when userAgentString = Windows Chrome/150!)
-  out.s4_matchedDesktopUaEmptyBrands = await runScenario('4_MatchedDesktopUa_EmptyBrands', 19323, '360,800', async (send, major) => {
-    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  // 3. Test Emulation.setUserAgentOverride with IDENTICAL Linux Desktop UA (isolates whether CDP setUserAgentOverride itself is detected!)
+  out.t3_cdpSameDesktopUa = await runScenario('3_CdpSameDesktopUa', 19332, '412,915', async (send, major, full) => {
     await send('Emulation.setUserAgentOverride', {
-      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+      userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+      platform: 'Linux x86_64',
       userAgentMetadata: {
-        brands: [],
-        platform: '',
-        platformVersion: '',
-        architecture: '',
+        brands: [
+          { brand: 'Not(A:Brand', version: '8' },
+          { brand: 'Chromium', version: major },
+          { brand: 'Google Chrome', version: major }
+        ],
+        fullVersionList: [
+          { brand: 'Not(A:Brand', version: '8.0.0.0' },
+          { brand: 'Chromium', version: full },
+          { brand: 'Google Chrome', version: full }
+        ],
+        platform: 'Linux',
+        platformVersion: '6.8.0',
+        architecture: 'x86',
         model: '',
-        mobile: false
+        mobile: false,
+        bitness: '64'
       }
-    });
-  }, false);
-
-  // 5. Simulate Android WebView globals (`delete window.chrome; delete window.Notification`) with Desktop UA
-  out.s5_noWinChromeNoNotif = await runScenario('5_NoWinChromeNoNotif', 19324, '360,800', async (send) => {
-    await send('Page.addScriptToEvaluateOnNewDocument', {
-      source: 'try { delete window.chrome; delete window.Notification; } catch(e) {}'
     });
   }, false);
 
