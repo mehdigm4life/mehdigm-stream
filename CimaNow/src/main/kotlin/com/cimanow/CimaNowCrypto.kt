@@ -865,9 +865,10 @@ object CimaNowCrypto {
                         get lastElementChild() { return makeFlexChild(this._fh); },
                         get children() { var c = makeFlexChild(this._fh); return [c, c]; },
                         get childNodes() { var c = makeFlexChild(this._fh); return [c, c]; },
-                        querySelector: function() { return makeFlexChild(this._fh); },
+                        querySelector: function() { return this._fh > 0 ? makeFlexChild(this._fh) : null; },
                         querySelectorAll: function(sel) {
-                            return this._isVaultRoot ? document.querySelectorAll(sel) : [makeFlexChild(this._fh)];
+                            if (this._isVaultRoot) return __rawDocQSA(sel);
+                            return this._fh > 0 ? [makeFlexChild(this._fh)] : [];
                         },
                         getElementsByTagName: function() { return []; },
                         getBoundingClientRect: function() { return { height: this._fh, width: 403, top: 0, bottom: this._fh, left: 0, right: 403 }; },
@@ -893,33 +894,83 @@ object CimaNowCrypto {
                         setAttribute: function(a, v) { __h.elSetAttr(jEl, String(a), String(v)); },
                         removeAttribute: function(a) { __h.elRemoveAttr(jEl, String(a)); },
                         hasAttribute: function(a) { return Boolean(__h.elHasAttr(jEl, String(a))); },
+                        querySelectorAll: function() { return []; },
+                        querySelector: function() { return null; },
+                        getElementsByTagName: function() { return []; },
                         set src(v) { __h.elSetAttr(jEl, 'src', String(v)); },
                         get src() { var v = __h.elGetAttr(jEl, 'src'); return v === null ? '' : String(v); },
                         set href(v) { __h.elSetAttr(jEl, 'href', String(v)); },
                         get href() { var v = __h.elGetAttr(jEl, 'href'); return v === null ? '' : String(v); }
                     };
                 }
-                function Document() {}
-                Document.prototype.write = function(html) { __h.onDocWrite(String(html)); };
-                var document = new Document();
-                document.documentElement = makeMockEl('HTML', '');
-                document.body = makeMockEl('BODY', '');
-                document.addEventListener = function() {};
-                document.createDocumentFragment = function() { return makeMockEl('FRAG', ''); };
-                document.createElement = function(tag) { return makeMockEl(tag, ''); };
-                document.getElementById = function(id) {
-                    var sid = String(id);
-                    if (__h.hasOuterEl(sid)) return makeMockEl('SCRIPT', sid);
-                    return null;
-                };
-                document.querySelectorAll = function(sel) {
+                function EventTarget() {}
+                EventTarget.prototype.addEventListener = function() {};
+                EventTarget.prototype.removeEventListener = function() {};
+                function Node() {}
+                Node.prototype = new EventTarget();
+                Node.prototype.appendChild = function(c) { return c; };
+                Node.prototype.removeChild = function(c) { return c; };
+                Node.prototype.insertBefore = function(c) { return c; };
+                Node.prototype.replaceChild = function(n) { return n; };
+                function Element() {}
+                Element.prototype = new Node();
+                Element.prototype.querySelectorAll = function() { return []; };
+                Element.prototype.querySelector = function() { return null; };
+                Element.prototype.getElementsByTagName = function() { return []; };
+                Element.prototype.getAttribute = function() { return null; };
+                Element.prototype.setAttribute = function() {};
+                Element.prototype.removeAttribute = function() {};
+                Element.prototype.hasAttribute = function() { return false; };
+                Element.prototype.closest = function() { return null; };
+                function HTMLElement() {}
+                HTMLElement.prototype = new Element();
+                function HTMLIFrameElement() {}
+                HTMLIFrameElement.prototype = new HTMLElement();
+                function HTMLAnchorElement() {}
+                HTMLAnchorElement.prototype = new HTMLElement();
+                function HTMLScriptElement() {}
+                HTMLScriptElement.prototype = new HTMLElement();
+                window.EventTarget = EventTarget;
+                window.Node = Node;
+                window.Element = Element;
+                window.HTMLElement = HTMLElement;
+                window.HTMLIFrameElement = HTMLIFrameElement;
+                window.HTMLAnchorElement = HTMLAnchorElement;
+                window.HTMLScriptElement = HTMLScriptElement;
+
+                function __rawDocQSA(sel) {
                     var jArr = __h.qsaSnapshot(String(sel));
                     var out = [];
                     for (var i = 0; i < jArr.length; i++) {
                         out.push(wrapJsoupEl(jArr[i]));
                     }
                     return out;
+                }
+                function Document() {}
+                Document.prototype = new Node();
+                Document.prototype.write = function(html) { __h.onDocWrite(String(html)); };
+                Document.prototype.addEventListener = function() {};
+                Document.prototype.createDocumentFragment = function() { return makeMockEl('FRAG', ''); };
+                Document.prototype.createElement = function(tag) { return makeMockEl(tag, ''); };
+                Document.prototype.getElementById = function(id) {
+                    var sid = String(id);
+                    if (__h.hasOuterEl(sid)) return makeMockEl('SCRIPT', sid);
+                    return null;
                 };
+                Document.prototype.querySelectorAll = function(sel) { return __rawDocQSA(sel); };
+                Document.prototype.querySelector = function(sel) {
+                    var r = __rawDocQSA(sel);
+                    return r.length > 0 ? r[0] : null;
+                };
+                Document.prototype.getElementsByTagName = function(tag) { return __rawDocQSA(String(tag)); };
+                window.Document = Document;
+                window.HTMLDocument = Document;
+
+                var document = new Document();
+                document.documentElement = makeMockEl('HTML', '');
+                document.head = makeMockEl('HEAD', '');
+                document.body = makeMockEl('BODY', '');
+                window.document = document;
             """.trimIndent()
 
             cx.evaluateString(scope, s2Shim, "s2_shim.js", 1, null)
@@ -930,7 +981,7 @@ object CimaNowCrypto {
             }
 
             val dDoc = bridge.decryptedDoc ?: run {
-                vaultDebugLogger?.invoke("decryptedDoc is NULL! s2Len=${s2Code.length}\n--- S2 HEAD ---\n${s2Code.take(5500)}\n--- S2 TAIL ---\n${s2Code.takeLast(5500)}")
+                vaultDebugLogger?.invoke("decryptedDoc is NULL! s2Len=${s2Code.length}")
                 return null
             }
 

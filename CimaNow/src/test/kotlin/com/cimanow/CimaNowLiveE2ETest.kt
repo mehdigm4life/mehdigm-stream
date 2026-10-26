@@ -85,9 +85,26 @@ class CimaNowLiveE2ETest {
         val sampleIframeV14 = """<iframe src="javascript:void(0);" data-vx="$vxEncoded"></iframe>"""
         assertEquals(targetEmbed, CimaNowCrypto.decodeCnBootFrame(sampleIframeV14, coreTok))
 
-        // 5. Full Rhino V13 `/watching/` sandbox (`unlockWatchingVault` + snapshot `querySelectorAll` + XHR signer + `__cnBootFrame*`)
+        // 5. Full Rhino V14+ `/watching/` sandbox (`unlockWatchingVault` + `Document.prototype`/`Element.prototype` `_isBadQS` hooks + XHR signer + `__cnBootFrame*`)
         val mockS2 = """
             (function(){
+                var _nWrite = Document.prototype.write;
+                var _emptyQSA = document.createDocumentFragment().querySelectorAll('x');
+                var _origQSA = Document.prototype.querySelectorAll;
+                var _origQS = Document.prototype.querySelector;
+                var _origGTN = Document.prototype.getElementsByTagName;
+                var _origEQSA = Element.prototype.querySelectorAll;
+                var _origEQS = Element.prototype.querySelector;
+                Document.prototype.querySelectorAll = function(a) {
+                    if (typeof a === 'string' && (a.indexOf('a[href]') !== -1 || a.indexOf('#download') !== -1)) return _emptyQSA;
+                    return _origQSA.apply(this, arguments);
+                };
+                Document.prototype.getElementsByTagName = function(a) {
+                    if (a && a.toLowerCase() === 'iframe') return _emptyQSA;
+                    return _origGTN.apply(this, arguments);
+                };
+                var _nOPD = Object.getOwnPropertyDescriptor;
+                if (window.Object && _nOPD) { _nOPD(window.Element.prototype, 'outerHTML'); }
                 var _liveTk = '';
                 window.__cnBootFrameV99 = function(f) {
                     var b = f.getAttribute('data-cnb');

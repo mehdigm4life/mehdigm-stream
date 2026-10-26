@@ -1144,9 +1144,10 @@ object CimaNowGatewaySolver {
                         val jsOut = withContext(Dispatchers.Main) {
                             val wv = webViewRef ?: return@withContext ""
                             val nextIdx = clickedTabUpTo + 1
-                            // Anti-tamper-safe DOM reader: avoids `JSON.stringify` and `getAttribute`
-                            // (both hooked by `cnV14Ultra`), reads `.src` and `.href` properties directly
-                            // (preserving `#fragment` on UpnShare), and computes `visualViewport` tap coords.
+                            // Anti-tamper-safe DOM tree walker: avoids `querySelectorAll`, `querySelector`,
+                            // `getElementsByTagName`, `getAttribute`, `innerHTML`/`outerHTML`, and `JSON.stringify`
+                            // (ALL hooked by CimaNow's `cnV14Ultra+` vault!), walking C++ sibling pointers
+                            // (`lastElementChild` / `previousElementSibling`) and reading `.src` / `.href` directly.
                             evalJsSuspend(
                                 wv,
                                 """
@@ -1158,14 +1159,29 @@ object CimaNowGatewaySolver {
                                         var vox = (vv && vv.offsetLeft) ? vv.offsetLeft : 0;
                                         var voy = (vv && vv.offsetTop) ? vv.offsetTop : 0;
                                         var lines = [];
-                                        var ifs = document.getElementsByTagName('iframe');
+                                        var ifs = [], as = [], rawLis = [];
+                                        var rootNode = document.body || document.documentElement;
+                                        var stack = rootNode ? [rootNode] : [];
+                                        while (stack.length > 0) {
+                                            var node = stack.pop();
+                                            var tn = String(node.tagName || '').toUpperCase();
+                                            if (tn === 'IFRAME') ifs.push(node);
+                                            else if (tn === 'A') as.push(node);
+                                            else if (tn === 'LI') {
+                                                var wp = node.parentElement;
+                                                for (var wd = 0; wd < 5 && wp; wd++, wp = wp.parentElement) {
+                                                    if (String(wp.id || '') === 'watch') { rawLis.push(node); break; }
+                                                }
+                                            }
+                                            var ch = node.lastElementChild;
+                                            while (ch) { stack.push(ch); ch = ch.previousElementSibling; }
+                                        }
                                         for (var i = 0; i < ifs.length; i++) {
                                             var s = String(ifs[i].src || '');
                                             if (s.indexOf('http') === 0 || s.indexOf('//') === 0) {
                                                 lines.push('IF|' + s.replace(/[\r\n]+/g, ''));
                                             }
                                         }
-                                        var as = document.getElementsByTagName('a');
                                         for (var j = 0; j < as.length; j++) {
                                             var hr = String(as[j].href || '');
                                             if ((hr.indexOf('http') === 0 || hr.indexOf('//') === 0) && hr.indexOf('javascript:') !== 0) {
@@ -1182,8 +1198,6 @@ object CimaNowGatewaySolver {
                                                 }
                                             }
                                         }
-                                        var watchRoot = document.getElementById('watch');
-                                        var rawLis = watchRoot ? watchRoot.getElementsByTagName('li') : [];
                                         var lis = [];
                                         for (var k = 0; k < rawLis.length; k++) {
                                             var el = rawLis[k];
@@ -1193,7 +1207,7 @@ object CimaNowGatewaySolver {
                                             if (String(ds.id || '') === '00' || String(ds.index || '') === '00') continue;
                                             if (el.offsetWidth <= 2 && el.offsetHeight <= 2) continue;
                                             var txt = String(el.textContent || '').trim();
-                                            if (!txt && el.children.length === 0) continue;
+                                            if (!txt && (!el.children || el.children.length === 0)) continue;
                                             lis.push(el);
                                         }
                                         var clicked = -1;
