@@ -82,7 +82,7 @@ object CimaNowGatewaySolver {
 
     private data class CachedToken(val mintedWatchingUrl: String, val expiresAtMs: Long)
 
-    private data class CssTapTarget(
+    internal data class CssTapTarget(
         val cssX: Float,
         val cssY: Float,
         val viewportW: Float,

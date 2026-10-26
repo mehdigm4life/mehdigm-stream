@@ -303,7 +303,7 @@ object CimaNowExtractors {
         // bound to the device's residential IP and native WebView User-Agent/CookieManager.
         // Never waste 30s replaying a device-IP-minted `?token=` across foreign SOCKS5 proxies
         // or poisoning `directBlockedUntilMs` — fall through directly to native V8 WebView if needed!
-        if (Build.VERSION.SDK_INT > 0 && !CimaNowNetwork.isDirectCurrentlyBlocked()) {
+        if (android.os.Build.VERSION.SDK_INT > 0 && !CimaNowNetwork.isDirectCurrentlyBlocked()) {
             return try {
                 decodeWatchingWithSession(
                     session = CimaNowNetwork.newDirectSession(),
@@ -897,8 +897,8 @@ object CimaNowExtractors {
                 .header("User-Agent", DESKTOP_UA)
                 .header("Accept", "*/*")
                 .header("Accept-Language", "en-US,en;q=0.5")
-                .header("Referer", "$embedOrigin/e/$code")
-                .header("x-embed-parent", CimaNowNetwork.encodeUrl(referer ?: "${CimaNowNetwork.mainUrl}/"))
+                .header("Referer", embedPageUrl)
+                .header("x-embed-parent", parentFrameUrl)
                 .build()
             val txt = CimaNowNetwork.directNoProxyClient.newCall(getReq).execute().use {
                 if (it.isSuccessful) it.body?.string().orEmpty() else ""
