@@ -48,6 +48,29 @@
         "description": "موقع انمي زد — مشاهدة وتحميل أفلام ومسلسلات الأنمي والكرتون المدبلج والمترجم."
     },
     {
+        "iconUrl": "https://cartoony.net/assets/img/logo.webp?brand=main",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+        "fileSize": 48748,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "TvSeries",
+            "Movie",
+            "Cartoon"
+        ],
+        "version": 2,
+        "internalName": "Cartoony",
+        "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Cartoony.cs3",
+        "name": "كرتوني (Cartoony)",
+        "description": "موقع كرتوني — كرتون وأنمي وأفلام ومسلسلات عربية."
+    },
+    {
         "iconUrl": "https://static.faselhdcdn.com/wp-content/uploads/2022/06/logo-1.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
@@ -132,29 +155,6 @@
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CartoonAnime.cs3",
         "name": "مسلسلات كرتون وأنمي (CartoonAnime)",
         "description": "مسلسلات كرتون وأنمي — مسلسلات وأفلام الكرتون والأنمي المترجمة والمدبلجة."
-    },
-    {
-        "iconUrl": "https://cartoony.net/assets/img/logo.webp?brand=main",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 48748,
-        "status": 1,
-        "language": "ar",
-        "authors": [
-            "mehdigm4life"
-        ],
-        "tvTypes": [
-            "Anime",
-            "AnimeMovie",
-            "TvSeries",
-            "Movie",
-            "Cartoon"
-        ],
-        "version": 2,
-        "internalName": "Cartoony",
-        "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Cartoony.cs3",
-        "name": "كرتوني (Cartoony)",
-        "description": "موقع كرتوني — كرتون وأنمي وأفلام ومسلسلات عربية."
     },
     {
         "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/CimaCloud.png",
