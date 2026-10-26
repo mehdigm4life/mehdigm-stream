@@ -277,6 +277,7 @@ class CimaNowLiveE2ETest {
 
         val api = CimaNow()
         CimaNowExtractors.debugLogger = { println("    [E2E][Trace] $it") }
+        CimaNowCrypto.vaultDebugLogger = { println("    [E2E][VaultDbg] $it") }
 
         // ── 1. Verify Catalogs & Pagination ──────────────────────────────────
         val shelvesToCheck = listOf(

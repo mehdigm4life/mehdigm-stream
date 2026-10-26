@@ -600,6 +600,9 @@ object CimaNowCrypto {
 
     // ── 4. Version-Agnostic Rhino `/watching/` Vault Sandbox (V12, V13, V14+) ─
 
+    @Volatile
+    var vaultDebugLogger: ((String) -> Unit)? = null
+
     fun unlockWatchingVault(rawHtml: String): WatchingVaultHandle? {
         unlockWatchingVaultRhino(rawHtml)?.let { return it }
         val legacy = decodeWatchingVaultStaticV12(rawHtml) ?: return null
@@ -758,7 +761,14 @@ object CimaNowCrypto {
     private fun unlockWatchingVaultRhino(rawHtml: String): WatchingVaultHandle? {
         if (rawHtml.length < 512) return null
         val outerDoc = Jsoup.parse(rawHtml)
-        val s2Code = unpackWatchingBootstrapRhino(outerDoc) ?: return null
+        val s2Code = unpackWatchingBootstrapRhino(outerDoc) ?: run {
+            val scriptsSummary = outerDoc.select("script").joinToString(" | ") { s ->
+                "id=${s.id()} type=${s.attr("type")} dataLen=${s.data().length} attrs=${s.attributes().map { "${it.key}:${it.value.length}" }}"
+            }
+            val bootCode = outerDoc.select("script").firstOrNull { it.data().isNotBlank() }?.data()?.take(2500).orEmpty()
+            vaultDebugLogger?.invoke("unpackWatchingBootstrapRhino NULL! scripts=[$scriptsSummary]\nbootCode=$bootCode")
+            return null
+        }
 
         val bridge = RhinoWatchingBridge(outerDoc)
         val rhinoLock = Any()
@@ -913,9 +923,16 @@ object CimaNowCrypto {
             """.trimIndent()
 
             cx.evaluateString(scope, s2Shim, "s2_shim.js", 1, null)
-            cx.evaluateString(scope, s2Code, "s2_vault.js", 1, null)
+            try {
+                cx.evaluateString(scope, s2Code, "s2_vault.js", 1, null)
+            } catch (e: Throwable) {
+                vaultDebugLogger?.invoke("s2_vault error: ${e.javaClass.simpleName}: ${e.message}")
+            }
 
-            val dDoc = bridge.decryptedDoc ?: return null
+            val dDoc = bridge.decryptedDoc ?: run {
+                vaultDebugLogger?.invoke("decryptedDoc is NULL! s2Len=${s2Code.length}\n--- S2 HEAD ---\n${s2Code.take(5500)}\n--- S2 TAIL ---\n${s2Code.takeLast(5500)}")
+                return null
+            }
 
             // Snapshot window keys before running inline #vault_script so any newly registered
             // zero-arg token getter (e.g. _getCoreToken or any future renamed getter) is found automatically!

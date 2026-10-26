@@ -319,8 +319,15 @@ object CimaNowExtractors {
             }
         }
 
+        var alreadyFetchedNonBlockedHtml = false
         return CimaNowNetwork.withStickySession { session ->
-            decodeWatchingWithSession(session, mintedUrl, gatewayVaultReferer, rawHtmlHolder)
+            if (alreadyFetchedNonBlockedHtml) return@withStickySession null
+            val res = decodeWatchingWithSession(session, mintedUrl, gatewayVaultReferer, rawHtmlHolder)
+            if (res == null && rawHtmlHolder?.get(0) != null) {
+                // HTTP 200 succeeded with valid non-blocked HTML; do not waste 8 SOCKS5 retries on a local JS parse miss
+                alreadyFetchedNonBlockedHtml = true
+            }
+            res
         }
     }
 
