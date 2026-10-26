@@ -385,7 +385,7 @@ class CimaNowLiveE2ETest {
         assertTrue("Expected at least 1 live playable stream (200/206) on series episode", anyEpPlayable)
 
         // Verify CS3IPlayer Cronet HTTP/2 header cleanliness across all emitted links
-        for (lnk in bkLinks + mvLinks + epLinks) {
+        for (lnk in bkLinks + movieLinks + epLinks) {
             val cs3Merged = mapOf("referer" to lnk.referer) + lnk.headers
             val refKeyCount = cs3Merged.keys.count { it.equals("referer", ignoreCase = true) }
             assertTrue("Expected <= 1 referer key in CS3IPlayer merged headers for ${lnk.name}, got ${cs3Merged.keys}", refKeyCount <= 1)
