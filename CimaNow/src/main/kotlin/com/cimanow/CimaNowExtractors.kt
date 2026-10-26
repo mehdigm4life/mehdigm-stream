@@ -224,69 +224,103 @@ object CimaNowExtractors {
         }
     }
 
+    private suspend fun decodeWatchingWithSession(
+        session: CimaNowNetwork.StickyHttpSession,
+        mintedUrl: String,
+        gatewayVaultReferer: String,
+        rawHtmlHolder: Array<String?>? = null,
+    ): UnlockedSources? {
+        val pTag = session.proxySpec ?: "direct"
+        val (wCode, watchHtml) = session.getText(
+            url = mintedUrl,
+            referer = gatewayVaultReferer,
+        ) ?: run {
+            debugLogger?.invoke("[$pTag] watching fetch null")
+            throw CimaNowNetwork.CimaBlockedException("watching network error")
+        }
+        if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) {
+            debugLogger?.invoke("[$pTag] watching blocked code=$wCode len=${watchHtml.length}")
+            throw CimaNowNetwork.CimaBlockedException("watching blocked HTTP $wCode")
+        }
+
+        if (rawHtmlHolder != null && watchHtml.length > 2_000) {
+            rawHtmlHolder[0] = watchHtml
+        }
+
+        val vault = CimaNowCrypto.unlockWatchingVault(watchHtml) ?: run {
+            debugLogger?.invoke("[$pTag] unlockWatchingVault null (watchLen=${watchHtml.length})")
+            return null
+        }
+        val decoded = vault.decoded
+        debugLogger?.invoke(
+            "[$pTag] unlocked watching! initial=${decoded.initialEmbedUrl != null} tabs=${decoded.serverTabs.size} downloads=${decoded.downloads.size} coreTokLen=${decoded.coreToken.length}",
+        )
+
+        val watchOrigin = originOf(mintedUrl)
+        val embeds = ArrayList<Pair<String, String>>()
+        decoded.initialEmbedUrl?.let { embeds.add("Default" to it) }
+
+        if (decoded.coreToken.isNotBlank() && decoded.serverTabs.isNotEmpty()) {
+            val switched = coroutineScope {
+                val tabSem = Semaphore(5)
+                decoded.serverTabs.map { tab ->
+                    async(Dispatchers.IO) {
+                        tabSem.withPermit {
+                            val encTok = URLEncoder.encode(decoded.coreToken, "UTF-8")
+                            val encIdx = URLEncoder.encode(tab.dataIndex, "UTF-8")
+                            val encId = URLEncoder.encode(tab.dataId, "UTF-8")
+                            val rawCoreUrl =
+                                "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
+                                    "?token=$encTok&action=switch&index=$encIdx&id=$encId"
+                            val signedCoreUrl = vault.signCoreSwitchUrl(rawCoreUrl, tab)
+                            val resp = session.getText(
+                                url = signedCoreUrl,
+                                referer = mintedUrl,
+                                extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
+                            ) ?: return@withPermit null
+                            if (resp.first !in 200..299) return@withPermit null
+                            val iframeUrl = vault.decodeCoreIframe(resp.second) ?: return@withPermit null
+                            tab.name to iframeUrl
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            embeds.addAll(switched)
+        }
+
+        if (embeds.isEmpty() && decoded.downloads.isEmpty()) return null
+        debugLogger?.invoke("[$pTag] watchEmbeds=${embeds.map { "${it.first}:${it.second.take(70)}" }}")
+        debugLogger?.invoke("[$pTag] downloads=${decoded.downloads.map { "${it.label}:${it.url.take(70)}" }}")
+        return UnlockedSources(mintedUrl, embeds, decoded.downloads)
+    }
+
     private suspend fun fetchAndDecodeWatchingUrl(
         mintedUrl: String,
         gatewayVaultReferer: String,
+        rawHtmlHolder: Array<String?>? = null,
     ): UnlockedSources? {
+        // On real Android devices where direct residential connectivity is active, `?token=` is
+        // bound to the device's residential IP and native WebView User-Agent/CookieManager.
+        // Never waste 30s replaying a device-IP-minted `?token=` across foreign SOCKS5 proxies
+        // or poisoning `directBlockedUntilMs` — fall through directly to native V8 WebView if needed!
+        if (Build.VERSION.SDK_INT > 0 && !CimaNowNetwork.isDirectCurrentlyBlocked()) {
+            return try {
+                decodeWatchingWithSession(
+                    session = CimaNowNetwork.newDirectSession(),
+                    mintedUrl = mintedUrl,
+                    gatewayVaultReferer = gatewayVaultReferer,
+                    rawHtmlHolder = rawHtmlHolder,
+                )
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                logExtInfo("direct watching fetch fell through to V8 WebView: ${t.message}")
+                null
+            }
+        }
+
         return CimaNowNetwork.withStickySession { session ->
-            val pTag = session.proxySpec ?: "direct"
-            val (wCode, watchHtml) = session.getText(
-                url = mintedUrl,
-                referer = gatewayVaultReferer,
-            ) ?: run {
-                debugLogger?.invoke("[$pTag] watching fetch null")
-                throw CimaNowNetwork.CimaBlockedException("watching network error")
-            }
-            if (CimaNowNetwork.isCimaBlocked(wCode, watchHtml)) {
-                debugLogger?.invoke("[$pTag] watching blocked code=$wCode len=${watchHtml.length}")
-                throw CimaNowNetwork.CimaBlockedException("watching blocked HTTP $wCode")
-            }
-
-            val vault = CimaNowCrypto.unlockWatchingVault(watchHtml) ?: run {
-                debugLogger?.invoke("[$pTag] unlockWatchingVault null (watchLen=${watchHtml.length})")
-                return@withStickySession null
-            }
-            val decoded = vault.decoded
-            debugLogger?.invoke(
-                "[$pTag] unlocked watching! initial=${decoded.initialEmbedUrl != null} tabs=${decoded.serverTabs.size} downloads=${decoded.downloads.size} coreTokLen=${decoded.coreToken.length}",
-            )
-
-            val watchOrigin = originOf(mintedUrl)
-            val embeds = ArrayList<Pair<String, String>>()
-            decoded.initialEmbedUrl?.let { embeds.add("Default" to it) }
-
-            if (decoded.coreToken.isNotBlank() && decoded.serverTabs.isNotEmpty()) {
-                val switched = coroutineScope {
-                    val tabSem = Semaphore(5)
-                    decoded.serverTabs.map { tab ->
-                        async(Dispatchers.IO) {
-                            tabSem.withPermit {
-                                val encTok = URLEncoder.encode(decoded.coreToken, "UTF-8")
-                                val encIdx = URLEncoder.encode(tab.dataIndex, "UTF-8")
-                                val encId = URLEncoder.encode(tab.dataId, "UTF-8")
-                                val rawCoreUrl =
-                                    "$watchOrigin/wp-content/themes/Cima%20Now%20New/core.php" +
-                                        "?token=$encTok&action=switch&index=$encIdx&id=$encId"
-                                val signedCoreUrl = vault.signCoreSwitchUrl(rawCoreUrl, tab)
-                                val resp = session.getText(
-                                    url = signedCoreUrl,
-                                    referer = mintedUrl,
-                                    extraHeaders = mapOf("X-Requested-With" to "XMLHttpRequest"),
-                                ) ?: return@withPermit null
-                                if (resp.first !in 200..299) return@withPermit null
-                                val iframeUrl = vault.decodeCoreIframe(resp.second) ?: return@withPermit null
-                                tab.name to iframeUrl
-                            }
-                        }
-                    }.awaitAll().filterNotNull()
-                }
-                embeds.addAll(switched)
-            }
-
-            if (embeds.isEmpty() && decoded.downloads.isEmpty()) return@withStickySession null
-            debugLogger?.invoke("[$pTag] watchEmbeds=${embeds.map { "${it.first}:${it.second.take(70)}" }}")
-            debugLogger?.invoke("[$pTag] downloads=${decoded.downloads.map { "${it.label}:${it.url.take(70)}" }}")
-            UnlockedSources(mintedUrl, embeds, decoded.downloads)
+            decodeWatchingWithSession(session, mintedUrl, gatewayVaultReferer, rawHtmlHolder)
         }
     }
 
@@ -320,24 +354,31 @@ object CimaNowExtractors {
         var mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
         logExtInfo("mintWatchingUrl cached=$wasTokenCached ok=${!mintedUrl.isNullOrBlank()} ms=${System.currentTimeMillis() - tMint0}")
         if (!mintedUrl.isNullOrBlank()) {
-            fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
+            val rawHtmlHolder = arrayOfNulls<String>(1)
+            fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer, rawHtmlHolder)?.let { unlocked ->
                 unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
                 return unlocked
             }
             if (wasTokenCached) {
                 CimaNowGatewaySolver.invalidateWatchingUrl(effectiveItemUrl)
+                rawHtmlHolder[0] = null
                 mintedUrl = CimaNowGatewaySolver.mintWatchingUrl(gwEntry, effectiveItemUrl)
                 if (!mintedUrl.isNullOrBlank()) {
-                    fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer)?.let { unlocked ->
+                    fetchAndDecodeWatchingUrl(mintedUrl, vaultReferer, rawHtmlHolder)?.let { unlocked ->
                         unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
                         return unlocked
                     }
                 }
             }
-            // Layer-2 Future-Proof Fallback: if Rhino/OkHttp could not unlock `/watching/`,
-            // open `mintedUrl` directly inside Android WebView's native V8 engine.
+            // Layer-2 Native V8 Fallback: if Rhino/OkHttp could not unlock `/watching/`,
+            // render `/watching/` inside Android WebView's real V8 engine (using `rawHtmlHolder[0]`
+            // via `loadDataWithBaseURL` if HTML was already fetched so single-use tokens aren't re-consumed).
             if (!mintedUrl.isNullOrBlank()) {
-                val wvFallback = CimaNowGatewaySolver.extractWatchingSourcesViaWebView(mintedUrl, vaultReferer)
+                val wvFallback = CimaNowGatewaySolver.extractWatchingSourcesViaWebView(
+                    mintedWatchingUrl = mintedUrl,
+                    refererUrl = vaultReferer,
+                    preloadedWatchHtml = rawHtmlHolder[0],
+                )
                 if (wvFallback != null) {
                     val unlocked = UnlockedSources(mintedUrl, wvFallback.watchEmbeds, wvFallback.downloads)
                     unlockedSourcesCache[itemKey] = (System.currentTimeMillis() + UNLOCKED_CACHE_TTL_MS) to unlocked
@@ -480,6 +521,21 @@ object CimaNowExtractors {
             (cleanPath.endsWith(".mp4") || cleanPath.endsWith(".mkv"))
     }
 
+    // Normalizes `Referer` -> lowercase `referer` so CloudStream's `CS3IPlayer`
+    // (`mapOf("referer" to link.referer) + link.headers`) never sends duplicate
+    // mixed-case `referer` + `Referer` headers to `CronetDataSource` over HTTP/2/QUIC.
+    internal fun playerHeaders(headers: Map<String, String>): Map<String, String> {
+        val out = LinkedHashMap<String, String>(headers.size)
+        for ((k, v) in headers) {
+            if (k.equals("Referer", ignoreCase = true)) {
+                out["referer"] = v
+            } else {
+                out[k] = v
+            }
+        }
+        return out
+    }
+
     // ── Host 1: Direct CimaNow MP4 (`reva.cimanowtv.com`) ────────────────────
 
     private suspend fun emitDirectMp4(
@@ -491,9 +547,11 @@ object CimaNowExtractors {
         val encoded = CimaNowNetwork.encodeUrl(url)
         val qual = qualityHint ?: detectQualityInt("$labelHint $url")
         val ref = "${CimaNowNetwork.mainUrl}/"
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to ref,
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to DESKTOP_UA,
+                "referer" to ref,
+            ),
         )
         callback(
             newExtractorLink("CimaNow Direct", "CimaNow Direct [MP4]", encoded, ExtractorLinkType.VIDEO) {
@@ -530,9 +588,11 @@ object CimaNowExtractors {
 
         if (!location.startsWith("http") || location.contains("security_check", true)) return@withContext
         val qual = qualityHint ?: detectQualityInt("$labelHint $location")
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to "https://vk.com/",
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to DESKTOP_UA,
+                "referer" to "https://vk.com/",
+            ),
         )
         callback(
             newExtractorLink("VK Direct", "VK Direct [MP4]", location, ExtractorLinkType.VIDEO) {
@@ -617,9 +677,11 @@ object CimaNowExtractors {
         }
 
         val qual = qualityHint ?: detectQualityInt(finalMp4Url)
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to "$origin/",
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to DESKTOP_UA,
+                "referer" to "$origin/",
+            ),
         )
         callback(
             newExtractorLink("Jetload", "Jetload [MP4]", CimaNowNetwork.encodeUrl(finalMp4Url), ExtractorLinkType.VIDEO) {
@@ -827,6 +889,25 @@ object CimaNowExtractors {
             put("X-Embed-Parent", parentFrameUrl)
             if (parentReferer.startsWith("http")) put("X-Embed-Referer", CimaNowNetwork.encodeUrl(parentReferer))
         }
+
+        // Fast-path 1: Official CloudStream `ByseSX` lightweight GET `/api/videos/$code/embed/playback`
+        val fastGetPb = runCatching {
+            val getReq = Request.Builder()
+                .url("$embedOrigin/api/videos/$code/embed/playback")
+                .header("User-Agent", DESKTOP_UA)
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Referer", "$embedOrigin/e/$code")
+                .header("x-embed-parent", CimaNowNetwork.encodeUrl(referer ?: "${CimaNowNetwork.mainUrl}/"))
+                .build()
+            val txt = CimaNowNetwork.directNoProxyClient.newCall(getReq).execute().use {
+                if (it.isSuccessful) it.body?.string().orEmpty() else ""
+            }
+            val root = CimaNowCrypto.safeJsonObject(txt)
+            val pb = root?.optJSONObject("playback") ?: if (root?.has("payload") == true) root else null
+            pb?.takeIf { it.optString("payload").isNotBlank() }
+        }.getOrNull()
+        if (fastGetPb != null) return@runCatching fastGetPb
 
         val settings = runCatching {
             val req = Request.Builder().url("$embedOrigin/api/videos/$code/embed/settings")
@@ -1205,20 +1286,44 @@ object CimaNowExtractors {
         url: String,
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val html = fetchText(
-            url,
-            mapOf(
-                "User-Agent" to DESKTOP_UA,
-                "Referer" to "https://vk.ru/",
-                "Accept-Language" to "en-US,en;q=0.9",
-            ),
-        ) ?: return@withContext
+        val vkFirefoxUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0"
+        val reqHeaders = mapOf(
+            "User-Agent" to vkFirefoxUa,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "en-US,en;q=0.5",
+            "Referer" to "https://vk.ru/",
+            "Sec-Fetch-Dest" to "document",
+            "Sec-Fetch-Mode" to "navigate",
+            "Sec-Fetch-Site" to "none",
+        )
+        // Official CloudStream `VkExtractor` two-step cookie session pattern
+        val vkStore = CimaNowNetwork.SessionCookieStore(false)
+        val vkClient = CimaNowNetwork.newIsolatedDirectClient(vkStore, followRedirects = true, timeoutSec = 14L)
+        var html = runCatching {
+            val req = Request.Builder().url(CimaNowNetwork.encodeUrl(url)).apply {
+                for ((k, v) in reqHeaders) header(k, v)
+            }.build()
+            vkClient.newCall(req).execute().use { it.body?.string().orEmpty() }
+        }.getOrDefault("")
+
+        if (!html.contains("\"hls\"") && !html.contains("\"url")) {
+            val retry = runCatching {
+                val req = Request.Builder().url(CimaNowNetwork.encodeUrl(url)).apply {
+                    for ((k, v) in reqHeaders) header(k, v)
+                }.build()
+                vkClient.newCall(req).execute().use { it.body?.string().orEmpty() }
+            }.getOrDefault("")
+            if (retry.isNotBlank()) html = retry
+        }
+        if (html.isBlank()) return@withContext
 
         val unescaped = html.replace("\\/", "/")
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to "https://vk.ru/",
-            "Origin" to "https://vk.ru",
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to vkFirefoxUa,
+                "referer" to "https://vkvideo.ru/",
+                "Origin" to "https://vkvideo.ru",
+            ),
         )
 
         val seen = HashSet<String>()
@@ -1228,7 +1333,7 @@ object CimaNowExtractors {
             if (mp4Url.startsWith("http") && seen.add(mp4Url)) {
                 callback(
                     newExtractorLink("VK", "VK [MP4]", mp4Url, ExtractorLinkType.VIDEO) {
-                        this.referer = "https://vk.ru/"
+                        this.referer = "https://vkvideo.ru/"
                         this.quality = height
                         this.headers = headers
                     },
@@ -1239,7 +1344,7 @@ object CimaNowExtractors {
         for (m in Regex(""""hls"\s*:\s*"(https?://[^"]+)"""").findAll(unescaped)) {
             val hlsUrl = m.groupValues[1].replace("\\u0026", "&").trim()
             if (hlsUrl.startsWith("http") && seen.add(hlsUrl)) {
-                emitHlsVariantsOrMaster("VK", hlsUrl, "https://vk.ru/", headers, Qualities.Unknown.value, callback)
+                emitHlsVariantsOrMaster("VK", hlsUrl, "https://vkvideo.ru/", headers, Qualities.Unknown.value, callback)
             }
         }
     }
@@ -1271,10 +1376,12 @@ object CimaNowExtractors {
                 ?: CimaNowCrypto.safeJsonObject(Parser.unescapeEntities(metaRaw, false))
         } ?: return@withContext
 
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to "https://ok.ru/",
-            "Origin" to "https://ok.ru",
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to DESKTOP_UA,
+                "referer" to "https://ok.ru/",
+                "Origin" to "https://ok.ru",
+            ),
         )
         val qualityMap = mapOf(
             "mobile" to Qualities.P144.value,
@@ -1430,10 +1537,12 @@ object CimaNowExtractors {
 
         val activeOrigin = originOf(finalUrl)
         val effRef = "$activeOrigin/"
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
-            "Referer" to effRef,
-            "Origin" to activeOrigin,
+        val headers = playerHeaders(
+            mapOf(
+                "User-Agent" to DESKTOP_UA,
+                "referer" to effRef,
+                "Origin" to activeOrigin,
+            ),
         )
 
         val combined = (unpackAllPacker(html) + html).joinToString("\n").replace("\\/", "/")
@@ -1493,6 +1602,7 @@ object CimaNowExtractors {
     ) {
         val safeMaster = CimaNowNetwork.encodeUrl(masterUrl)
         val playlistText = fetchText(safeMaster, headers)
+        val cleanPlayerHeaders = playerHeaders(headers)
         var emittedVariants = 0
 
         if (!playlistText.isNullOrBlank() && playlistText.contains("#EXT-X-STREAM-INF")) {
@@ -1518,7 +1628,7 @@ object CimaNowExtractors {
                             newExtractorLink(label, "$label [HLS]", variantUrl, ExtractorLinkType.M3U8) {
                                 this.referer = referer
                                 this.quality = pendingQuality
-                                this.headers = headers
+                                this.headers = cleanPlayerHeaders
                             },
                         )
                     }
@@ -1531,7 +1641,7 @@ object CimaNowExtractors {
                 newExtractorLink(label, "$label [HLS]", safeMaster, ExtractorLinkType.M3U8) {
                     this.referer = referer
                     this.quality = fallbackQuality
-                    this.headers = headers
+                    this.headers = cleanPlayerHeaders
                 },
             )
         }

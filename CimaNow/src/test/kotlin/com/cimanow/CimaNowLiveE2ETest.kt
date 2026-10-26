@@ -203,9 +203,72 @@ class CimaNowLiveE2ETest {
         // 9. Read-only Android WebView gateway probe invariants
         val probeDuringCd = CimaNowGatewaySolver.buildReadOnlyGatewayProbeJs(countdownElapsed = false, allowTurnstileTap = true)
         assertTrue(probeDuringCd.contains("xqeqjp") && probeDuringCd.contains("OVL:"))
+        assertTrue(probeDuringCd.contains("visualViewport"))
         assertTrue(probeDuringCd.contains("ERR:BROWSER") && probeDuringCd.contains("ERR:WAF"))
         assertTrue(probeDuringCd.contains("behavior: 'instant'"))
         assertTrue(probeDuringCd.contains("if (false && !cd"))
+    }
+
+    @Test
+    fun testCloudStreamRuntimeInvariants() {
+        // 1. `visualViewport` -> physical WebView px mapping across Portrait, Landscape (`GeneratorPlayer` 800x360), and 980px wide viewport
+        val portraitPt = CimaNowGatewaySolver.computeViewTapPoint(
+            wvWidth = 1080,
+            wvHeight = 2400,
+            density = 2.75f,
+            target = CimaNowGatewaySolver.CssTapTarget(196f, 567f, 393f, 873f),
+        )
+        assertEquals(538.6f, portraitPt.first, 1.5f)
+        assertEquals(1558.8f, portraitPt.second, 1.5f)
+
+        val landscapePt = CimaNowGatewaySolver.computeViewTapPoint(
+            wvWidth = 2200,
+            wvHeight = 990,
+            density = 2.75f,
+            target = CimaNowGatewaySolver.CssTapTarget(400f, 180f, 800f, 360f),
+        )
+        assertEquals(1100f, landscapePt.first, 0.5f)
+        assertEquals(495f, landscapePt.second, 0.5f)
+
+        val wideViewportPt = CimaNowGatewaySolver.computeViewTapPoint(
+            wvWidth = 1080,
+            wvHeight = 2400,
+            density = 2.75f,
+            target = CimaNowGatewaySolver.CssTapTarget(490f, 1100f, 980f, 2180f),
+        )
+        assertEquals(540f, wideViewportPt.first, 0.5f)
+        assertEquals(1211f, wideViewportPt.second, 1.5f)
+
+        // 2. Lossless `evaluateJavascript` JSON string decoding (`JSONTokener`)
+        val rawJsStr = org.json.JSONObject.quote(
+            "META|4|0|UpnShare|196,420,800,360\nIF|https://cimanow.upns.online/#cfv8l1\nDL|https://reva.cimanowtv.com/f.mp4?dl=1\t1080p \\ \"HD\"",
+        )
+        val decoded = CimaNowGatewaySolver.decodeEvaluateJavascriptResult(rawJsStr)
+        val snap = CimaNowGatewaySolver.parseWatchingDomProbeOutput(decoded)
+        assertNotNull(snap)
+        assertEquals(4, snap!!.totalTabs)
+        assertEquals(0, snap.clickedIdx)
+        assertEquals("UpnShare", snap.tabName)
+        assertEquals("196,420,800,360", snap.tapSpec)
+        assertEquals(listOf("https://cimanow.upns.online/#cfv8l1"), snap.iframeSrcs)
+        assertEquals(1, snap.downloads.size)
+        assertEquals("https://reva.cimanowtv.com/f.mp4?dl=1", snap.downloads[0].first)
+        assertEquals("1080p \\ \"HD\"", snap.downloads[0].second)
+        assertEquals("", CimaNowGatewaySolver.decodeEvaluateJavascriptResult("null"))
+        assertEquals("", CimaNowGatewaySolver.decodeEvaluateJavascriptResult(null))
+
+        // 3. Dynamic gateway host navigation allowlist
+        assertTrue(CimaNowGatewaySolver.isAllowedGatewayNavigation("https://rm.newgateway2027.online/2020/02/blog-post.html/", "rm.newgateway2027.online"))
+        assertTrue(CimaNowGatewaySolver.isAllowedGatewayNavigation("https://sub.newgateway2027.online/get-link.php", "rm.newgateway2027.online"))
+        assertFalse(CimaNowGatewaySolver.isAllowedGatewayNavigation("https://fugitivequilt.com/ad", "rm.newgateway2027.online"))
+
+        // 4. `CS3IPlayer` Cronet HTTP/2 duplicate `referer`/`Referer` prevention (`mapOf("referer" to link.referer) + link.headers`)
+        val normalized = CimaNowExtractors.playerHeaders(
+            mapOf("User-Agent" to CimaNowNetwork.DESKTOP_UA, "Referer" to "https://cimanow.upns.online/"),
+        )
+        val cs3Merged = mapOf("referer" to "https://cimanow.upns.online/") + normalized
+        val refererKeys = cs3Merged.keys.filter { it.equals("referer", ignoreCase = true) }
+        assertEquals("CS3IPlayer merged headers must contain exactly 1 referer key", listOf("referer"), refererKeys)
     }
 
     @Test
@@ -321,19 +384,37 @@ class CimaNowLiveE2ETest {
         println("  [EpisodeStreamProbe] anyPlayable=$anyEpPlayable")
         assertTrue("Expected at least 1 live playable stream (200/206) on series episode", anyEpPlayable)
 
-        // ── 6. Verify Exact Android WebView (`; wv` + 393x873 + OVL/TS/BTN Probe JS) Live ──
+        // Verify CS3IPlayer Cronet HTTP/2 header cleanliness across all emitted links
+        for (lnk in bkLinks + mvLinks + epLinks) {
+            val cs3Merged = mapOf("referer" to lnk.referer) + lnk.headers
+            val refKeyCount = cs3Merged.keys.count { it.equals("referer", ignoreCase = true) }
+            assertTrue("Expected <= 1 referer key in CS3IPlayer merged headers for ${lnk.name}, got ${cs3Merged.keys}", refKeyCount <= 1)
+        }
+
+        // ── 6. Verify Exact Android WebView (`; wv`) in BOTH Portrait (393x873) AND `GeneratorPlayer` Landscape (800x360) Live ──
         val bkData = CimaNowCrypto.safeJsonObject(bkLoad.dataUrl)
         val bkItemUrl = bkData?.optString("itemUrl") ?: beekeeperUrl
         val bkShineUrl = bkData?.optString("shineUrl").orEmpty()
         assertTrue("Expected shineUrl on The Beekeeper", bkShineUrl.isNotBlank())
-        val androidSimMinted = verifyAndroidWebViewProbeLive(bkShineUrl, bkItemUrl)
-        println("[E2E][AndroidWebViewSim] minted=${androidSimMinted?.take(95)}")
-        assertNotNull("Expected Android WebView `; wv` + OVL/BTN probe simulation to mint watching URL", androidSimMinted)
-        assertTrue(androidSimMinted!!.contains("/watching/") && androidSimMinted.contains("token="))
+
+        val portraitMinted = verifyAndroidWebViewProbeLive(bkShineUrl, bkItemUrl, viewportW = 393, viewportH = 873)
+        println("[E2E][AndroidWebViewSim-Portrait-393x873] minted=${portraitMinted?.take(95)}")
+        assertNotNull("Expected Portrait Android WebView `; wv` simulation to mint watching URL", portraitMinted)
+        assertTrue(portraitMinted!!.contains("/watching/") && portraitMinted.contains("token="))
+
+        val landscapeMinted = verifyAndroidWebViewProbeLive(bkShineUrl, bkItemUrl, viewportW = 800, viewportH = 360)
+        println("[E2E][AndroidWebViewSim-Landscape-800x360] minted=${landscapeMinted?.take(95)}")
+        assertNotNull("Expected GeneratorPlayer Landscape (800x360) Android WebView `; wv` simulation to mint watching URL", landscapeMinted)
+        assertTrue(landscapeMinted!!.contains("/watching/") && landscapeMinted.contains("token="))
         Unit
     }
 
-    private fun verifyAndroidWebViewProbeLive(shineUrl: String, itemUrl: String): String? {
+    private fun verifyAndroidWebViewProbeLive(
+        shineUrl: String,
+        itemUrl: String,
+        viewportW: Int,
+        viewportH: Int,
+    ): String? {
         val probeWait = CimaNowGatewaySolver.buildReadOnlyGatewayProbeJs(countdownElapsed = false, allowTurnstileTap = false)
         val probeTs = CimaNowGatewaySolver.buildReadOnlyGatewayProbeJs(countdownElapsed = false, allowTurnstileTap = true)
         val probeForce = CimaNowGatewaySolver.buildReadOnlyGatewayProbeJs(countdownElapsed = true, allowTurnstileTap = true)
@@ -346,7 +427,7 @@ class CimaNowLiveE2ETest {
             const port = 19910 + Math.floor(Math.random() * 60);
             const prof = '/tmp/cn_wv_sim_' + process.pid + '_' + port;
             const chrome = ['/usr/bin/google-chrome-stable','/usr/bin/google-chrome','/usr/bin/chromium-browser','/usr/bin/chromium'].find(p => fs.existsSync(p));
-            const args = ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-gpu','--user-data-dir='+prof,'--disable-blink-features=AutomationControlled','--window-size=393,873','--remote-debugging-port='+port,'about:blank'];
+            const args = ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-gpu','--user-data-dir='+prof,'--disable-blink-features=AutomationControlled','--window-size=${viewportW},${viewportH}','--remote-debugging-port='+port,'about:blank'];
             const xvfb = '/usr/bin/xvfb-run';
             const proc = fs.existsSync(xvfb) ? spawn(xvfb, ['-a','--server-args=-screen 0 1280x960x24', chrome, ...args], { stdio: 'ignore' }) : spawn(chrome, ['--headless=new', ...args], { stdio: 'ignore' });
             function done(obj) {
@@ -394,17 +475,17 @@ class CimaNowLiveE2ETest {
                 await send('Page.enable');
                 await send('Network.enable');
                 await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-                await send('Emulation.setDeviceMetricsOverride', { width: 393, height: 873, deviceScaleFactor: 2.75, mobile: true });
+                await send('Emulation.setDeviceMetricsOverride', { width: ${viewportW}, height: ${viewportH}, deviceScaleFactor: 2.75, mobile: true });
                 await send('Page.addScriptToEvaluateOnNewDocument', {
                     source: "try { Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (Linux; Android 14; M2006C3MG Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.63 Mobile Safari/537.36', configurable: true }); Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv8l', configurable: true }); } catch(e) {}"
                 });
                 await send('Page.navigate', { url: ${org.json.JSONObject.quote(CimaNowNetwork.encodeUrl(shineUrl))}, referrer: ${org.json.JSONObject.quote(CimaNowNetwork.encodeUrl(itemUrl))} });
                 const tap = async (x, y) => {
                     await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-                    await new Promise(r => setTimeout(r, 60));
+                    await new Promise(r => setTimeout(r, 65));
                     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
                 };
-                let firstBtnMs = 0, lastTsMs = 0, lastOvlMs = 0, lastBtnMs = 0;
+                let firstBtnMs = 0, lastTsMs = 0, lastOvlMs = 0, lastBtnMs = 0, tsTry = 0;
                 const jsWait = ${org.json.JSONObject.quote(probeWait)};
                 const jsTs = ${org.json.JSONObject.quote(probeTs)};
                 const jsForce = ${org.json.JSONObject.quote(probeForce)};
@@ -419,6 +500,7 @@ class CimaNowLiveE2ETest {
                     if (!firstBtnMs && pv.includes('HASBTN')) firstBtnMs = ms;
                     if (pv.startsWith('URL:')) return done({ url: pv.slice(4), trace });
                     if (pv.startsWith('ERR:')) return done({ url: '', err: pv, trace });
+                    if (pv.startsWith('SCROLL:')) trace.push(ms + ':' + pv);
                     if (pv.startsWith('OVL:') && ms - lastOvlMs >= 480) {
                         lastOvlMs = ms;
                         const [ox, oy] = pv.slice(4).replace(':HASBTN','').split(',').map(Number);
@@ -431,7 +513,10 @@ class CimaNowLiveE2ETest {
                         await tap(bx, by);
                     } else if (pv.startsWith('TS:') && ms - lastTsMs >= 3200) {
                         lastTsMs = ms;
-                        const [tx, ty] = pv.slice(3).replace(':HASBTN','').split('|')[0].split(',').map(Number);
+                        const pts = pv.slice(3).replace(':HASBTN','').split('|');
+                        const pick = pts[tsTry % pts.length] || pts[0];
+                        tsTry++;
+                        const [tx, ty] = pick.split(',').map(Number);
                         trace.push(ms + ':TS:' + tx + ',' + ty);
                         await tap(tx, ty);
                     }
@@ -448,8 +533,11 @@ class CimaNowLiveE2ETest {
             val finished = proc.waitFor(55L, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) proc.destroyForcibly()
             val raw = if (tmpOut.exists()) tmpOut.readText(Charsets.UTF_8) else "{}"
-            println("  [AndroidWebViewSimRaw] $raw")
-            CimaNowGatewaySolver.normalizeMintedWatchingUrl(CimaNowCrypto.safeJsonObject(raw)?.optString("url"))
+            println("  [AndroidWebViewSimRaw ${viewportW}x${viewportH}] $raw")
+            val obj = CimaNowCrypto.safeJsonObject(raw)
+            val traceStr = obj?.optJSONArray("trace")?.toString().orEmpty()
+            assertFalse("Unexpected SCROLL:HASBTN deadlock in ${viewportW}x${viewportH}: $traceStr", traceStr.contains("SCROLL:HASBTN"))
+            CimaNowGatewaySolver.normalizeMintedWatchingUrl(obj?.optString("url"))
         } finally {
             tmpJs.delete()
             tmpOut.delete()
@@ -459,7 +547,7 @@ class CimaNowLiveE2ETest {
     private fun probePlayableStream(link: ExtractorLink): Boolean = runCatching {
         val rb = Request.Builder().url(link.url)
         for ((k, v) in link.headers) rb.header(k, v)
-        if (link.referer.isNotBlank() && !link.headers.containsKey("Referer")) {
+        if (link.referer.isNotBlank() && link.headers.keys.none { it.equals("Referer", ignoreCase = true) }) {
             rb.header("Referer", link.referer)
         }
         if (link.type == ExtractorLinkType.M3U8) {

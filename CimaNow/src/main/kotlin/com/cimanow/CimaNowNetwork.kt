@@ -1,7 +1,13 @@
 package com.cimanow
 
+import android.app.Activity
+import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.WebSettings
+import com.lagradost.cloudstream3.CommonActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -34,6 +40,7 @@ import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -64,8 +71,17 @@ object CimaNowNetwork {
     private var appContextRef: WeakReference<Context>? = null
 
     @Volatile
+    private var lastActivityRef: WeakReference<Activity>? = null
+
+    private val lifecycleRegistered = AtomicBoolean(false)
+
+    @Volatile
     var mainUrl: String = DEFAULT_MAIN_URL
         private set
+
+    @Volatile
+    var nativeWebViewUserAgent: String? = null
+        internal set
 
     @Volatile
     var preferredUserAgent: String = MOBILE_UA
@@ -74,6 +90,13 @@ object CimaNowNetwork {
 
     @Volatile
     private var directBlockedUntilMs: Long = 0L
+
+    fun isDirectCurrentlyBlocked(): Boolean = System.currentTimeMillis() < directBlockedUntilMs
+
+    fun resolveActivity(): Activity? {
+        CommonActivity.activity?.takeIf { !it.isFinishing && !it.isDestroyed }?.let { return it }
+        return lastActivityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
+    }
 
     private val proxyMutex = Mutex()
     private val workingProxies = CopyOnWriteArrayList<String>()
@@ -91,9 +114,53 @@ object CimaNowNetwork {
     )
 
     fun init(context: Context) {
-        appContextRef = WeakReference(context.applicationContext ?: context)
+        if (context is Activity) {
+            lastActivityRef = WeakReference(context)
+        }
+        val appCtx = context.applicationContext ?: context
+        appContextRef = WeakReference(appCtx)
+
+        if (Build.VERSION.SDK_INT > 0) {
+            if (appCtx is Application && lifecycleRegistered.compareAndSet(false, true)) {
+                runCatching {
+                    appCtx.registerActivityLifecycleCallbacks(
+                        object : Application.ActivityLifecycleCallbacks {
+                            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+                                lastActivityRef = WeakReference(activity)
+                            }
+
+                            override fun onActivityStarted(activity: Activity) {
+                                lastActivityRef = WeakReference(activity)
+                            }
+
+                            override fun onActivityResumed(activity: Activity) {
+                                lastActivityRef = WeakReference(activity)
+                            }
+
+                            override fun onActivityPaused(activity: Activity) = Unit
+                            override fun onActivityStopped(activity: Activity) = Unit
+                            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                            override fun onActivityDestroyed(activity: Activity) = Unit
+                        },
+                    )
+                }
+            }
+
+            // Pre-initialize preferredUserAgent to the device's genuine native WebView User-Agent
+            // (matching CloudStream's official CloudflareKiller / WebViewResolver) so cookies and
+            // tokens never experience a User-Agent mismatch between getMainPage/load/WebView/OkHttp.
+            runCatching { WebSettings.getDefaultUserAgent(appCtx) }
+                .getOrNull()
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { ua ->
+                    nativeWebViewUserAgent = ua
+                    preferredUserAgent = ua
+                }
+        }
+
         runCatching {
-            val prefs = (context.applicationContext ?: context).getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val saved = prefs.getString(KEY_ACTIVE_DOMAIN, null)?.trim()?.trimEnd('/')
             if (!saved.isNullOrBlank() && saved.startsWith("https://")) {
                 mainUrl = saved
@@ -232,10 +299,17 @@ object CimaNowNetwork {
             val bucket = store[domainKey(url.host)]
             val now = System.currentTimeMillis()
             val out = LinkedHashMap<String, Cookie>()
-            if (syncWithWebKit && android.os.Build.VERSION.SDK_INT > 0) {
+            if (syncWithWebKit && Build.VERSION.SDK_INT > 0) {
                 runCatching {
-                    val raw = CookieManager.getInstance().getCookie("${url.scheme}://${url.host}").orEmpty()
-                    for (pair in raw.split(';')) {
+                    val cm = CookieManager.getInstance()
+                    val originCookies = cm.getCookie("${url.scheme}://${url.host}").orEmpty()
+                    val fullUrlCookies = cm.getCookie(url.toString()).orEmpty()
+                    val combined = if (fullUrlCookies.isNotBlank() && fullUrlCookies != originCookies) {
+                        "$originCookies; $fullUrlCookies"
+                    } else {
+                        originCookies.ifBlank { fullUrlCookies }
+                    }
+                    for (pair in combined.split(';')) {
                         val eq = pair.indexOf('=')
                         if (eq <= 0) continue
                         val name = pair.substring(0, eq).trim()
@@ -686,13 +760,15 @@ object CimaNowNetwork {
                 val store = SessionCookieStore(syncWithWebKit = true)
                 val session = StickyHttpSession(newIsolatedDirectClient(store), store, null)
                 val directResult = block(session)
-                return@withContext directResult
+                if (directResult != null) {
+                    return@withContext directResult
+                }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (_: CimaBlockedException) {
-                directBlockedUntilMs = System.currentTimeMillis() + 300_000L
+                directBlockedUntilMs = System.currentTimeMillis() + 180_000L
             } catch (_: Throwable) {
-                directBlockedUntilMs = System.currentTimeMillis() + 300_000L
+                // Transient network or parse error — never poison direct residential transport
             }
         }
 

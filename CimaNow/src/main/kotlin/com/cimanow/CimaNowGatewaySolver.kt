@@ -30,8 +30,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.lang.reflect.InvocationHandler
@@ -165,9 +165,19 @@ object CimaNowGatewaySolver {
     private fun hostOnly(url: String?): String =
         runCatching { URI(CimaNowNetwork.encodeUrl(url.orEmpty())).host?.lowercase().orEmpty() }.getOrDefault("")
 
-    private fun isAllowedGatewayNavigation(url: String): Boolean {
+    private fun baseDomainOf(host: String): String {
+        val clean = host.trim('.')
+        val parts = clean.split('.')
+        return if (parts.size >= 2) "${parts[parts.size - 2]}.${parts[parts.size - 1]}" else clean
+    }
+
+    internal fun isAllowedGatewayNavigation(url: String, gatewayHost: String = ""): Boolean {
         val host = hostOnly(url)
         if (host.isEmpty()) return true
+        val gwBase = baseDomainOf(gatewayHost)
+        if (gwBase.isNotEmpty() && (host == gatewayHost || host.endsWith(".$gwBase") || host == gwBase)) {
+            return true
+        }
         return host.contains("freex2line.") ||
             host.contains("cimanow") ||
             host.contains("cloudflare.") ||
@@ -324,8 +334,9 @@ object CimaNowGatewaySolver {
                 ?: shineUrl.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
                 ?: return@withLock null
 
-            val minted = if (Build.VERSION.SDK_INT > 0 && CommonActivity.activity != null) {
-                // Attempt #1: 100% native untouched Android WebView identity (zero UA/Sec-CH-UA mismatch)
+            val activeActivity = if (Build.VERSION.SDK_INT > 0) CimaNowNetwork.resolveActivity() else null
+            val minted = if (Build.VERSION.SDK_INT > 0 && activeActivity != null) {
+                // Attempt #1: 100% native untouched Android WebView identity (exact UA/Sec-CH-UA/CookieManager parity)
                 mintViaAndroidWebView(
                     shineUrl = cleanShine,
                     itemUrl = itemUrl,
@@ -347,7 +358,7 @@ object CimaNowGatewaySolver {
                 mintViaHeadlessChromiumCli(cleanShine, itemUrl)
                     ?: mintViaHeadlessChromiumCli(cleanShine, itemUrl)
             } else {
-                logWarn("CommonActivity.activity is null (SDK=${Build.VERSION.SDK_INT})")
+                logWarn("Active Activity is null (SDK=${Build.VERSION.SDK_INT}, commonAct=${CommonActivity.activity != null})")
                 null
             }
 
@@ -369,13 +380,14 @@ object CimaNowGatewaySolver {
         attempt: Int,
         useNativeDefaultUa: Boolean,
     ): String? {
-        val activity = CommonActivity.activity ?: return null
+        val activity = CimaNowNetwork.resolveActivity() ?: return null
         if (activity.isFinishing || activity.isDestroyed) return null
 
+        val gatewayHost = hostOnly(shineUrl)
         val deferred = CompletableDeferred<String?>()
         var containerRef: PassThroughWebViewContainer? = null
         var webViewRef: WebView? = null
-        val popupWebViews = ArrayList<WebView>(1)
+        val popupWebViews = ArrayList<WebView>(2)
         val mainHandler = Handler(Looper.getMainLooper())
 
         return try {
@@ -418,9 +430,6 @@ object CimaNowGatewaySolver {
                     ?.takeIf { it.isNotBlank() }
                     ?: wv.settings.userAgentString.orEmpty()
                 val cleanedUa = cleanWebViewUserAgent(rawDefaultUa)
-                if (cleanedUa.isNotBlank()) {
-                    CimaNowNetwork.preferredUserAgent = cleanedUa
-                }
                 val xrwMode = suppressXRequestedWithHeader(wv.settings)
 
                 wv.settings.apply {
@@ -429,7 +438,7 @@ object CimaNowGatewaySolver {
                     @Suppress("DEPRECATION")
                     databaseEnabled = true
                     useWideViewPort = true
-                    loadWithOverviewMode = false
+                    loadWithOverviewMode = true
                     loadsImagesAutomatically = true
                     blockNetworkImage = false
                     mediaPlaybackRequiresUserGesture = true
@@ -437,18 +446,41 @@ object CimaNowGatewaySolver {
                     cacheMode = WebSettings.LOAD_DEFAULT
                     setSupportMultipleWindows(true)
                     javaScriptCanOpenWindowsAutomatically = true
-                    if (!useNativeDefaultUa) {
+                    if (!useNativeDefaultUa && cleanedUa.isNotBlank()) {
                         userAgentString = cleanedUa
                     }
                 }
 
+                // CRITICAL: Always synchronize CimaNowNetwork.preferredUserAgent with the EXACT byte-for-byte
+                // User-Agent used by this WebView (`activeUa`), matching CloudStream's official CloudflareKiller.
+                // Overwriting preferredUserAgent with `cleanedUa` while WebView used `rawDefaultUa` (`; wv`)
+                // breaks `cf_clearance` and token User-Agent validation on `cimanow.cc/.../watching/?token=...`!
                 val activeUa = wv.settings.userAgentString.orEmpty()
+                if (activeUa.isNotBlank()) {
+                    if (useNativeDefaultUa) {
+                        CimaNowNetwork.nativeWebViewUserAgent = activeUa
+                    }
+                    CimaNowNetwork.preferredUserAgent = activeUa
+                }
                 logInfo(
-                    "Attempt #$attempt init WebView (nativeUa=$useNativeDefaultUa, xrw=$xrwMode, ua=${activeUa.take(82)})",
+                    "Attempt #$attempt init WebView (nativeUa=$useNativeDefaultUa, xrw=$xrwMode, root=${root.width}x${root.height}, ua=${activeUa.take(82)})",
                 )
 
-                // PowerVR Rogue GE8320 single-surface safe popup sink: at most ONE unattached
-                // software-layered WebView (0 GPU RenderTargetSurfaces) torn down on next tick.
+                fun clearPopupWebViews() {
+                    val existing = popupWebViews.toList()
+                    popupWebViews.clear()
+                    for (old in existing) {
+                        runCatching {
+                            old.stopLoading()
+                            old.webViewClient = WebViewClient()
+                            old.destroy()
+                        }
+                    }
+                }
+
+                // Zero-leak single-surface popup sink: disposes any prior popup first so sequential
+                // `#xqeqjp` -> `#xqeqjp1` -> `#downloadbtn` popups NEVER return false or leak `resultMsg`,
+                // while keeping at most ONE unattached `LAYER_TYPE_NONE` WebView alive at any instant.
                 wv.webChromeClient = object : WebChromeClient() {
                     override fun onCreateWindow(
                         view: WebView?,
@@ -456,8 +488,8 @@ object CimaNowGatewaySolver {
                         isUserGesture: Boolean,
                         resultMsg: android.os.Message?,
                     ): Boolean {
-                        if (popupWebViews.isNotEmpty()) return false
                         val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                        clearPopupWebViews()
                         val popupWv = runCatching { WebView(activity) }.getOrNull() ?: return false
                         popupWv.setLayerType(View.LAYER_TYPE_NONE, null)
                         popupWebViews.add(popupWv)
@@ -479,12 +511,11 @@ object CimaNowGatewaySolver {
                                     logInfo("Attempt #$attempt swallowed popunder: ${hostOnly(u)}")
                                 }
                                 runCatching { popupWv.stopLoading() }
-                                mainHandler.post {
-                                    runCatching {
-                                        popupWebViews.remove(popupWv)
-                                        popupWv.destroy()
+                                mainHandler.postDelayed({
+                                    if (popupWebViews.remove(popupWv)) {
+                                        runCatching { popupWv.destroy() }
                                     }
-                                }
+                                }, 120L)
                                 return true
                             }
 
@@ -511,7 +542,7 @@ object CimaNowGatewaySolver {
                                     popupWv.destroy()
                                 }
                             }
-                        }, 600L)
+                        }, 450L)
                         return true
                     }
                 }
@@ -532,7 +563,7 @@ object CimaNowGatewaySolver {
                             runCatching { view?.stopLoading() }
                             return true
                         }
-                        if (target.startsWith("http") && !isAllowedGatewayNavigation(target)) {
+                        if (target.startsWith("http") && !isAllowedGatewayNavigation(target, gatewayHost)) {
                             logInfo("Attempt #$attempt blocked external redirect: ${hostOnly(target)}")
                             return true
                         }
@@ -744,35 +775,99 @@ object CimaNowGatewaySolver {
                 try {
                     var loc = String(location.href || '');
                     if (loc.indexOf('/watching/') !== -1 && loc.indexOf('token=') !== -1) return 'URL:' + loc;
-                    var iw = Math.round(window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0);
-                    var ih = Math.round(window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0);
+
+                    var anyWatchLink = document.querySelector('a[href*="/watching/"][href*="token="]');
+                    if (anyWatchLink) {
+                        var awh = String(anyWatchLink.href || anyWatchLink.getAttribute('href') || '');
+                        if (awh.indexOf('http') === 0 && awh.indexOf('/watching/') !== -1 && awh.indexOf('token=') !== -1) {
+                            return 'URL:' + awh;
+                        }
+                    }
+
+                    var vv = window.visualViewport;
+                    var vw = Math.round((vv && vv.width > 0) ? vv.width : ((document.documentElement && document.documentElement.clientWidth) || window.innerWidth || 0));
+                    var vh = Math.round((vv && vv.height > 0) ? vv.height : ((document.documentElement && document.documentElement.clientHeight) || window.innerHeight || 0));
+                    var vox = (vv && vv.offsetLeft) ? vv.offsetLeft : 0;
+                    var voy = (vv && vv.offsetTop) ? vv.offsetTop : 0;
+
+                    function refreshVv() {
+                        vv = window.visualViewport;
+                        vw = Math.round((vv && vv.width > 0) ? vv.width : ((document.documentElement && document.documentElement.clientWidth) || window.innerWidth || 0));
+                        vh = Math.round((vv && vv.height > 0) ? vv.height : ((document.documentElement && document.documentElement.clientHeight) || window.innerHeight || 0));
+                        vox = (vv && vv.offsetLeft) ? vv.offsetLeft : 0;
+                        voy = (vv && vv.offsetTop) ? vv.offsetTop : 0;
+                    }
+
+                    function scrollCenter(el) {
+                        try {
+                            el.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
+                        } catch(e1) {
+                            var r = el.getBoundingClientRect();
+                            var curY = window.pageYOffset || (document.documentElement && document.documentElement.scrollTop) || 0;
+                            window.scrollTo(0, Math.max(0, curY + r.top - (vh / 2) + (r.height / 2)));
+                        }
+                        refreshVv();
+                    }
+
+                    function hasActiveOverlay() {
+                        var ids = ['xqeqjp', 'xqeqjp1', 'xqeqjp2'];
+                        for (var oi = 0; oi < ids.length; oi++) {
+                            var oel = document.getElementById(ids[oi]);
+                            if (oel && oel.offsetWidth > 20 && oel.offsetHeight > 20) {
+                                var ocs = getComputedStyle(oel);
+                                if (ocs.display !== 'none' && ocs.visibility !== 'hidden' && ocs.pointerEvents !== 'none') return true;
+                            }
+                        }
+                        var extra = document.querySelectorAll('a[id^="xqeqjp"]');
+                        for (var ei = 0; ei < extra.length; ei++) {
+                            var eel = extra[ei];
+                            if (eel && eel.offsetWidth > 20 && eel.offsetHeight > 20) {
+                                var ecs = getComputedStyle(eel);
+                                if (ecs.display !== 'none' && ecs.visibility !== 'hidden' && ecs.pointerEvents !== 'none') return true;
+                            }
+                        }
+                        return false;
+                    }
+
                     var btn = document.getElementById('downloadbtn');
                     var cd = document.getElementById('countdown');
-                    var h = btn ? String(btn.getAttribute('href') || '') : '';
+                    var hAttr = btn ? String(btn.getAttribute('href') || '') : '';
+                    var hProp = btn ? String(btn.href || '') : '';
                     if (btn) {
-                        if (h.indexOf('http') === 0 && h.indexOf('/watching/') !== -1 && h.indexOf('token=') !== -1) {
-                            return 'URL:' + h;
+                        if (hAttr.indexOf('http') === 0 && hAttr.indexOf('/watching/') !== -1 && hAttr.indexOf('token=') !== -1) {
+                            return 'URL:' + hAttr;
                         }
-                        var isReadyHref = (h === '#watch-ready') ||
-                            ($forceFlag && h && h !== '#' && h !== 'javascript:void(0);' && h.indexOf('blog-post_75') === -1);
+                        if (hProp.indexOf('http') === 0 && hProp.indexOf('/watching/') !== -1 && hProp.indexOf('token=') !== -1) {
+                            return 'URL:' + hProp;
+                        }
+                        var isReadyHref = (hAttr === '#watch-ready') ||
+                            (hProp.slice(-12) === '#watch-ready') ||
+                            ($forceFlag && hAttr && hAttr !== '#' && hAttr !== 'javascript:void(0);' && hAttr.indexOf('blog-post_75') === -1);
                         if (isReadyHref) {
                             var cs = getComputedStyle(btn);
                             if ($forceFlag && !cd && (btn.hidden || cs.display === 'none')) {
                                 btn.removeAttribute('hidden');
                                 btn.style.setProperty('display', 'inline-block', 'important');
                             }
+                            // Dismiss full-screen popunder overlays (`#xqeqjp`, `#xqeqjp1`, z-index 99999999)
+                            // BEFORE tapping `#downloadbtn`, including when Turnstile auto-passes invisibly!
+                            if (hasActiveOverlay() && vw > 40 && vh > 40) {
+                                return 'OVL:' + Math.round(vw / 2) + ',' + Math.round(vh / 2) + ',' + vw + ',' + vh + ':HASBTN';
+                            }
                             var br = btn.getBoundingClientRect();
                             if (br.width > 4 && br.height > 4) {
-                                if (br.top < 8 || br.bottom > ih - 8) {
-                                    try {
-                                        btn.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
-                                    } catch(e1) {
-                                        window.scrollTo(0, Math.max(0, (window.pageYOffset || 0) + br.top - (ih / 2) + (br.height / 2)));
-                                    }
+                                var bvx = Math.round(br.left + br.width / 2 - vox);
+                                var bvy = Math.round(br.top + br.height / 2 - voy);
+                                if (bvy < 6 || bvy > vh - 6 || bvx < 4 || bvx > vw - 4) {
+                                    scrollCenter(btn);
                                     br = btn.getBoundingClientRect();
-                                    if (br.top < 4 || br.bottom > ih - 4) return 'SCROLL:HASBTN';
+                                    bvx = Math.round(br.left + br.width / 2 - vox);
+                                    bvy = Math.round(br.top + br.height / 2 - voy);
                                 }
-                                return 'BTN:' + Math.round(br.left + br.width / 2) + ',' + Math.round(br.top + br.height / 2) + ',' + iw + ',' + ih;
+                                if (bvx >= 2 && bvx <= vw - 2 && bvy >= 2 && bvy <= vh - 2) {
+                                    return 'BTN:' + bvx + ',' + bvy + ',' + vw + ',' + vh;
+                                }
+                                return 'SCROLL:HASBTN';
                             }
                         }
                     } else {
@@ -787,23 +882,33 @@ object CimaNowGatewaySolver {
                             return 'ERR:ADBLOCK';
                         }
                     }
-                    if ($tsTapFlag && h !== '#watch-ready') {
+
+                    if ($tsTapFlag && hAttr !== '#watch-ready') {
                         var inp = document.querySelector('input[name="cf-turnstile-response"]');
                         var tokReady = inp && inp.value && inp.value.length > 20;
                         if (!tokReady) {
-                            var candidates = [
-                                '.cf-turnstile',
-                                '[data-sitekey]',
-                                '#challenge-stage > div',
-                                'html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div',
-                                'iframe[src*="challenges.cloudflare.com"]'
-                            ];
                             var box = null;
-                            for (var ci = 0; ci < candidates.length; ci++) {
-                                var el = document.querySelector(candidates[ci]);
-                                if (el) {
-                                    var r0 = el.getBoundingClientRect();
-                                    if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) { box = el; break; }
+                            var ifr = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                            if (ifr) {
+                                var ir = ifr.getBoundingClientRect();
+                                if (ir.width >= 40 && ir.height >= 25 && ir.height <= 160) box = ifr;
+                            }
+                            if (!box) {
+                                var hosts = document.querySelectorAll('.cf-turnstile, [data-sitekey], #challenge-stage > div, html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div');
+                                for (var ci = 0; ci < hosts.length && !box; ci++) {
+                                    var hEl = hosts[ci];
+                                    var sub = hEl.querySelectorAll('div, iframe');
+                                    for (var si = 0; si < sub.length; si++) {
+                                        var sr = sub[si].getBoundingClientRect();
+                                        if (sr.width >= 180 && sr.width <= 340 && sr.height >= 40 && sr.height <= 100) {
+                                            box = sub[si];
+                                            break;
+                                        }
+                                    }
+                                    if (!box) {
+                                        var r0 = hEl.getBoundingClientRect();
+                                        if (r0.width >= 40 && r0.height >= 25 && r0.height <= 160) box = hEl;
+                                    }
                                 }
                             }
                             if (!box && inp) {
@@ -815,28 +920,31 @@ object CimaNowGatewaySolver {
                                 }
                             }
                             if (box) {
-                                var ovl1 = document.getElementById('xqeqjp');
-                                var ovl2 = document.getElementById('xqeqjp1');
-                                var activeOvl = (ovl1 && ovl1.offsetWidth > 10 && getComputedStyle(ovl1).display !== 'none') ? ovl1
-                                    : ((ovl2 && ovl2.offsetWidth > 10 && getComputedStyle(ovl2).display !== 'none') ? ovl2 : null);
-                                if (activeOvl && iw > 40 && ih > 40) {
-                                    return 'OVL:' + Math.round(iw / 2) + ',' + Math.round(ih / 2) + ',' + iw + ',' + ih + (btn ? ':HASBTN' : '');
+                                if (hasActiveOverlay() && vw > 40 && vh > 40) {
+                                    return 'OVL:' + Math.round(vw / 2) + ',' + Math.round(vh / 2) + ',' + vw + ',' + vh + (btn ? ':HASBTN' : '');
                                 }
                                 var tr = box.getBoundingClientRect();
-                                if (tr.top < 8 || tr.bottom > ih - 8) {
-                                    try {
-                                        box.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'});
-                                    } catch(e2) {
-                                        window.scrollTo(0, Math.max(0, (window.pageYOffset || 0) + tr.top - (ih / 2)));
-                                    }
+                                var tvy = Math.round(tr.top + tr.height / 2 - voy);
+                                if (tvy < 6 || tvy > vh - 6) {
+                                    scrollCenter(box);
                                     tr = box.getBoundingClientRect();
+                                    tvy = Math.round(tr.top + tr.height / 2 - voy);
                                 }
-                                if (tr.width >= 40 && tr.height >= 25 && tr.top >= 0 && tr.left >= 0) {
-                                    var cy = Math.round(tr.top + tr.height / 2);
-                                    var lx = Math.round(tr.left + 28);
-                                    var rx = Math.round(tr.right - 28);
-                                    var pair = lx + ',' + cy + ',' + iw + ',' + ih + '|' + rx + ',' + cy + ',' + iw + ',' + ih;
-                                    return 'TS:' + pair + (btn ? ':HASBTN' : '');
+                                if (tr.width >= 40 && tr.height >= 25 && tvy >= 2 && tvy <= vh - 2) {
+                                    var tl = tr.left - vox;
+                                    var trRight = tr.right - vox;
+                                    var pts = [];
+                                    if (tr.width <= 340) {
+                                        pts.push(Math.round(tl + 28) + ',' + tvy + ',' + vw + ',' + vh);
+                                        pts.push(Math.round(trRight - 28) + ',' + tvy + ',' + vw + ',' + vh);
+                                    } else {
+                                        var mid = (tl + trRight) / 2;
+                                        pts.push(Math.round(mid - 122) + ',' + tvy + ',' + vw + ',' + vh);
+                                        pts.push(Math.round(mid + 122) + ',' + tvy + ',' + vw + ',' + vh);
+                                        pts.push(Math.round(tl + 28) + ',' + tvy + ',' + vw + ',' + vh);
+                                        pts.push(Math.round(trRight - 28) + ',' + tvy + ',' + vw + ',' + vh);
+                                    }
+                                    return 'TS:' + pts.join('|') + (btn ? ':HASBTN' : '');
                                 }
                             }
                         }
@@ -850,13 +958,63 @@ object CimaNowGatewaySolver {
 
     // ── Layer-2 Real-V8 `/watching/` Vault Unlocker (Future-Proof Android Fallback) ──
 
+    internal data class ParsedWatchingDomSnapshot(
+        val totalTabs: Int,
+        val clickedIdx: Int,
+        val tabName: String,
+        val tapSpec: String,
+        val iframeSrcs: List<String>,
+        val downloads: List<Pair<String, String>>,
+    )
+
+    internal fun parseWatchingDomProbeOutput(rawText: String): ParsedWatchingDomSnapshot? {
+        if (rawText.isBlank()) return null
+        var totalTabs = 0
+        var clickedIdx = -1
+        var tabName = "Watch"
+        var tapSpec = ""
+        val iframes = ArrayList<String>()
+        val downloads = ArrayList<Pair<String, String>>()
+        var sawMeta = false
+
+        for (line in rawText.split('\n')) {
+            if (line.startsWith("META|")) {
+                sawMeta = true
+                val parts = line.split('|')
+                totalTabs = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                clickedIdx = parts.getOrNull(2)?.toIntOrNull() ?: -1
+                tabName = parts.getOrNull(3)?.trim().orEmpty().ifBlank { "Watch" }
+                tapSpec = parts.getOrNull(4)?.trim().orEmpty()
+            } else if (line.startsWith("IF|")) {
+                val u = line.substring(3).trim()
+                if (u.isNotEmpty()) iframes.add(u)
+            } else if (line.startsWith("DL|")) {
+                val rest = line.substring(3)
+                val tabPos = rest.indexOf('\t')
+                if (tabPos > 0) {
+                    val u = rest.substring(0, tabPos).trim()
+                    val lbl = rest.substring(tabPos + 1).trim().ifBlank { "Download" }
+                    if (u.isNotEmpty()) downloads.add(u to lbl)
+                } else if (rest.isNotBlank()) {
+                    downloads.add(rest.trim() to "Download")
+                }
+            }
+        }
+        return if (sawMeta) {
+            ParsedWatchingDomSnapshot(totalTabs, clickedIdx, tabName, tapSpec, iframes, downloads)
+        } else {
+            null
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     suspend fun extractWatchingSourcesViaWebView(
         mintedWatchingUrl: String,
         refererUrl: String,
+        preloadedWatchHtml: String? = null,
     ): WebViewWatchingResult? {
         if (Build.VERSION.SDK_INT <= 0) return null
-        val activity = CommonActivity.activity ?: return null
+        val activity = CimaNowNetwork.resolveActivity() ?: return null
         if (activity.isFinishing || activity.isDestroyed) return null
 
         return solverMutex.withLock {
@@ -888,12 +1046,22 @@ object CimaNowGatewaySolver {
                     wv.settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
+                        @Suppress("DEPRECATION")
+                        databaseEnabled = true
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
                         loadsImagesAutomatically = false
                         blockNetworkImage = true
                         mediaPlaybackRequiresUserGesture = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         setSupportMultipleWindows(true)
                         javaScriptCanOpenWindowsAutomatically = false
+                        // Preserve exact User-Agent parity with CimaNowNetwork / CookieManager
+                        val targetUa = CimaNowNetwork.preferredUserAgent
+                        val defaultUa = userAgentString.orEmpty()
+                        if (targetUa.isNotBlank() && targetUa != defaultUa && targetUa != CimaNowNetwork.MOBILE_UA) {
+                            userAgentString = targetUa
+                        }
                     }
 
                     runCatching {
@@ -951,121 +1119,148 @@ object CimaNowGatewaySolver {
                     container.addView(wv, matchParent)
                     root.addView(container, matchParent)
 
-                    wv.loadUrl(
-                        CimaNowNetwork.encodeUrl(mintedWatchingUrl),
-                        mapOf("Referer" to CimaNowNetwork.encodeUrl(refererUrl)),
-                    )
+                    val encodedWatch = CimaNowNetwork.encodeUrl(mintedWatchingUrl)
+                    if (!preloadedWatchHtml.isNullOrBlank() && preloadedWatchHtml.length > 2_000) {
+                        logInfo("Loading pre-fetched /watching/ HTML into V8 WebView (${preloadedWatchHtml.length} chars)")
+                        wv.loadDataWithBaseURL(encodedWatch, preloadedWatchHtml, "text/html", "UTF-8", encodedWatch)
+                    } else {
+                        wv.loadUrl(
+                            encodedWatch,
+                            mapOf("Referer" to CimaNowNetwork.encodeUrl(refererUrl)),
+                        )
+                    }
                 }
 
                 val embeds = LinkedHashMap<String, String>()
                 val downloads = LinkedHashMap<String, CimaNowCrypto.DownloadEntry>()
+                var activeServerLabel = "Watch"
 
                 withTimeoutOrNull(WATCHING_WV_TIMEOUT_MS) {
-                    delay(1_400L)
+                    delay(1_500L)
                     var clickedTabUpTo = -1
                     var totalTabs = 0
 
-                    for (step in 0 until 28) {
+                    for (step in 0 until 26) {
                         val jsOut = withContext(Dispatchers.Main) {
                             val wv = webViewRef ?: return@withContext ""
                             val nextIdx = clickedTabUpTo + 1
+                            // Anti-tamper-safe DOM reader: avoids `JSON.stringify` and `getAttribute`
+                            // (both hooked by `cnV14Ultra`), reads `.src` and `.href` properties directly
+                            // (preserving `#fragment` on UpnShare), and computes `visualViewport` tap coords.
                             evalJsSuspend(
                                 wv,
                                 """
                                 (function(){
                                     try {
-                                        var iw = Math.round(window.innerWidth || 393);
-                                        var ih = Math.round(window.innerHeight || 873);
-                                        var out = { iframes: [], dls: [], tabs: 0, clicked: -1, tabName: '', tap: '' };
-                                        var ifs = document.querySelectorAll('iframe');
+                                        var vv = window.visualViewport;
+                                        var vw = Math.round((vv && vv.width > 0) ? vv.width : ((document.documentElement && document.documentElement.clientWidth) || window.innerWidth || 393));
+                                        var vh = Math.round((vv && vv.height > 0) ? vv.height : ((document.documentElement && document.documentElement.clientHeight) || window.innerHeight || 873));
+                                        var vox = (vv && vv.offsetLeft) ? vv.offsetLeft : 0;
+                                        var voy = (vv && vv.offsetTop) ? vv.offsetTop : 0;
+                                        var lines = [];
+                                        var ifs = document.getElementsByTagName('iframe');
                                         for (var i = 0; i < ifs.length; i++) {
                                             var s = String(ifs[i].src || '');
-                                            if (s.indexOf('http') === 0 || s.indexOf('//') === 0) out.iframes.push(s);
+                                            if (s.indexOf('http') === 0 || s.indexOf('//') === 0) {
+                                                lines.push('IF|' + s.replace(/[\r\n]+/g, ''));
+                                            }
                                         }
-                                        var as = document.querySelectorAll('#download a, ul.download a, li[aria-label="download"] a, li[aria-label="quality"] a, a[href*="cimanowtv"], a[href*="vk.com/doc"], a[href*="jetload"], a[href*="upns."], a[href*="byse"], a[href*="filemoon"], a[href*="savefiles"], a[href*="streamhls"], a[href*="uqload"]');
+                                        var as = document.getElementsByTagName('a');
                                         for (var j = 0; j < as.length; j++) {
                                             var hr = String(as[j].href || '');
                                             if ((hr.indexOf('http') === 0 || hr.indexOf('//') === 0) && hr.indexOf('javascript:') !== 0) {
-                                                out.dls.push({ u: hr, t: String(as[j].innerText || '').trim().slice(0, 80) });
+                                                var inDl = false;
+                                                var p = as[j].parentElement;
+                                                for (var d = 0; d < 5 && p; d++, p = p.parentElement) {
+                                                    var pid = String(p.id || '');
+                                                    var pcl = String(p.className || '');
+                                                    if (pid === 'download' || pcl.indexOf('download') !== -1) { inDl = true; break; }
+                                                }
+                                                if (inDl || hr.indexOf('cimanowtv') !== -1 || hr.indexOf('vk.com/doc') !== -1 || hr.indexOf('jetload') !== -1 || hr.indexOf('upns.') !== -1 || hr.indexOf('byse') !== -1 || hr.indexOf('filemoon') !== -1 || hr.indexOf('savefiles') !== -1 || hr.indexOf('streamhls') !== -1 || hr.indexOf('uqload') !== -1) {
+                                                    var lbl = String(as[j].textContent || '').replace(/[\r\n\t|]+/g, ' ').trim().slice(0, 80);
+                                                    lines.push('DL|' + hr.replace(/[\r\n\t]+/g, '') + '\t' + lbl);
+                                                }
                                             }
                                         }
-                                        var rawLis = document.querySelectorAll('#watch li[data-id], #watch li[data-index], ul#watch li');
+                                        var watchRoot = document.getElementById('watch');
+                                        var rawLis = watchRoot ? watchRoot.getElementsByTagName('li') : [];
                                         var lis = [];
                                         for (var k = 0; k < rawLis.length; k++) {
-                                            var did = String(rawLis[k].getAttribute('data-id') || '');
-                                            var dix = String(rawLis[k].getAttribute('data-index') || '');
-                                            if (did === '00' || dix === '00') continue;
-                                            lis.push(rawLis[k]);
+                                            var el = rawLis[k];
+                                            var cs = getComputedStyle(el);
+                                            if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+                                            var ds = el.dataset || {};
+                                            if (String(ds.id || '') === '00' || String(ds.index || '') === '00') continue;
+                                            if (el.offsetWidth <= 2 && el.offsetHeight <= 2) continue;
+                                            var txt = String(el.textContent || '').trim();
+                                            if (!txt && el.children.length === 0) continue;
+                                            lis.push(el);
                                         }
-                                        out.tabs = lis.length;
+                                        var clicked = -1;
+                                        var tabName = '';
+                                        var tap = '';
                                         if ($nextIdx < lis.length) {
                                             var li = lis[$nextIdx];
-                                            out.tabName = String(li.innerText || ('Server ' + ($nextIdx + 1))).trim().slice(0, 40);
+                                            tabName = String(li.textContent || ('Server ' + ($nextIdx + 1))).replace(/[\r\n|]+/g, ' ').trim().slice(0, 40);
                                             try { li.scrollIntoView({behavior: 'instant', block: 'center', inline: 'center'}); } catch(e0) {}
+                                            vv = window.visualViewport;
+                                            vox = (vv && vv.offsetLeft) ? vv.offsetLeft : 0;
+                                            voy = (vv && vv.offsetTop) ? vv.offsetTop : 0;
                                             var r = li.getBoundingClientRect();
                                             if (r.width > 4 && r.height > 4) {
-                                                out.tap = Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2) + ',' + iw + ',' + ih;
+                                                tap = Math.round(r.left + r.width / 2 - vox) + ',' + Math.round(r.top + r.height / 2 - voy) + ',' + vw + ',' + vh;
                                             }
-                                            out.clicked = $nextIdx;
+                                            clicked = $nextIdx;
                                         }
-                                        return JSON.stringify(out);
+                                        lines.unshift('META|' + lis.length + '|' + clicked + '|' + tabName + '|' + tap);
+                                        return lines.join('\n');
                                     } catch(e) { return ''; }
                                 })()
                                 """.trimIndent(),
                             )
                         }
 
-                        val obj = CimaNowCrypto.safeJsonObject(jsOut)
-                        if (obj != null) {
-                            totalTabs = obj.optInt("tabs", 0)
-                            val clicked = obj.optInt("clicked", -1)
-                            val tabName = obj.optString("tabName").ifBlank { "Watch" }
-                            val tapStr = obj.optString("tap")
-                            val ifs: JSONArray? = obj.optJSONArray("iframes")
-                            if (ifs != null) {
-                                for (i in 0 until ifs.length()) {
-                                    CimaNowCrypto.normalizeEmbedUrl(ifs.optString(i))?.let { norm ->
-                                        if (!isWatchingPageInfraHost(hostOnly(norm))) {
-                                            embeds.putIfAbsent(norm, tabName)
-                                        }
+                        val snap = parseWatchingDomProbeOutput(jsOut)
+                        if (snap != null) {
+                            totalTabs = snap.totalTabs
+                            for (rawIf in snap.iframeSrcs) {
+                                CimaNowCrypto.normalizeEmbedUrl(rawIf)?.let { norm ->
+                                    if (!isWatchingPageInfraHost(hostOnly(norm))) {
+                                        embeds.putIfAbsent(norm, activeServerLabel)
                                     }
                                 }
                             }
-                            val dls: JSONArray? = obj.optJSONArray("dls")
-                            if (dls != null) {
-                                for (i in 0 until dls.length()) {
-                                    val d = dls.optJSONObject(i) ?: continue
-                                    val u = CimaNowCrypto.normalizeEmbedUrl(d.optString("u")) ?: continue
-                                    val lbl = d.optString("t").ifBlank { "Download" }
-                                    val q = Regex("""(2160|1440|1080|720|480|360|240)""").find("$lbl $u")
-                                        ?.groupValues?.get(1)?.toIntOrNull()
-                                    downloads.putIfAbsent(
-                                        u,
-                                        CimaNowCrypto.DownloadEntry(url = u, label = lbl, qualityHint = q),
-                                    )
-                                }
+                            for ((rawDl, lbl) in snap.downloads) {
+                                val u = CimaNowCrypto.normalizeEmbedUrl(rawDl) ?: continue
+                                val q = Regex("""(2160|1440|1080|720|480|360|240)""").find("$lbl $u")
+                                    ?.groupValues?.get(1)?.toIntOrNull()
+                                downloads.putIfAbsent(
+                                    u,
+                                    CimaNowCrypto.DownloadEntry(url = u, label = lbl, qualityHint = q),
+                                )
                             }
-                            for (ic in interceptedEmbeds) {
-                                CimaNowCrypto.normalizeEmbedUrl(ic)?.let { norm ->
-                                    embeds.putIfAbsent(norm, tabName)
-                                }
-                            }
-                            if (clicked >= 0) {
-                                clickedTabUpTo = clicked
-                                parseCssTapTarget(tapStr)?.let { target ->
+                            if (snap.clickedIdx >= 0) {
+                                clickedTabUpTo = snap.clickedIdx
+                                activeServerLabel = snap.tabName.ifBlank { "Server ${snap.clickedIdx + 1}" }
+                                parseCssTapTarget(snap.tapSpec)?.let { target ->
                                     dispatchTrustedTap(containerRef, webViewRef, target)
                                 }
+                                delay(680L)
+                                continue
                             } else if (totalTabs > 0 && clickedTabUpTo >= totalTabs - 1 && (embeds.isNotEmpty() || downloads.isNotEmpty())) {
-                                delay(450L)
+                                // Only attach intercepted URLs if their host wasn't already captured with `#fragment` via `iframe.src`
+                                val capturedHosts = embeds.keys.map { hostOnly(it) }.toSet()
                                 for (ic in interceptedEmbeds) {
                                     CimaNowCrypto.normalizeEmbedUrl(ic)?.let { norm ->
-                                        embeds.putIfAbsent(norm, "Watch")
+                                        if (hostOnly(norm) !in capturedHosts) {
+                                            embeds.putIfAbsent(norm, activeServerLabel)
+                                        }
                                     }
                                 }
                                 break
                             }
                         }
-                        delay(420L)
+                        delay(450L)
                     }
                 }
 
@@ -1115,24 +1310,27 @@ object CimaNowGatewaySolver {
         return CssTapTarget(x, y, iw, ih)
     }
 
-    private fun computeViewTapPoint(wv: WebView, target: CssTapTarget): Pair<Float, Float> {
-        val density = wv.resources.displayMetrics.density.coerceAtLeast(1f)
-        val scaleX = if (target.viewportW > 0f && wv.width > 0) {
-            wv.width.toFloat() / target.viewportW
+    internal fun computeViewTapPoint(wvWidth: Int, wvHeight: Int, density: Float, target: CssTapTarget): Pair<Float, Float> {
+        val safeDensity = density.coerceAtLeast(1f)
+        val scaleX = if (target.viewportW > 0f && wvWidth > 0) {
+            wvWidth.toFloat() / target.viewportW
         } else {
-            density
+            safeDensity
         }
-        val scaleY = if (target.viewportH > 0f && wv.height > 0) {
-            wv.height.toFloat() / target.viewportH
+        val scaleY = if (target.viewportH > 0f && wvHeight > 0) {
+            wvHeight.toFloat() / target.viewportH
         } else {
-            density
+            safeDensity
         }
-        val maxX = (wv.width - 2).coerceAtLeast(4).toFloat()
-        val maxY = (wv.height - 2).coerceAtLeast(4).toFloat()
+        val maxX = (wvWidth - 2).coerceAtLeast(4).toFloat()
+        val maxY = (wvHeight - 2).coerceAtLeast(4).toFloat()
         val realX = (target.cssX * scaleX).coerceIn(2f, maxX)
         val realY = (target.cssY * scaleY).coerceIn(2f, maxY)
         return realX to realY
     }
+
+    private fun computeViewTapPoint(wv: WebView, target: CssTapTarget): Pair<Float, Float> =
+        computeViewTapPoint(wv.width, wv.height, wv.resources.displayMetrics.density, target)
 
     private suspend fun dispatchTrustedTap(
         container: PassThroughWebViewContainer?,
@@ -1147,68 +1345,82 @@ object CimaNowGatewaySolver {
                 toolType = MotionEvent.TOOL_TYPE_FINGER
             },
         )
-        withContext(Dispatchers.Main) {
+        var downEvent: MotionEvent? = null
+        try {
+            withContext(Dispatchers.Main) {
+                runCatching {
+                    val (rx, ry) = computeViewTapPoint(wv, target)
+                    val coords = arrayOf(
+                        MotionEvent.PointerCoords().apply {
+                            x = rx
+                            y = ry
+                            pressure = 0.68f
+                            size = 0.12f
+                        },
+                    )
+                    val down = MotionEvent.obtain(
+                        downAt, downAt, MotionEvent.ACTION_DOWN, 1, props, coords,
+                        0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
+                    )
+                    downEvent = down
+                    container?.allowSyntheticTouch = true
+                    try {
+                        wv.dispatchTouchEvent(down)
+                    } finally {
+                        container?.allowSyntheticTouch = false
+                    }
+                }
+            }
+            delay(65L)
+            withContext(Dispatchers.Main) {
+                runCatching {
+                    val (rx, ry) = computeViewTapPoint(wv, target)
+                    val coords = arrayOf(
+                        MotionEvent.PointerCoords().apply {
+                            x = rx
+                            y = ry
+                            pressure = 0.68f
+                            size = 0.12f
+                        },
+                    )
+                    val upAt = SystemClock.uptimeMillis()
+                    val up = MotionEvent.obtain(
+                        downAt, upAt, MotionEvent.ACTION_UP, 1, props, coords,
+                        0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
+                    )
+                    container?.allowSyntheticTouch = true
+                    try {
+                        wv.dispatchTouchEvent(up)
+                    } finally {
+                        container?.allowSyntheticTouch = false
+                        up.recycle()
+                    }
+                }
+            }
+        } finally {
+            runCatching { downEvent?.recycle() }
+        }
+    }
+
+    internal fun decodeEvaluateJavascriptResult(raw: String?): String {
+        val s = raw?.trim() ?: return ""
+        if (s.isEmpty() || s == "null" || s == "undefined") return ""
+        if (s.length >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
             runCatching {
-                val (rx, ry) = computeViewTapPoint(wv, target)
-                val coords = arrayOf(
-                    MotionEvent.PointerCoords().apply {
-                        x = rx
-                        y = ry
-                        pressure = 0.68f
-                        size = 0.12f
-                    },
-                )
-                val down = MotionEvent.obtain(
-                    downAt, downAt, MotionEvent.ACTION_DOWN, 1, props, coords,
-                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
-                )
-                container?.allowSyntheticTouch = true
-                try {
-                    wv.dispatchTouchEvent(down)
-                } finally {
-                    container?.allowSyntheticTouch = false
-                    down.recycle()
+                val parsed = JSONTokener(s).nextValue()
+                if (parsed != null && parsed !== JSONObject.NULL) {
+                    return parsed.toString()
                 }
             }
         }
-        delay(60L)
-        withContext(Dispatchers.Main) {
-            runCatching {
-                val (rx, ry) = computeViewTapPoint(wv, target)
-                val coords = arrayOf(
-                    MotionEvent.PointerCoords().apply {
-                        x = rx
-                        y = ry
-                        pressure = 0.68f
-                        size = 0.12f
-                    },
-                )
-                val upAt = SystemClock.uptimeMillis()
-                val up = MotionEvent.obtain(
-                    downAt, upAt, MotionEvent.ACTION_UP, 1, props, coords,
-                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0,
-                )
-                container?.allowSyntheticTouch = true
-                try {
-                    wv.dispatchTouchEvent(up)
-                } finally {
-                    container?.allowSyntheticTouch = false
-                    up.recycle()
-                }
-            }
-        }
+        return s
     }
 
     private suspend fun evalJsSuspend(wv: WebView, script: String): String =
         withTimeoutOrNull(2_000L) {
             val d = CompletableDeferred<String>()
             wv.evaluateJavascript(script) { raw ->
-                val unquoted = if (raw != null && raw.length >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
-                    raw.substring(1, raw.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
-                } else {
-                    raw.orEmpty()
-                }
-                if (!d.isCompleted) d.complete(unquoted)
+                if (!d.isCompleted) d.complete(decodeEvaluateJavascriptResult(raw))
             }
             d.await()
         }.orEmpty()
