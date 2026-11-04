@@ -42,12 +42,25 @@ jobs:
         run: |
           if [ -f "FaselHD/build/FaselHD.cs3" ]; then
             cp FaselHD/build/FaselHD.cs3 build/FaselHD.cs3
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          artifact = Path("build/FaselHD.cs3")
+          catalog = Path("plugins.json")
+          plugins = json.loads(catalog.read_text(encoding="utf-8"))
+          for plugin in plugins:
+              if plugin.get("internalName") == "FaselHD":
+                  plugin["fileSize"] = artifact.stat().st_size
+          catalog.write_text(json.dumps(plugins, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
+          PY
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             git add -f build/FaselHD.cs3
+            git add plugins.json
             git commit --allow-empty -m "🤖 Build FaselHD.cs3"
             git pull --rebase origin "$GITHUB_REF_NAME" || true
-            git push
+            git push origin "$GITHUB_REF_NAME"
           else
             echo "FaselHD.cs3 not found!"
           fi

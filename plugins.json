@@ -60,9 +60,10 @@
         "tvTypes": [
             "TvSeries",
             "Movie",
-            "Anime"
+            "Anime",
+            "AnimeMovie"
         ],
-        "version": 9,
+        "version": 10,
         "internalName": "FaselHD",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/FaselHD.cs3",
         "name": "فاصل إعلاني (FaselHD)",

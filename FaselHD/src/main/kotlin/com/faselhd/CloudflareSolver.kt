@@ -5,7 +5,6 @@ import android.app.Activity
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -14,26 +13,50 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 object CloudflareSolver {
-    private const val TAG = "CF_Solver_Hidden"
-
     suspend fun solve(activity: Activity?, url: String, userAgent: String): Document? {
-        return suspendCoroutine { continuation ->
-            if (activity == null || activity.isFinishing) {
+        return suspendCancellableCoroutine { continuation ->
+            if (activity == null || activity.isFinishing || activity.isDestroyed) {
                 continuation.resume(null)
-                return@suspendCoroutine
+                return@suspendCancellableCoroutine
             }
 
-            Handler(Looper.getMainLooper()).post {
-                val rootView = activity.findViewById<ViewGroup>(R.id.content) ?: run {
+            val mainHandler = Handler(Looper.getMainLooper())
+            var webViewRef: WebView? = null
+            var pollingHandlerRef: Handler? = null
+            var cancelCleanup: (() -> Unit)? = null
+            continuation.invokeOnCancellation {
+                mainHandler.post {
+                    val cleanup = cancelCleanup
+                    if (cleanup != null) {
+                        cleanup()
+                    } else {
+                        pollingHandlerRef?.removeCallbacksAndMessages(null)
+                        val view = webViewRef
+                        webViewRef = null
+                        runCatching { view?.stopLoading() }
+                        runCatching { (view?.parent as? ViewGroup)?.removeView(view) }
+                        runCatching { view?.destroy() }
+                    }
+                }
+            }
+
+            mainHandler.post {
+                if (!continuation.isActive) return@post
+                if (activity.isFinishing || activity.isDestroyed) {
                     continuation.resume(null)
+                    return@post
+                }
+                val rootView = activity.findViewById<ViewGroup>(R.id.content) ?: run {
+                    if (continuation.isActive) continuation.resume(null)
                     return@post
                 }
 
                 val webView = WebView(activity)
+                webViewRef = webView
                 webView.layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -60,29 +83,43 @@ object CloudflareSolver {
                 var isSolved = false
                 var isProcessingClick = false
                 val pollingHandler = Handler(Looper.getMainLooper())
+                pollingHandlerRef = pollingHandler
+                cancelCleanup = {
+                    if (!isSolved) {
+                        isSolved = true
+                        pollingHandler.removeCallbacksAndMessages(null)
+                        runCatching { webView.stopLoading() }
+                        runCatching { (webView.parent as? ViewGroup)?.removeView(webView) }
+                        runCatching { webView.destroy() }
+                        webViewRef = null
+                        pollingHandlerRef = null
+                    }
+                }
 
-                fun finishSuccess(html: String?) {
+                fun finishSuccess(html: String?, pageUrl: String = url) {
                     if (!isSolved) {
                         isSolved = true
                         cookieManager.flush()
                         try {
                             pollingHandler.removeCallbacksAndMessages(null)
-                            rootView.removeView(webView)
+                            (webView.parent as? ViewGroup)?.removeView(webView)
                             webView.destroy()
+                            webViewRef = null
+                            pollingHandlerRef = null
                         } catch (e: Exception) {}
 
                         if (html == null) {
-                            continuation.resume(null)
+                            if (continuation.isActive) continuation.resume(null)
                             return
                         }
 
-                        var cleanHtml = html.removeSurrounding("\"")
+                        val cleanHtml = html.removeSurrounding("\"")
                             .replace("\\u003C", "<")
                             .replace("\\u003E", ">")
                             .replace("\\\"", "\"")
                             .replace("\\\\", "\\")
 
-                        continuation.resume(Jsoup.parse(cleanHtml))
+                        if (continuation.isActive) continuation.resume(Jsoup.parse(cleanHtml, pageUrl))
                     }
                 }
 
@@ -109,7 +146,8 @@ object CloudflareSolver {
                 fun startPolling() {
                     val runnable = object : Runnable {
                         override fun run() {
-                            if (isSolved || isProcessingClick) {
+                            if (isSolved) return
+                            if (isProcessingClick) {
                                 pollingHandler.postDelayed(this, 2000)
                                 return
                             }
@@ -117,16 +155,17 @@ object CloudflareSolver {
                             val jsGetCoords = """
                                 (function(){
                                     try{
-                                        var box = document.querySelector("$targetCssPath");
-                                        if(!box) return "NO_BOX";
+                                        var html = document.documentElement.innerHTML || "";
+                                        var challengeText = (document.title + " " + html).toLowerCase();
+                                        var active = /just a moment|checking your browser|cf-browser-verification|__cf_chl_opt|cf-chl-widget|cloudflare ray id/.test(challengeText);
+                                        if (!active) return "NO_CHALLENGE";
+                                        var box = document.querySelector('input[type="checkbox"]')?.parentElement
+                                            || document.querySelector("$targetCssPath")
+                                            || document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                                        if (!box) return "NO_BOX";
                                         var r = box.getBoundingClientRect();
-                                        if(r.width === 0 && r.height === 0) return "NO_BOX";
-                                        var size = Math.min(36, Math.max(18, Math.round(r.height * 0.55)));
-                                        var margin = Math.round(Math.max(8, r.width * 0.03));
-                                        var centerY = r.top + (r.height / 2);
-                                        var rightSideX = r.right - (size / 2) - margin;
-                                        var leftSideX = r.left + (size / 2) + margin;
-                                        return rightSideX + "," + centerY + "|" + leftSideX + "," + centerY;
+                                        if (r.width < 1 || r.height < 1) return "NO_BOX";
+                                        return (r.left + r.width / 2) + "," + (r.top + r.height / 2);
                                     }catch(e){ return "ERROR"; }
                                 })();
                             """.trimIndent()
@@ -134,20 +173,17 @@ object CloudflareSolver {
                             webView.evaluateJavascript(jsGetCoords) { res ->
                                 try {
                                     val clean = res?.removeSurrounding("\"")
-                                    if (clean != null && clean.contains("|")) {
+                                    val coords = clean?.split(",")
+                                    val x = coords?.getOrNull(0)?.toFloatOrNull()
+                                    val y = coords?.getOrNull(1)?.toFloatOrNull()
+                                    if (x != null && y != null) {
                                         isProcessingClick = true
-                                        val sides = clean.split("|")
-                                        val (rx, ry) = sides[0].split(",").map { it.toFloatOrNull() }
-                                        val (lx, ly) = sides[1].split(",").map { it.toFloatOrNull() }
-                                        if (rx != null && ry != null && lx != null && ly != null) {
-                                            simulateRealTouch(webView, rx, ry)
-                                            pollingHandler.postDelayed({
-                                                simulateRealTouch(webView, lx, ly)
-                                                pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
-                                            }, 250)
-                                        } else { isProcessingClick = false }
+                                        simulateRealTouch(webView, x, y)
+                                        pollingHandler.postDelayed({ isProcessingClick = false }, 1800)
                                     }
-                                } catch (e: Exception) { isProcessingClick = false }
+                                } catch (_: Exception) {
+                                    isProcessingClick = false
+                                }
                             }
                             pollingHandler.postDelayed(this, 2000)
                         }
@@ -164,11 +200,11 @@ object CloudflareSolver {
                     val js = """
                         (function(){
                             try{
-                                var hasBox = document.querySelector("$targetCssPath") != null;
                                 var html = document.documentElement.innerHTML || "";
-                                var stillCloudflare = html.toLowerCase().includes("cloudflare") || html.toLowerCase().includes("checking your browser");
-                                return location.href + "|" + document.readyState + "|" + hasBox + "|" + stillCloudflare;
-                            }catch(e){ return location.href + "|loading|false|true"; }
+                                var challengeText = (document.title + " " + html).toLowerCase();
+                                var stillCloudflare = /just a moment|checking your browser|cf-browser-verification|__cf_chl_opt|challenge-running|cf-chl-widget|cloudflare ray id/.test(challengeText);
+                                return location.href + "|" + document.readyState + "|" + stillCloudflare;
+                            }catch(e){ return location.href + "|loading|true"; }
                         })();
                     """.trimIndent()
 
@@ -179,12 +215,14 @@ object CloudflareSolver {
                         }
 
                         val parts = res.replace("\"", "").split("|")
-                        if (parts.size < 4) {
+                        if (parts.size < 3) {
                             pollingHandler.postDelayed({ waitUntilReady() }, 200)
                             return@evaluateJavascript
                         }
 
-                        val (currentUrl, ready, hasBox, stillCloudflare) = parts
+                        val currentUrl = parts[0]
+                        val ready = parts[1]
+                        val stillCloudflare = parts[2]
                         val now = SystemClock.uptimeMillis()
                         if (currentUrl != lastUrl) {
                             lastUrl = currentUrl
@@ -192,11 +230,11 @@ object CloudflareSolver {
                         }
                         val stableTime = now - stableSince
 
-                        if (hasBox == "false" && stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
+                        if (stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
                             fetched = true
                             pollingHandler.postDelayed({
                                 webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
-                                    finishSuccess(html)
+                                    finishSuccess(html, currentUrl)
                                 }
                             }, 500)
                             return@evaluateJavascript
