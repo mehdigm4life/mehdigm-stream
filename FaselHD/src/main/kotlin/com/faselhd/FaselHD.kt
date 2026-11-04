@@ -100,8 +100,25 @@ class FaselHD(private val context: Context) : MainAPI() {
         return CommonActivity.activity?.takeIf { !it.isFinishing && !it.isDestroyed }
     }
 
-    private val userAgent =
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    private val userAgent: String by lazy {
+        val nativeWebViewAgent = runCatching { WebSettings.getDefaultUserAgent(context) }.getOrNull()
+        nativeWebViewAgent
+            ?.replace("; wv)", ")")
+            ?.replace("Version/4.0 ", "")
+            ?.replace(" Version/4.0", "")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    }
+
+    private val chromeMajorVersion: String by lazy {
+        Regex("(?:Chrome|Chromium)/([0-9]+)")
+            .find(userAgent)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: "124"
+    }
 
     private val httpClient by lazy {
         app.baseClient.newBuilder()
@@ -145,7 +162,7 @@ class FaselHD(private val context: Context) : MainAPI() {
         val refererHost = referer?.let { value -> runCatching { Uri.parse(value).host }.getOrNull() }
         val headers = mutableMapOf(
             "User-Agent" to userAgent,
-            "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"",
+            "sec-ch-ua" to "\"Not:A-Brand\";v=\"99\", \"Chromium\";v=\"$chromeMajorVersion\", \"Google Chrome\";v=\"$chromeMajorVersion\"",
             "sec-ch-ua-mobile" to "?1",
             "sec-ch-ua-platform" to "\"Android\"",
             "upgrade-insecure-requests" to "1",
@@ -168,30 +185,35 @@ class FaselHD(private val context: Context) : MainAPI() {
     private fun getProtectedHeaders(): Map<String, String> = getModernHeaders(mainUrl)
 
     private fun isCloudflareChallenge(code: Int, html: String): Boolean {
-        if (code == 403 || code == 503) return true
-        val lower = html.take(24_000).lowercase()
-        return listOf(
+        if (code == 403 || code == 429 || code == 503) return true
+        val lower = html.take(32_000).lowercase()
+        val explicitMarkers = listOf(
             "<title>just a moment",
             "cf-browser-verification",
             "cf-chl-widget",
             "__cf_chl_opt",
             "challenge-running",
             "checking your browser",
+            "checking if the site connection is secure",
+            "attention required",
             "verify you are human",
-        ).any { marker -> lower.contains(marker) }
+            "/cdn-cgi/challenge-platform/",
+        )
+        val turnstileChallenge = lower.contains("cf-turnstile") &&
+            (lower.contains("_cf_chl_") || lower.contains("verify you are human") || lower.contains("just a moment"))
+        return explicitMarkers.any { marker -> lower.contains(marker) } || turnstileChallenge
     }
 
-    // Try ordinary HTTP first, including challenge detection for HTTP 200 pages;
-    // solve in a WebView and retry once with the newly-issued cookies if needed.
+    // Keep ordinary HTTP attempts short; Cloudflare and network-level failures get one WebView fallback.
     private suspend fun smartGet(url: String, referer: String? = null): Document {
         val cleanUrl = toAbsolute(url, mainUrl) ?: url.trim()
         var challengeDetected = false
-        for (attempt in 1..3) {
+        for (attempt in 1..2) {
             try {
                 val response = app.get(
                     cleanUrl,
                     headers = getModernHeaders(cleanUrl, referer),
-                    timeout = 30L,
+                    timeout = 15L,
                     allowRedirects = true,
                 )
                 val html = response.text
@@ -201,13 +223,11 @@ class FaselHD(private val context: Context) : MainAPI() {
                 ) {
                     return document
                 }
-                if (isCloudflareChallenge(response.code, html)) {
+                if (isCloudflareChallenge(response.code, html) ||
+                    (response.code in 200..299 && html.isBlank())
+                ) {
                     challengeDetected = true
                     break
-                }
-                if (response.code == 429) {
-                    delay(1_000L * attempt)
-                    continue
                 }
                 return document
             } catch (cancelled: CancellationException) {
@@ -215,12 +235,15 @@ class FaselHD(private val context: Context) : MainAPI() {
             } catch (error: Exception) {
                 val message = error.message.orEmpty()
                 when {
-                    message.contains("429") -> delay(1_000L * attempt)
-                    message.contains("403") || message.contains("503") -> {
+                    message.contains("403") || message.contains("429") || message.contains("503") -> {
                         challengeDetected = true
                         break
                     }
-                    attempt == 3 -> return Jsoup.parse("", cleanUrl)
+                    attempt == 2 -> {
+                        // A WebView uses Chromium's network stack and can succeed where OkHttp times out.
+                        challengeDetected = true
+                        break
+                    }
                     else -> delay(250L * attempt)
                 }
             }
@@ -230,13 +253,13 @@ class FaselHD(private val context: Context) : MainAPI() {
         return cfLock.withLock {
             val solved = CloudflareSolver.solve(activeActivity(), cleanUrl, userAgent)
                 ?: return@withLock Jsoup.parse("", cleanUrl)
-            if (isCloudflareChallenge(200, solved.outerHtml())) return@withLock Jsoup.parse("", cleanUrl)
+            val solvedHtml = solved.outerHtml()
 
             val retried = try {
                 app.get(
                     cleanUrl,
                     headers = getModernHeaders(cleanUrl, referer),
-                    timeout = 30L,
+                    timeout = 15L,
                     allowRedirects = true,
                 )
             } catch (cancelled: CancellationException) {
@@ -246,14 +269,15 @@ class FaselHD(private val context: Context) : MainAPI() {
             }
             if (retried != null) {
                 val retriedHtml = retried.text
-                if (retried.code in 200..299 && !isCloudflareChallenge(retried.code, retriedHtml)) {
-                    Jsoup.parse(retriedHtml, retried.url)
-                } else {
-                    solved
+                if (retried.code in 200..299 && retriedHtml.isNotBlank() &&
+                    !isCloudflareChallenge(retried.code, retriedHtml)
+                ) {
+                    return@withLock Jsoup.parse(retriedHtml, retried.url)
                 }
-            } else {
-                solved
             }
+
+            if (!isCloudflareChallenge(200, solvedHtml)) solved
+            else Jsoup.parse("", cleanUrl)
         }
     }
 
@@ -269,20 +293,8 @@ class FaselHD(private val context: Context) : MainAPI() {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            if (error.message.orEmpty().contains("429")) {
-                delay(1_000L)
-                return try {
-                    requestBlock(currentCookies).takeIf { it.isNotBlank() && !isCloudflareChallenge(200, it) }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            if (error.message != "403_FORBIDDEN" &&
-                !error.message.orEmpty().contains("403") &&
-                !error.message.orEmpty().contains("503")
-            ) return null
+            val message = error.message.orEmpty()
+            if (listOf("403", "429", "503").none { message.contains(it) }) return null
             challengeDetected = true
         }
 
