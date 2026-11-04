@@ -428,6 +428,13 @@ class FaselHD(private val context: Context) : MainAPI() {
     // الصفحة الرئيسية + الأقسام
     // ------------------------------------------------------------------
 
+    private fun hasNextPage(doc: Document, nextPage: Int): Boolean {
+        val pagePath = Regex("""/page/$nextPage(?:/|[?#]|$)""", RegexOption.IGNORE_CASE)
+        val pageQuery = Regex("""[?&](?:page|paged)=$nextPage(?:&|$)""", RegexOption.IGNORE_CASE)
+        return doc.select("ul.pagination a[href], .pagination a[href], nav.pagination a[href]")
+            .any { link -> pagePath.containsMatchIn(link.attr("href")) || pageQuery.containsMatchIn(link.attr("href")) }
+    }
+
     override val mainPage = mainPageOf(
         "$mainUrl/main" to "الرئيسية",
         "$mainUrl/movies" to "أفلام أجنبية",
@@ -488,8 +495,7 @@ class FaselHD(private val context: Context) : MainAPI() {
         val items = groupResults(
             doc.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult(docBase) }
         )
-        val hasNext = doc.select("ul.pagination a[href]")
-            .any { it.attr("href").contains("page/${page + 1}") }
+        val hasNext = hasNextPage(doc, page + 1)
         return newHomePageResponse(request.name, items, hasNext)
     }
 
@@ -545,7 +551,7 @@ class FaselHD(private val context: Context) : MainAPI() {
         val docBase = document.location().takeIf { it.startsWith("http", ignoreCase = true) } ?: searchUrl
         var items = document.select("div#postList div.postDiv, div.postDiv, article")
             .mapNotNull { it.toSearchResult(docBase) }
-        val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
+        val hasNext = hasNextPage(document, page + 1)
 
         // If the ordinary WordPress search is blocked, use the site's own AJAX search.
         if (items.isEmpty() && page == 1) {
