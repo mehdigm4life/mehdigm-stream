@@ -5,74 +5,41 @@ import android.app.Activity
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.InputDevice
+import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import org.json.JSONTokener
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
-import kotlin.math.roundToInt
+import kotlin.coroutines.suspendCoroutine
 
 object CloudflareSolver {
-    private const val SOLVE_TIMEOUT_MS = 35_000L
-    private const val TARGET_CSS_PATH = "html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div"
+    private const val TAG = "CF_Solver_Hidden"
 
     suspend fun solve(activity: Activity?, url: String, userAgent: String): Document? {
-        return suspendCancellableCoroutine { continuation ->
-            if (activity == null || activity.isFinishing || activity.isDestroyed) {
+        return suspendCoroutine { continuation ->
+            if (activity == null || activity.isFinishing) {
                 continuation.resume(null)
-                return@suspendCancellableCoroutine
+                return@suspendCoroutine
             }
 
-            val mainHandler = Handler(Looper.getMainLooper())
-            var webViewRef: WebView? = null
-            var pollingHandlerRef: Handler? = null
-            var cancelCleanup: (() -> Unit)? = null
-            continuation.invokeOnCancellation {
-                mainHandler.post {
-                    val cleanup = cancelCleanup
-                    if (cleanup != null) {
-                        cleanup()
-                    } else {
-                        pollingHandlerRef?.removeCallbacksAndMessages(null)
-                        val view = webViewRef
-                        webViewRef = null
-                        runCatching { view?.stopLoading() }
-                        runCatching { (view?.parent as? ViewGroup)?.removeView(view) }
-                        runCatching { view?.destroy() }
-                    }
-                }
-            }
-
-            mainHandler.post {
-                if (!continuation.isActive) return@post
-                if (activity.isFinishing || activity.isDestroyed) {
-                    continuation.resume(null)
-                    return@post
-                }
+            Handler(Looper.getMainLooper()).post {
                 val rootView = activity.findViewById<ViewGroup>(R.id.content) ?: run {
-                    if (continuation.isActive) continuation.resume(null)
+                    continuation.resume(null)
                     return@post
                 }
 
                 val webView = WebView(activity)
-                webViewRef = webView
                 webView.layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                // Keep Chromium in the real viewport: off-screen or fully transparent WebViews
-                // can fail Cloudflare's viewport checks and make synthetic taps ineffective.
-                webView.alpha = 0.01f
-                webView.translationX = 0f
-                webView.translationY = 0f
+                webView.alpha = 0f
+                webView.translationX = 10000f
                 webView.isFocusable = false
                 webView.isFocusableInTouchMode = false
                 webView.isClickable = false
@@ -84,280 +51,154 @@ object CloudflareSolver {
                     this.userAgentString = userAgent
                     useWideViewPort = true
                     loadWithOverviewMode = true
-                    javaScriptCanOpenWindowsAutomatically = false
-                    setSupportMultipleWindows(false)
-                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                    loadsImagesAutomatically = true
-                    blockNetworkImage = false
-                    cacheMode = WebSettings.LOAD_DEFAULT
                 }
 
                 val cookieManager = CookieManager.getInstance()
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
 
-                fun clearanceValue(cookieUrl: String): String? = runCatching {
-                    cookieManager.getCookie(cookieUrl)
-                        ?.split(';')
-                        ?.firstOrNull { it.trim().startsWith("cf_clearance=", ignoreCase = true) }
-                        ?.substringAfter('=')
-                        ?.trim()
-                }.getOrNull()
-
-                // Avoid treating an old clearance cookie as proof that this solve succeeded.
-                val initialClearance = clearanceValue(url)
                 var isSolved = false
                 var isProcessingClick = false
-                var pollingStarted = false
-                var readinessStarted = false
-                var fetched = false
-                var tapCount = 0
-                var lastTapAt = 0L
-                var targetPathChallengeSeen = false
-                var lastUrl: String? = null
-                var stableSince = 0L
-
                 val pollingHandler = Handler(Looper.getMainLooper())
-                pollingHandlerRef = pollingHandler
-                cancelCleanup = {
+
+                fun finishSuccess(html: String?) {
                     if (!isSolved) {
                         isSolved = true
-                        pollingHandler.removeCallbacksAndMessages(null)
-                        runCatching { webView.stopLoading() }
-                        runCatching { (webView.parent as? ViewGroup)?.removeView(webView) }
-                        runCatching { webView.destroy() }
-                        webViewRef = null
-                        pollingHandlerRef = null
+                        cookieManager.flush()
+                        try {
+                            pollingHandler.removeCallbacksAndMessages(null)
+                            rootView.removeView(webView)
+                            webView.destroy()
+                        } catch (e: Exception) {}
+
+                        if (html == null) {
+                            continuation.resume(null)
+                            return
+                        }
+
+                        var cleanHtml = html.removeSurrounding("\"")
+                            .replace("\\u003C", "<")
+                            .replace("\\u003E", ">")
+                            .replace("\\\"", "\"")
+                            .replace("\\\\", "\\")
+
+                        continuation.resume(Jsoup.parse(cleanHtml))
                     }
                 }
 
-                fun finishSuccess(html: String?, pageUrl: String = url) {
-                    if (isSolved) return
-                    isSolved = true
-                    cookieManager.flush()
-                    pollingHandler.removeCallbacksAndMessages(null)
-                    runCatching { webView.stopLoading() }
-                    runCatching { (webView.parent as? ViewGroup)?.removeView(webView) }
-                    runCatching { webView.destroy() }
-                    webViewRef = null
-                    pollingHandlerRef = null
-
-                    if (!continuation.isActive) return
-                    if (html == null) {
-                        continuation.resume(null)
-                        return
-                    }
-                    val decodedHtml = decodeJavascriptString(html).orEmpty()
-                    continuation.resume(Jsoup.parse(decodedHtml, pageUrl))
-                }
-
-                pollingHandler.postDelayed({ finishSuccess(null) }, SOLVE_TIMEOUT_MS)
-
-                fun finishWithCurrentPage(pageUrl: String = webView.url ?: url) {
-                    if (isSolved || fetched) return
-                    fetched = true
-                    webView.evaluateJavascript(
-                        "document.documentElement ? document.documentElement.outerHTML : (document.body ? document.body.innerHTML : '')",
-                    ) { html -> finishSuccess(html, pageUrl) }
-                }
+                pollingHandler.postDelayed({ finishSuccess(null) }, 60000)
 
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density
                     val realX = cssX * density
                     val realY = cssY * density
                     val downTime = SystemClock.uptimeMillis()
-                    val properties = arrayOf(MotionEvent.PointerProperties().apply {
-                        id = 0
-                        toolType = MotionEvent.TOOL_TYPE_FINGER
-                    })
-                    val coordinates = arrayOf(MotionEvent.PointerCoords().apply {
-                        x = realX
-                        y = realY
-                        pressure = 0.7f
-                        size = 0.12f
-                    })
-                    fun makeEvent(action: Int, eventTime: Long) = MotionEvent.obtain(
-                        downTime,
-                        eventTime,
-                        action,
-                        1,
-                        properties,
-                        coordinates,
-                        0,
-                        0,
-                        1f,
-                        1f,
-                        0,
-                        0,
-                        InputDevice.SOURCE_TOUCHSCREEN,
-                        0,
-                    )
-
-                    val down = makeEvent(MotionEvent.ACTION_DOWN, downTime)
-                    view.dispatchTouchEvent(down)
-                    down.recycle()
+                    val eventTime = SystemClock.uptimeMillis() + 50
+                    val downEvent = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, realX, realY, 0)
+                    view.dispatchTouchEvent(downEvent)
                     view.postDelayed({
-                        val up = makeEvent(MotionEvent.ACTION_UP, SystemClock.uptimeMillis())
-                        view.dispatchTouchEvent(up)
-                        up.recycle()
-                    }, 80)
+                        val upEvent = MotionEvent.obtain(downTime, eventTime, MotionEvent.ACTION_UP, realX, realY, 0)
+                        view.dispatchTouchEvent(upEvent)
+                        downEvent.recycle()
+                        upEvent.recycle()
+                    }, 50)
                 }
 
+                val targetCssPath = "html > body > div:nth-of-type(1) > div > div:nth-of-type(2) > div"
+
                 fun startPolling() {
-                    if (pollingStarted || isSolved) return
-                    pollingStarted = true
                     val runnable = object : Runnable {
                         override fun run() {
-                            if (isSolved) return
-                            if (isProcessingClick) {
-                                pollingHandler.postDelayed(this, 1500)
+                            if (isSolved || isProcessingClick) {
+                                pollingHandler.postDelayed(this, 2000)
                                 return
                             }
 
                             val jsGetCoords = """
                                 (function(){
-                                    try {
-                                        var html = (document.documentElement && document.documentElement.innerHTML || "").toLowerCase();
-                                        var title = (document.title || "").toLowerCase();
-                                        var text = title + " " + html;
-                                        var pathBox = document.querySelector("$TARGET_CSS_PATH");
-                                        var explicit = /just a moment|checking your browser|checking if the site connection is secure|cf-browser-verification|__cf_chl_opt|cf-chl-widget|challenge-running|cloudflare ray id|verify you are human|attention required/.test(text);
-                                        var turnstile = html.indexOf("cf-turnstile") >= 0 && (html.indexOf("_cf_chl_") >= 0 || text.indexOf("verify you are human") >= 0 || title.indexOf("just a moment") >= 0);
-                                        var referenceFallback = !!pathBox && html.indexOf("cloudflare") >= 0;
-                                        if (!explicit && !turnstile && !referenceFallback) return "NO_CHALLENGE";
-
-                                        var input = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
-                                        var token = input && input.value ? input.value.length : 0;
-                                        var box = null;
-                                        var boxSource = "";
-                                        if (input) {
-                                            var parent = input.parentElement;
-                                            while (parent && parent !== document.body) {
-                                                var parentRect = parent.getBoundingClientRect();
-                                                if (parentRect.width >= 180 && parentRect.height >= 35 && parentRect.height <= 160) {
-                                                    box = parent;
-                                                    boxSource = "input";
-                                                    break;
-                                                }
-                                                parent = parent.parentElement;
-                                            }
-                                        }
-                                        if (!box) {
-                                            box = document.querySelector('input[type="checkbox"]')?.parentElement;
-                                            if (box) boxSource = "checkbox";
-                                        }
-                                        if (!box && pathBox) {
-                                            box = pathBox;
-                                            boxSource = "path";
-                                        }
-                                        if (!box) {
-                                            box = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
-                                            if (box) boxSource = "iframe";
-                                        }
-                                        if (!box) return "NO_BOX|" + token;
-                                        var rect = box.getBoundingClientRect();
-                                        if (rect.width < 1 || rect.height < 1) return "NO_BOX|" + token;
-                                        var direction = (document.documentElement.dir || "").toLowerCase();
-                                        return "STATE|" + token + "|" + rect.left + "|" + rect.right + "|" + rect.top + "|" + rect.height + "|" + direction + "|" + boxSource;
-                                    } catch (e) { return "ERROR"; }
+                                    try{
+                                        var box = document.querySelector("$targetCssPath");
+                                        if(!box) return "NO_BOX";
+                                        var r = box.getBoundingClientRect();
+                                        if(r.width === 0 && r.height === 0) return "NO_BOX";
+                                        var size = Math.min(36, Math.max(18, Math.round(r.height * 0.55)));
+                                        var margin = Math.round(Math.max(8, r.width * 0.03));
+                                        var centerY = r.top + (r.height / 2);
+                                        var rightSideX = r.right - (size / 2) - margin;
+                                        var leftSideX = r.left + (size / 2) + margin;
+                                        return rightSideX + "," + centerY + "|" + leftSideX + "," + centerY;
+                                    }catch(e){ return "ERROR"; }
                                 })();
                             """.trimIndent()
 
-                            webView.evaluateJavascript(jsGetCoords) { result ->
-                                val state = decodeJavascriptString(result).orEmpty().split('|')
-                                if (state.size >= 8 && state[0] == "STATE") {
-                                    val tokenLength = state[1].toIntOrNull() ?: 0
-                                    val left = state[2].toFloatOrNull()
-                                    val right = state[3].toFloatOrNull()
-                                    val top = state[4].toFloatOrNull()
-                                    val height = state[5].toFloatOrNull()
-                                    val direction = state[6]
-                                    val boxSource = state[7]
-                                    val now = SystemClock.uptimeMillis()
-                                    if (tokenLength == 0 && left != null && right != null && top != null && height != null &&
-                                        right > left && height > 0 && now - lastTapAt >= 1400
-                                    ) {
-                                        val y = top + (height / 2f)
+                            webView.evaluateJavascript(jsGetCoords) { res ->
+                                try {
+                                    val clean = res?.removeSurrounding("\"")
+                                    if (clean != null && clean.contains("|")) {
                                         isProcessingClick = true
-                                        tapCount++
-                                        lastTapAt = now
-                                        if (boxSource == "path") {
-                                            // Match the reference Faselhd solver's two-edge tap fallback.
-                                            val width = right - left
-                                            val checkboxSize = (height * 0.55f).roundToInt().coerceIn(18, 36).toFloat()
-                                            val margin = (width * 0.03f).roundToInt().coerceAtLeast(8).toFloat()
-                                            val rightX = (right - (checkboxSize / 2f) - margin).coerceAtLeast(left + 1f)
-                                            val leftX = (left + (checkboxSize / 2f) + margin).coerceAtMost(right - 1f)
-                                            simulateRealTouch(webView, rightX, y)
+                                        val sides = clean.split("|")
+                                        val (rx, ry) = sides[0].split(",").map { it.toFloatOrNull() }
+                                        val (lx, ly) = sides[1].split(",").map { it.toFloatOrNull() }
+                                        if (rx != null && ry != null && lx != null && ly != null) {
+                                            simulateRealTouch(webView, rx, ry)
                                             pollingHandler.postDelayed({
-                                                if (!isSolved) {
-                                                    simulateRealTouch(webView, leftX, y)
-                                                    pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
-                                                }
+                                                simulateRealTouch(webView, lx, ly)
+                                                pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
                                             }, 250)
-                                        } else {
-                                            val preferredSide = tapCount % 2 == 1
-                                            val tapRight = if (direction == "rtl") !preferredSide else preferredSide
-                                            val x = if (tapRight) right - 28f else left + 28f
-                                            simulateRealTouch(webView, x, y)
-                                            pollingHandler.postDelayed({ isProcessingClick = false }, 1100)
-                                        }
+                                        } else { isProcessingClick = false }
                                     }
-                                }
-                                pollingHandler.postDelayed(this, 1800)
+                                } catch (e: Exception) { isProcessingClick = false }
                             }
+                            pollingHandler.postDelayed(this, 2000)
                         }
                     }
                     pollingHandler.post(runnable)
                 }
 
+                var lastUrl: String? = null
+                var stableSince = 0L
+                var fetched = false
+
                 fun waitUntilReady() {
                     if (isSolved) return
                     val js = """
                         (function(){
-                            try {
-                                var html = (document.documentElement && document.documentElement.innerHTML || "").toLowerCase();
-                                var title = (document.title || "").toLowerCase();
-                                var text = title + " " + html;
-                                var explicit = /just a moment|checking your browser|checking if the site connection is secure|cf-browser-verification|__cf_chl_opt|cf-chl-widget|challenge-running|cloudflare ray id|verify you are human|attention required/.test(text);
-                                var turnstile = html.indexOf("cf-turnstile") >= 0 && (html.indexOf("_cf_chl_") >= 0 || text.indexOf("verify you are human") >= 0 || title.indexOf("just a moment") >= 0);
-                                var hasTargetBox = document.querySelector("$TARGET_CSS_PATH") != null;
-                                var referenceFallback = hasTargetBox && html.indexOf("cloudflare") >= 0;
-                                var active = explicit || turnstile || referenceFallback;
-                                return location.href + "|" + document.readyState + "|" + (active ? "true" : "false") + "|" + (hasTargetBox ? "true" : "false");
-                            } catch (e) { return location.href + "|loading|true"; }
+                            try{
+                                var hasBox = document.querySelector("$targetCssPath") != null;
+                                var html = document.documentElement.innerHTML || "";
+                                var stillCloudflare = html.toLowerCase().includes("cloudflare") || html.toLowerCase().includes("checking your browser");
+                                return location.href + "|" + document.readyState + "|" + hasBox + "|" + stillCloudflare;
+                            }catch(e){ return location.href + "|loading|false|true"; }
                         })();
                     """.trimIndent()
 
-                    webView.evaluateJavascript(js) { result ->
-                        val parts = decodeJavascriptString(result)?.split('|')
-                        if (parts == null || parts.size < 4) {
+                    webView.evaluateJavascript(js) { res ->
+                        if (res == null) {
                             pollingHandler.postDelayed({ waitUntilReady() }, 200)
                             return@evaluateJavascript
                         }
 
-                        val currentUrl = parts[0]
-                        val ready = parts[1]
-                        val stillCloudflare = parts[2] == "true"
-                        val hasTargetBox = parts[3] == "true"
-                        if (stillCloudflare && hasTargetBox) targetPathChallengeSeen = true
+                        val parts = res.replace("\"", "").split("|")
+                        if (parts.size < 4) {
+                            pollingHandler.postDelayed({ waitUntilReady() }, 200)
+                            return@evaluateJavascript
+                        }
+
+                        val (currentUrl, ready, hasBox, stillCloudflare) = parts
                         val now = SystemClock.uptimeMillis()
                         if (currentUrl != lastUrl) {
                             lastUrl = currentUrl
                             stableSince = now
                         }
                         val stableTime = now - stableSince
-                        val currentClearance = clearanceValue(currentUrl)
-                        val hasFreshClearance = currentClearance != null && currentClearance != initialClearance
 
-                        if (hasFreshClearance) {
-                            finishWithCurrentPage(currentUrl)
-                            return@evaluateJavascript
-                        }
-                        if (!stillCloudflare && ready == "complete" && stableTime > 1200 &&
-                            (!targetPathChallengeSeen || !hasTargetBox)
-                        ) {
-                            finishWithCurrentPage(currentUrl)
+                        if (hasBox == "false" && stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
+                            fetched = true
+                            pollingHandler.postDelayed({
+                                webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
+                                    finishSuccess(html)
+                                }
+                            }, 500)
                             return@evaluateJavascript
                         }
                         pollingHandler.postDelayed({ waitUntilReady() }, 200)
@@ -365,14 +206,11 @@ object CloudflareSolver {
                 }
 
                 webView.webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, pageUrl: String?) {
-                        super.onPageFinished(view, pageUrl)
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
                         isProcessingClick = false
                         startPolling()
-                        if (!readinessStarted) {
-                            readinessStarted = true
-                            waitUntilReady()
-                        }
+                        waitUntilReady()
                     }
                 }
 
@@ -381,15 +219,4 @@ object CloudflareSolver {
             }
         }
     }
-}
-
-private fun decodeJavascriptString(result: String?): String? {
-    if (result == null) return null
-    val decoded = runCatching { JSONTokener(result).nextValue() as? String }.getOrNull()
-    if (decoded != null) return decoded
-    return result.removeSurrounding("\"")
-        .replace("\\u003C", "<")
-        .replace("\\u003E", ">")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
 }
