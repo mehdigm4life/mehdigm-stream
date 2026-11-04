@@ -184,8 +184,15 @@ class FaselHD(private val context: Context) : MainAPI() {
 
     private fun getProtectedHeaders(): Map<String, String> = getModernHeaders(mainUrl)
 
+    private fun isCloudflareStatusCode(code: Int): Boolean =
+        code == 403 || code == 429 || code == 503 || code in 520..526 || code == 530
+
+    private fun hasCloudflareStatusMessage(message: String): Boolean =
+        listOf(403, 429, 503, 520, 521, 522, 523, 524, 525, 526, 530)
+            .any { code -> message.contains(code.toString()) }
+
     private fun isCloudflareChallenge(code: Int, html: String): Boolean {
-        if (code == 403 || code == 429 || code == 503) return true
+        if (isCloudflareStatusCode(code)) return true
         val lower = html.take(32_000).lowercase()
         val explicitMarkers = listOf(
             "<title>just a moment",
@@ -218,14 +225,20 @@ class FaselHD(private val context: Context) : MainAPI() {
                 )
                 val html = response.text
                 val document = Jsoup.parse(html, response.url)
-                if (response.code in 200..299 && html.isNotBlank() &&
+                if (response.code == 429 && attempt < 2) {
+                    delay(1_000L * attempt)
+                    continue
+                }
+                if ((response.code in 200..299 || response.code in 300..308) && html.isNotBlank() &&
                     !isCloudflareChallenge(response.code, html)
                 ) {
                     return document
                 }
                 if (isCloudflareChallenge(response.code, html) ||
-                    (response.code in 200..299 && html.isBlank())
+                    (response.code in 200..299 && html.isBlank()) ||
+                    (response.code !in 200..299 && response.code !in 300..308)
                 ) {
+                    // Like the reference plugin, any unsuccessful HTTP status gets a Chromium attempt.
                     challengeDetected = true
                     break
                 }
@@ -235,7 +248,8 @@ class FaselHD(private val context: Context) : MainAPI() {
             } catch (error: Exception) {
                 val message = error.message.orEmpty()
                 when {
-                    message.contains("403") || message.contains("429") || message.contains("503") -> {
+                    message.contains("429") && attempt < 2 -> delay(1_000L * attempt)
+                    hasCloudflareStatusMessage(message) -> {
                         challengeDetected = true
                         break
                     }
@@ -293,8 +307,7 @@ class FaselHD(private val context: Context) : MainAPI() {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            val message = error.message.orEmpty()
-            if (listOf("403", "429", "503").none { message.contains(it) }) return null
+            if (!hasCloudflareStatusMessage(error.message.orEmpty())) return null
             challengeDetected = true
         }
 
@@ -338,10 +351,10 @@ class FaselHD(private val context: Context) : MainAPI() {
             }
 
             response.use { res ->
+                if (isCloudflareStatusCode(res.code)) {
+                    throw IllegalStateException("${res.code}_CLOUDFLARE")
+                }
                 when (res.code) {
-                    403 -> throw IllegalStateException("403_FORBIDDEN")
-                    429 -> throw IllegalStateException("429_TOO_MANY_REQUESTS")
-                    503 -> throw IllegalStateException("503_SERVICE_UNAVAILABLE")
                     301, 302, 303, 307, 308 -> {
                         val location = res.header("Location") ?: return ""
                         currentUrl = location.toHttpUrlOrNull()?.toString()
