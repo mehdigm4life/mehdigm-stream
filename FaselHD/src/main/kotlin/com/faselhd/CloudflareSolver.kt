@@ -18,6 +18,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 
 object CloudflareSolver {
     private const val SOLVE_TIMEOUT_MS = 35_000L
@@ -112,6 +113,7 @@ object CloudflareSolver {
                 var fetched = false
                 var tapCount = 0
                 var lastTapAt = 0L
+                var targetPathChallengeSeen = false
                 var lastUrl: String? = null
                 var stableSince = 0L
 
@@ -218,58 +220,88 @@ object CloudflareSolver {
                                         var html = (document.documentElement && document.documentElement.innerHTML || "").toLowerCase();
                                         var title = (document.title || "").toLowerCase();
                                         var text = title + " " + html;
+                                        var pathBox = document.querySelector("$TARGET_CSS_PATH");
                                         var explicit = /just a moment|checking your browser|checking if the site connection is secure|cf-browser-verification|__cf_chl_opt|cf-chl-widget|challenge-running|cloudflare ray id|verify you are human|attention required/.test(text);
                                         var turnstile = html.indexOf("cf-turnstile") >= 0 && (html.indexOf("_cf_chl_") >= 0 || text.indexOf("verify you are human") >= 0 || title.indexOf("just a moment") >= 0);
-                                        if (!explicit && !turnstile) return "NO_CHALLENGE";
+                                        var referenceFallback = !!pathBox && html.indexOf("cloudflare") >= 0;
+                                        if (!explicit && !turnstile && !referenceFallback) return "NO_CHALLENGE";
 
                                         var input = document.querySelector('input[name="cf-turnstile-response"], input[id^="cf-chl-widget-"]');
                                         var token = input && input.value ? input.value.length : 0;
                                         var box = null;
+                                        var boxSource = "";
                                         if (input) {
                                             var parent = input.parentElement;
                                             while (parent && parent !== document.body) {
                                                 var parentRect = parent.getBoundingClientRect();
                                                 if (parentRect.width >= 180 && parentRect.height >= 35 && parentRect.height <= 160) {
                                                     box = parent;
+                                                    boxSource = "input";
                                                     break;
                                                 }
                                                 parent = parent.parentElement;
                                             }
                                         }
-                                        if (!box) box = document.querySelector('input[type="checkbox"]')?.parentElement;
-                                        if (!box) box = document.querySelector("$TARGET_CSS_PATH");
-                                        if (!box) box = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
+                                        if (!box) {
+                                            box = document.querySelector('input[type="checkbox"]')?.parentElement;
+                                            if (box) boxSource = "checkbox";
+                                        }
+                                        if (!box && pathBox) {
+                                            box = pathBox;
+                                            boxSource = "path";
+                                        }
+                                        if (!box) {
+                                            box = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]');
+                                            if (box) boxSource = "iframe";
+                                        }
                                         if (!box) return "NO_BOX|" + token;
                                         var rect = box.getBoundingClientRect();
                                         if (rect.width < 1 || rect.height < 1) return "NO_BOX|" + token;
                                         var direction = (document.documentElement.dir || "").toLowerCase();
-                                        return "STATE|" + token + "|" + rect.left + "|" + rect.right + "|" + rect.top + "|" + rect.height + "|" + direction;
+                                        return "STATE|" + token + "|" + rect.left + "|" + rect.right + "|" + rect.top + "|" + rect.height + "|" + direction + "|" + boxSource;
                                     } catch (e) { return "ERROR"; }
                                 })();
                             """.trimIndent()
 
                             webView.evaluateJavascript(jsGetCoords) { result ->
                                 val state = decodeJavascriptString(result).orEmpty().split('|')
-                                if (state.size >= 7 && state[0] == "STATE") {
+                                if (state.size >= 8 && state[0] == "STATE") {
                                     val tokenLength = state[1].toIntOrNull() ?: 0
                                     val left = state[2].toFloatOrNull()
                                     val right = state[3].toFloatOrNull()
                                     val top = state[4].toFloatOrNull()
                                     val height = state[5].toFloatOrNull()
                                     val direction = state[6]
+                                    val boxSource = state[7]
                                     val now = SystemClock.uptimeMillis()
                                     if (tokenLength == 0 && left != null && right != null && top != null && height != null &&
                                         right > left && height > 0 && now - lastTapAt >= 1400
                                     ) {
-                                        val preferredSide = tapCount % 2 == 0
-                                        val tapRight = if (direction == "rtl") !preferredSide else preferredSide
-                                        val x = if (tapRight) right - 28f else left + 28f
                                         val y = top + (height / 2f)
                                         isProcessingClick = true
                                         tapCount++
                                         lastTapAt = now
-                                        simulateRealTouch(webView, x, y)
-                                        pollingHandler.postDelayed({ isProcessingClick = false }, 1100)
+                                        if (boxSource == "path") {
+                                            // Match the reference Faselhd solver's two-edge tap fallback.
+                                            val width = right - left
+                                            val checkboxSize = (height * 0.55f).roundToInt().coerceIn(18, 36).toFloat()
+                                            val margin = (width * 0.03f).roundToInt().coerceAtLeast(8).toFloat()
+                                            val rightX = (right - (checkboxSize / 2f) - margin).coerceAtLeast(left + 1f)
+                                            val leftX = (left + (checkboxSize / 2f) + margin).coerceAtMost(right - 1f)
+                                            simulateRealTouch(webView, rightX, y)
+                                            pollingHandler.postDelayed({
+                                                if (!isSolved) {
+                                                    simulateRealTouch(webView, leftX, y)
+                                                    pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
+                                                }
+                                            }, 250)
+                                        } else {
+                                            val preferredSide = tapCount % 2 == 1
+                                            val tapRight = if (direction == "rtl") !preferredSide else preferredSide
+                                            val x = if (tapRight) right - 28f else left + 28f
+                                            simulateRealTouch(webView, x, y)
+                                            pollingHandler.postDelayed({ isProcessingClick = false }, 1100)
+                                        }
                                     }
                                 }
                                 pollingHandler.postDelayed(this, 1800)
@@ -289,15 +321,17 @@ object CloudflareSolver {
                                 var text = title + " " + html;
                                 var explicit = /just a moment|checking your browser|checking if the site connection is secure|cf-browser-verification|__cf_chl_opt|cf-chl-widget|challenge-running|cloudflare ray id|verify you are human|attention required/.test(text);
                                 var turnstile = html.indexOf("cf-turnstile") >= 0 && (html.indexOf("_cf_chl_") >= 0 || text.indexOf("verify you are human") >= 0 || title.indexOf("just a moment") >= 0);
-                                var active = explicit || turnstile;
-                                return location.href + "|" + document.readyState + "|" + (active ? "true" : "false");
+                                var hasTargetBox = document.querySelector("$TARGET_CSS_PATH") != null;
+                                var referenceFallback = hasTargetBox && html.indexOf("cloudflare") >= 0;
+                                var active = explicit || turnstile || referenceFallback;
+                                return location.href + "|" + document.readyState + "|" + (active ? "true" : "false") + "|" + (hasTargetBox ? "true" : "false");
                             } catch (e) { return location.href + "|loading|true"; }
                         })();
                     """.trimIndent()
 
                     webView.evaluateJavascript(js) { result ->
                         val parts = decodeJavascriptString(result)?.split('|')
-                        if (parts == null || parts.size < 3) {
+                        if (parts == null || parts.size < 4) {
                             pollingHandler.postDelayed({ waitUntilReady() }, 200)
                             return@evaluateJavascript
                         }
@@ -305,6 +339,8 @@ object CloudflareSolver {
                         val currentUrl = parts[0]
                         val ready = parts[1]
                         val stillCloudflare = parts[2] == "true"
+                        val hasTargetBox = parts[3] == "true"
+                        if (stillCloudflare && hasTargetBox) targetPathChallengeSeen = true
                         val now = SystemClock.uptimeMillis()
                         if (currentUrl != lastUrl) {
                             lastUrl = currentUrl
@@ -318,7 +354,9 @@ object CloudflareSolver {
                             finishWithCurrentPage(currentUrl)
                             return@evaluateJavascript
                         }
-                        if (!stillCloudflare && ready == "complete" && stableTime > 1200) {
+                        if (!stillCloudflare && ready == "complete" && stableTime > 1200 &&
+                            (!targetPathChallengeSeen || !hasTargetBox)
+                        ) {
                             finishWithCurrentPage(currentUrl)
                             return@evaluateJavascript
                         }
