@@ -13,7 +13,9 @@ import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
 class Animezid : MainAPI() {
-    override var mainUrl = "https://animezid.org"
+    override var mainUrl = "https://animezid.org/"
+    private val siteRoot: String get() = mainUrl.trimEnd('/')
+
     override var name = "انمي زد (Animezid)"
     override val hasMainPage = true
     override var lang = "ar"
@@ -42,18 +44,18 @@ class Animezid : MainAPI() {
     // =========================================================================
 
     override val mainPage = mainPageOf(
-        "$mainUrl/newvideos.php?page=" to "أحدث الإضافات",
-        "$mainUrl/category.php?cat=anime&series_sort=newest&series_page=" to "الأنمي",
-        "$mainUrl/category.php?cat=cartoon&series_sort=newest&series_page=" to "مسلسلات كرتون",
-        "$mainUrl/category.php?cat=dubbed-anime&series_sort=newest&series_page=" to "أنمي مدبلج",
-        "$mainUrl/category.php?cat=series&series_sort=newest&series_page=" to "المسلسلات",
-        "$mainUrl/category.php?cat=movies&page=" to "الأفلام",
-        "$mainUrl/category.php?cat=new-movies&page=" to "أحدث الأفلام",
-        "$mainUrl/category.php?cat=dubbed-animation&page=" to "انيميشن مدبلج",
-        "$mainUrl/category.php?cat=subbed-animation&page=" to "انيميشن مترجم",
-        "$mainUrl/category.php?cat=disney-masr&page=" to "ديزني بالمصري",
-        "$mainUrl/category.php?cat=spacetoon&series_sort=newest&series_page=" to "سبيستون",
-        "$mainUrl/topvideos.php?page=" to "الأكثر مشاهدة"
+        "$siteRoot/newvideos.php?page=" to "أحدث الإضافات",
+        "$siteRoot/category.php?cat=anime&series_sort=newest&series_page=" to "الأنمي",
+        "$siteRoot/category.php?cat=cartoon&series_sort=newest&series_page=" to "مسلسلات كرتون",
+        "$siteRoot/category.php?cat=dubbed-anime&series_sort=newest&series_page=" to "أنمي مدبلج",
+        "$siteRoot/category.php?cat=series&series_sort=newest&series_page=" to "المسلسلات",
+        "$siteRoot/category.php?cat=movies&page=" to "الأفلام",
+        "$siteRoot/category.php?cat=new-movies&page=" to "أحدث الأفلام",
+        "$siteRoot/category.php?cat=dubbed-animation&page=" to "انيميشن مدبلج",
+        "$siteRoot/category.php?cat=subbed-animation&page=" to "انيميشن مترجم",
+        "$siteRoot/category.php?cat=disney-masr&page=" to "ديزني بالمصري",
+        "$siteRoot/category.php?cat=spacetoon&series_sort=newest&series_page=" to "سبيستون",
+        "$siteRoot/topvideos.php?page=" to "الأكثر مشاهدة"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -72,7 +74,7 @@ class Animezid : MainAPI() {
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = getPage("$mainUrl/search.php?keywords=${query.encode()}")
+        val doc = getPage("$siteRoot/search.php?keywords=${query.encode()}")
         return collectCards(doc)
     }
 
@@ -522,7 +524,7 @@ class Animezid : MainAPI() {
             "Accept" to "application/json, text/plain, */*",
             "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
             "X-Playback-CSRF" to csrf,
-            "Origin" to mainUrl,
+            "Origin" to siteRoot,
             "Referer" to referer
         )
         val cookieHeader = cookies.entries
@@ -536,7 +538,7 @@ class Animezid : MainAPI() {
             data.contains("/play.php") -> data
             data.contains("vid=") -> {
                 val vid = Regex("vid=([A-Za-z0-9]+)").find(data)?.groupValues?.get(1)
-                if (vid != null) "$mainUrl/play.php?vid=$vid" else data
+                if (vid != null) "$siteRoot/play.php?vid=$vid" else data
             }
             else -> data.replace("/watch.php", "/play.php")
         }
@@ -618,8 +620,8 @@ class Animezid : MainAPI() {
         return when {
             url.startsWith("http") -> url
             url.startsWith("//") -> "https:$url"
-            url.startsWith("/") -> mainUrl + url
-            else -> "$mainUrl/$url"
+            url.startsWith("/") -> siteRoot + url
+            else -> "$siteRoot/$url"
         }
     }
 }
