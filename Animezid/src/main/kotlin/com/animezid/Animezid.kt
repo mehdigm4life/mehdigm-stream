@@ -14,6 +14,7 @@ import java.net.URLEncoder
 
 class Animezid : MainAPI() {
     override var mainUrl = "https://animezid.org/"
+    // Keep the canonical trailing slash without creating double slashes in generated paths.
     private val siteRoot: String get() = mainUrl.trimEnd('/')
 
     override var name = "انمي زد (Animezid)"
