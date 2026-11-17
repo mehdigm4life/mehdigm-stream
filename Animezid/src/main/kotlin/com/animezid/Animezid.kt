@@ -287,7 +287,7 @@ class Animezid : MainAPI() {
     private data class PlaybackSession(
         val create: String,
         val id: String,
-        val headers: Map<String, String>,
+        val headers: MutableMap<String, String>,
         val embedded: List<JSONObject>
     )
 
@@ -349,8 +349,8 @@ class Animezid : MainAPI() {
 
     /**
      * Open a brand new playback session and return its embedded sources. The explicit
-     * Cookie header (a non-session value) prevents any shared cookie jar from reusing a
-     * previous PHPSESSID, which is what forces the server to hand out a new session.
+     * non-session Cookie value requests a fresh PHP session; its returned PHPSESSID is
+     * then carried through session creation and every source resolve.
      */
     private suspend fun createPlaybackSession(playUrl: String): PlaybackSession? {
         val resp = try {
@@ -366,7 +366,8 @@ class Animezid : MainAPI() {
 
         val doc = resp.document
         val csrf = doc.selectFirst("[data-playback-csrf]")?.attr("data-playback-csrf") ?: return null
-        val create = doc.selectFirst("[data-playback-create-url]")?.attr("data-playback-create-url") ?: return null
+        val rawCreate = doc.selectFirst("[data-playback-create-url]")?.attr("data-playback-create-url") ?: return null
+        val create = fixUrl(rawCreate)
         val vid = doc.selectFirst("[data-video-uniq]")?.attr("data-video-uniq")
             ?: Regex("vid=([A-Za-z0-9]+)").find(playUrl)?.groupValues?.get(1)
             ?: return null
@@ -391,12 +392,23 @@ class Animezid : MainAPI() {
         val srcId = src.optString("id").ifBlank { return false }
         val provider = src.optString("provider")
 
-        val resolveUrl = "${session.create}/${session.id}/sources/$srcId/resolve"
+        val resolveUrl = "${session.create.trimEnd('/')}/${session.id}/sources/$srcId/resolve"
         val resolved = resolveSource(resolveUrl, session.headers, playUrl)
         val launchUrl = resolved.optString("launch_url").ifBlank { return false }
 
+        // Animezid validates browser fetch metadata on launch redirects. This request
+        // represents loading the resolved player URL in the page's iframe.
+        val launchHeaders = session.headers.toMutableMap().apply {
+            this["Sec-Fetch-Dest"] = "iframe"
+            this["Sec-Fetch-Mode"] = "navigate"
+            this["Sec-Fetch-Site"] = "same-origin"
+        }
         val finalUrl = try {
-            app.get(launchUrl, headers = session.headers, referer = playUrl).url
+            val response = app.get(launchUrl, headers = launchHeaders, referer = playUrl)
+            if (isSelfHost(response.url)) {
+                mergeResponseCookies(session.headers, response.cookies)
+            }
+            response.url
         } catch (_: Exception) {
             launchUrl
         }
@@ -463,7 +475,7 @@ class Animezid : MainAPI() {
 
     private suspend fun retryPost(
         url: String,
-        headers: Map<String, String>,
+        headers: MutableMap<String, String>,
         jsonBody: Map<String, String>,
         referer: String,
         maxRetries: Int = 3
@@ -471,6 +483,7 @@ class Animezid : MainAPI() {
         repeat(maxRetries) { attempt ->
             try {
                 val resp = app.post(url, headers = headers, json = jsonBody, referer = referer)
+                mergeResponseCookies(headers, resp.cookies)
                 if (resp.code == 200 || resp.code == 201) {
                     return try { JSONObject(resp.text) } catch (_: Exception) { null }
                 }
@@ -488,7 +501,7 @@ class Animezid : MainAPI() {
      */
     private suspend fun resolveSource(
         url: String,
-        headers: Map<String, String>,
+        headers: MutableMap<String, String>,
         referer: String
     ): JSONObject {
         var rateLimited = false
@@ -499,6 +512,7 @@ class Animezid : MainAPI() {
                 null
             }
             if (resp != null) {
+                mergeResponseCookies(headers, resp.cookies)
                 if (resp.code == 200 || resp.code == 201) {
                     val obj = try { JSONObject(resp.text) } catch (_: Exception) { null }
                     if (obj != null && obj.optString("error") != "rate_limited") return obj
@@ -515,23 +529,44 @@ class Animezid : MainAPI() {
         return JSONObject()
     }
 
+    // The playback API now checks Fetch Metadata like a same-origin browser fetch.
     private fun playbackHeaders(
         csrf: String,
         referer: String,
         cookies: Map<String, String>
-    ): Map<String, String> {
-        val base = mapOf(
+    ): MutableMap<String, String> {
+        val headers = mutableMapOf(
             "User-Agent" to BROWSER_UA,
             "Accept" to "application/json, text/plain, */*",
             "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
             "X-Playback-CSRF" to csrf,
             "Origin" to siteRoot,
-            "Referer" to referer
+            "Referer" to referer,
+            "Sec-Fetch-Dest" to "empty",
+            "Sec-Fetch-Mode" to "cors",
+            "Sec-Fetch-Site" to "same-origin"
         )
-        val cookieHeader = cookies.entries
-            .filter { it.value.isNotBlank() }
-            .joinToString("; ") { "${it.key}=${it.value}" }
-        return if (cookieHeader.isBlank()) base else base + ("Cookie" to cookieHeader)
+        mergeResponseCookies(headers, cookies)
+        return headers
+    }
+
+    private fun mergeResponseCookies(headers: MutableMap<String, String>, cookies: Map<String, String>) {
+        if (cookies.isEmpty()) return
+        val merged = linkedMapOf<String, String>()
+        headers["Cookie"]?.split(';')?.forEach { cookie ->
+            val separator = cookie.indexOf('=')
+            if (separator > 0) {
+                val key = cookie.substring(0, separator).trim()
+                val value = cookie.substring(separator + 1).trim()
+                if (key.isNotBlank() && value.isNotBlank()) merged[key] = value
+            }
+        }
+        cookies.forEach { (key, value) ->
+            if (key.isNotBlank() && value.isNotBlank()) merged[key] = value
+        }
+        if (merged.isNotEmpty()) {
+            headers["Cookie"] = merged.entries.joinToString("; ") { (key, value) -> "$key=$value" }
+        }
     }
 
     private fun toPlayUrl(data: String): String {
