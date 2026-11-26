@@ -63,21 +63,27 @@ function makeCloudflarePair() {
   return { cloudflareId: `${randomAlnum(15)}${deviceKey}`, deviceKey };
 }
 
-function buildSecureToken(nowSeconds = Math.floor(Date.now() / 1000)) {
-  const staticMac = hmacSha256Hex(HMAC_SECRET, `err|${CERT_SHA256}|000|err_open`);
+function buildSecureToken(nowSeconds = Math.floor(Date.now() / 1000), attestation = {}) {
+  const a = attestation.a ?? "err";
+  const cert = attestation.cert ?? CERT_SHA256;
+  const b = attestation.b ?? `${cert}|/data/app/com.app.cimacloud/base.apk`;
+  const d = attestation.d ?? "empty";
+  const e = attestation.e ?? "empty";
+  const s = attestation.s ?? "err_open";
+  const staticMac = hmacSha256Hex(HMAC_SECRET, `${a}|${cert}|000|${s}`);
   const payload = JSON.stringify({
-    a: "err",
-    b: `${CERT_SHA256}|/data/app/com.app.cimacloud/base.apk`,
+    a,
+    b,
     c: "false",
-    d: "empty",
-    e: "empty",
+    d,
+    e,
     f: "false",
     g: "false",
     h: "false",
     i: "false",
     j: "false",
     r: "false",
-    s: "err_open",
+    s,
     m: staticMac,
     t: nowSeconds,
     n: crypto.randomBytes(8).toString("hex"),
@@ -186,14 +192,14 @@ async function getApiRoot() {
   return `${DEFAULT_API_BASE}${API_VERSION_PATH}`;
 }
 
-async function requestServerList(apiRoot, label, path) {
+async function requestServerList(apiRoot, label, path, attestation = {}) {
   const { cloudflareId, deviceKey } = makeCloudflarePair();
   const url = `${apiRoot.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
   const headers = {
     "User-Agent": APP_USER_AGENT,
     Accept: "application/json, text/plain, */*",
     "cloudflare-id": cloudflareId,
-    firebase_id: buildSecureToken(),
+    firebase_id: buildSecureToken(undefined, attestation),
   };
   const request = spawnSync(
     "python3",
@@ -252,8 +258,150 @@ async function requestServerList(apiRoot, label, path) {
   };
 }
 
+function tokenAttestationVariants() {
+  const cert = process.env.CIMA_OFFICIAL_CERT_SHA256?.trim() || CERT_SHA256;
+  const apkSize = process.env.CIMA_OFFICIAL_APK_SIZE?.trim();
+  const sigBlockSha = process.env.CIMA_APK_SIG_BLOCK_SHA256?.trim();
+  const nativeLibSha = process.env.CIMA_OFFICIAL_NATIVE_LIB_SHA256?.trim();
+  const canonicalPath = "/data/app/com.app.cimacloud/base.apk";
+  const modernPath = "/data/app/~~a1b2c3d4e5f6g7h8==/com.app.cimacloud-x9y8z7w6v5u4==/base.apk";
+  const directories = "cache,code_cache,files,shared_prefs";
+  const variants = [
+    {
+      name: "fakecontext-exact",
+      token: { a: "err", cert, b: `${cert}|${canonicalPath}`, d: "empty", e: "empty", s: "err_open" },
+    },
+    {
+      name: "fakecontext-dirs",
+      token: { a: "err", cert, b: `${cert}|${canonicalPath}`, d: directories, e: directories, s: "err_open" },
+    },
+  ];
+
+  if (apkSize && sigBlockSha) {
+    variants.push(
+      {
+        name: "official-size-signature-block-canonical-path",
+        token: { a: apkSize, cert, b: `${cert}|${canonicalPath}`, d: directories, e: directories, s: sigBlockSha },
+      },
+      {
+        name: "official-size-signature-block-modern-path",
+        token: { a: apkSize, cert, b: `${cert}|${modernPath}`, d: directories, e: directories, s: sigBlockSha },
+      },
+      {
+        name: "official-size-signature-block-empty-dirs",
+        token: { a: apkSize, cert, b: `${cert}|${canonicalPath}`, d: "empty", e: "empty", s: sigBlockSha },
+      },
+    );
+  }
+  if (apkSize && nativeLibSha) {
+    variants.push({
+      name: "official-size-native-library-hash",
+      token: { a: apkSize, cert, b: `${cert}|${canonicalPath}`, d: directories, e: directories, s: nativeLibSha },
+    });
+  }
+  return variants;
+}
+
+function summarizeProbe(result) {
+  return {
+    label: result.label,
+    path: result.path,
+    httpStatus: result.httpStatus,
+    apiStatus: result.apiStatus,
+    blocked: result.blocked,
+    auth: result.auth,
+    topLevelServerCount: result.topLevelServerCount,
+    acceptedLinkCount: result.acceptedLinkCount,
+    serverHosts: result.serverHosts,
+    decodeError: result.decodeError,
+    requestError: result.requestError,
+  };
+}
+
+async function probeAttestationVariants(apiRoot) {
+  const variants = tokenAttestationVariants();
+  const attempts = [];
+  let winner = null;
+  for (const variant of variants) {
+    try {
+      const result = await requestServerList(apiRoot, variant.name, "movie/27295/servers", variant.token);
+      attempts.push(result);
+      if (result.apiStatus === true && result.blocked !== true && result.acceptedLinkCount > 0) {
+        winner = variant;
+        break;
+      }
+    } catch (error) {
+      attempts.push({
+        label: variant.name,
+        path: "movie/27295/servers",
+        requestError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const followUps = [];
+  if (winner) {
+    const targets = [
+      { label: "reported episode", path: `episode/${process.env.CIMA_EPISODE_ID?.trim() || "384876"}/servers` },
+      { label: "known episode reference", path: `episode/${process.env.CIMA_REFERENCE_EPISODE_ID?.trim() || "370096"}/servers` },
+      { label: "known movie reference", path: `movie/${process.env.CIMA_MOVIE_ID?.trim() || "27295"}/servers` },
+    ];
+    for (const target of targets) {
+      if (followUps.some((item) => item.path === target.path)) continue;
+      try {
+        followUps.push(await requestServerList(apiRoot, target.label, target.path, winner.token));
+      } catch (error) {
+        followUps.push({
+          label: target.label,
+          path: target.path,
+          requestError: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  const report = {
+    apiRoot,
+    winner: winner?.name ?? null,
+    officialApkSize: process.env.CIMA_OFFICIAL_APK_SIZE || null,
+    officialCertSha256: process.env.CIMA_OFFICIAL_CERT_SHA256 || CERT_SHA256,
+    signingBlockShaAvailable: Boolean(process.env.CIMA_APK_SIG_BLOCK_SHA256),
+    attempts: attempts.map(summarizeProbe),
+    followUps: followUps.map(summarizeProbe),
+  };
+  const notice = JSON.stringify(report)
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+  console.log(`::notice title=CimaCloud official-attestation variant probe::${notice}`);
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const rows = attempts.map((item) =>
+      `| ${item.label} | ${item.httpStatus ?? "—"} | ${item.apiStatus ?? "—"} | ${item.blocked ?? "—"} | ${item.acceptedLinkCount ?? "—"} | ${item.decodeError ?? item.requestError ?? "—"} |`,
+    );
+    const summary = [
+      "## CimaCloud token-variant probe",
+      "",
+      `Winner: ${winner?.name ?? "none"}`,
+      "",
+      "| Attestation variant | HTTP | API status | Blocked | Links | Error |",
+      "|---|---:|---|---|---:|---|",
+      ...rows,
+      "",
+      "No auth headers or full media URLs are logged.",
+      "",
+    ].join("\n");
+    await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+  }
+  return report;
+}
+
 async function main() {
   const apiRoot = await getApiRoot();
+  if (process.env.CIMA_PROBE_TOKEN_VARIANTS === "true") {
+    await probeAttestationVariants(apiRoot);
+    return;
+  }
   const episodeId = process.env.CIMA_EPISODE_ID?.trim() || "384876";
   const referenceEpisodeId = process.env.CIMA_REFERENCE_EPISODE_ID?.trim() || "370096";
   const movieId = process.env.CIMA_MOVIE_ID?.trim() || "27295";

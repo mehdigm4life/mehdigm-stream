@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/download-cimacloud-official.yml"
       - "scripts/analyze-cimacloud-apk.py"
+      - "scripts/cimacloud-live-smoke.mjs"
+      - "scripts/cimacloud-live-smoke.test.mjs"
 
 permissions:
   contents: read
@@ -74,12 +76,23 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Analyze APK identity, signing certificate, native library, and JNI declarations
+        id: apk_metadata
         shell: bash
         run: |
           set -euo pipefail
           deps="$RUNNER_TEMP/androguard-deps"
           python3 -m pip install --disable-pip-version-check --quiet --target "$deps" androguard==4.1.4
           PYTHONPATH="$deps" python3 scripts/analyze-cimacloud-apk.py "$RUNNER_TEMP/cima-cloud-latest.apk"
+
+      - name: Probe current and APK-derived CimaCloud token variants
+        continue-on-error: true
+        run: node scripts/cimacloud-live-smoke.mjs
+        env:
+          CIMA_PROBE_TOKEN_VARIANTS: "true"
+          CIMA_OFFICIAL_APK_SIZE: ${{ steps.apk_metadata.outputs.apk_size }}
+          CIMA_APK_SIG_BLOCK_SHA256: ${{ steps.apk_metadata.outputs.apk_sig_block_sha256 }}
+          CIMA_OFFICIAL_CERT_SHA256: ${{ steps.apk_metadata.outputs.cert_sha256 }}
+          CIMA_OFFICIAL_NATIVE_LIB_SHA256: ${{ steps.apk_metadata.outputs.native_lib_sha256 }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

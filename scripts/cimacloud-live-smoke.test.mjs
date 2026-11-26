@@ -30,6 +30,18 @@ test("secure-token envelope has the expected three-part wire format", () => {
   assert(Buffer.from(ciphertextAndTag, "base64").length > 16);
 });
 
+test("official APK attestation fields also produce a valid secure-token envelope", () => {
+  const token = buildSecureToken(1_793_000_000, {
+    a: "42699524",
+    cert: "021bb8f6029e4e63e4b5b0ff922788b4fe24739e261e637dddf70bf95e0aacd7",
+    b: "021bb8f6029e4e63e4b5b0ff922788b4fe24739e261e637dddf70bf95e0aacd7|/data/app/com.app.cimacloud/base.apk",
+    d: "cache,code_cache,files,shared_prefs",
+    e: "cache,code_cache,files,shared_prefs",
+    s: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  assert.equal(token.split(".").length, 3);
+});
+
 test("cloudflare-id is a 15-character prefix plus a stable-format device key", () => {
   const pair = makeCloudflarePair();
   assert.match(pair.cloudflareId, /^[A-Za-z0-9]{15}[a-f0-9]{16}$/);
