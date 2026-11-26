@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/download-cimacloud-official.yml"
+      - "scripts/analyze-cimacloud-apk.py"
 
 permissions:
   contents: read
@@ -14,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Checkout repository analysis script
+        uses: actions/checkout@v5
+
       - name: Download the official APK with curl
         shell: bash
         run: |
@@ -68,6 +72,14 @@ jobs:
             echo "- Size: $(wc -c < "$apk") bytes"
             echo "- SHA-256: $(sha256sum "$apk" | cut -d ' ' -f 1)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Analyze APK identity, signing certificate, native library, and JNI declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          deps="$RUNNER_TEMP/androguard-deps"
+          python3 -m pip install --disable-pip-version-check --quiet --target "$deps" androguard==4.1.4
+          PYTHONPATH="$deps" python3 scripts/analyze-cimacloud-apk.py "$RUNNER_TEMP/cima-cloud-latest.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
