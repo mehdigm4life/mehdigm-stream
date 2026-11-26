@@ -255,6 +255,30 @@ async function main() {
     }
   }
 
+  const notice = JSON.stringify(
+    results.map((result) => ({
+      label: result.label,
+      path: result.path,
+      httpStatus: result.httpStatus,
+      apiStatus: result.apiStatus,
+      blocked: result.blocked,
+      auth: result.auth,
+      rootKeys: result.rootKeys,
+      topLevelServerCount: result.topLevelServerCount,
+      acceptedLinkCount: result.acceptedLinkCount,
+      nestedDataServerCount: result.nestedDataServerCount,
+      currentGenericUnwrapCount: result.currentGenericUnwrapCount,
+      topLevelServersWouldBeLostByGenericUnwrap: result.topLevelServersWouldBeLostByGenericUnwrap,
+      serverHosts: result.serverHosts,
+      decodeError: result.decodeError,
+      requestError: result.requestError,
+    })),
+  )
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+  console.log(`::notice title=CimaCloud authenticated API response summary::${notice}`);
+
   if (process.env.GITHUB_STEP_SUMMARY) {
     const lines = [
       "## CimaCloud server-list API smoke test",
