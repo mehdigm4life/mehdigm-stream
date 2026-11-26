@@ -1,7 +1,5 @@
 package com.cimacloud
 
-import android.content.Context
-import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +30,8 @@ import javax.crypto.spec.SecretKeySpec
 internal object CimaCloudCrypto {
 
     const val APP_USER_AGENT = "okhttp/4.10.0"
-    const val CANONICAL_SITE_URL = "https://cima-cloud.com"
+    const val CANONICAL_SITE_URL = "https://www.cima-cloud.com"
     private const val DEFAULT_API_BASE = "https://1654865.xyz"
-    private const val DEVICE_PREFS_NAME = "cimacloud_extension"
-    private const val DEVICE_KEY_PREF = "cloudflare_device_key"
     private const val LOG_TAG = "CimaCloud"
     private const val API_VERSION_PATH = "/v1.3/api"
 
@@ -65,43 +61,8 @@ internal object CimaCloudCrypto {
 
     private val rng = SecureRandom()
 
-    // Use the Android SSAID as the 16-char device suffix used by the API's response-key scheme.
-    // If the system value is unavailable, keep a random 64-bit fallback in the plugin's preferences.
-    @Volatile
-    private var configuredDeviceKey: String? = null
-    private val deviceKeyLock = Any()
-    private val fallbackDeviceKey: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { randomHex(8) }
-    private val sessionDeviceKey: String get() = configuredDeviceKey ?: fallbackDeviceKey
-
-    fun initialize(context: Context) {
-        if (configuredDeviceKey != null) return
-        synchronized(deviceKeyLock) {
-            if (configuredDeviceKey != null) return
-
-            val appContext = context.applicationContext ?: context
-            val androidId = runCatching {
-                Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
-            }.getOrNull()?.lowercase()?.takeIf(::isDeviceKey)
-
-            if (androidId != null) {
-                configuredDeviceKey = androidId
-                return
-            }
-
-            val prefs = runCatching {
-                appContext.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
-            }.getOrNull()
-            val stored = runCatching { prefs?.getString(DEVICE_KEY_PREF, null) }
-                .getOrNull()?.lowercase()?.takeIf(::isDeviceKey)
-            val stableFallback = stored ?: randomHex(8).also { generated ->
-                runCatching { prefs?.edit()?.putString(DEVICE_KEY_PREF, generated)?.apply() }
-            }
-            configuredDeviceKey = stableFallback
-        }
-    }
-
-    private fun isDeviceKey(value: String): Boolean =
-        value.length == 16 && value.all { it in '0'..'9' || it in 'a'..'f' } && value.any { it != '0' }
+    // Stable 16-character device-key suffix for the current extension session.
+    private val sessionDeviceKey: String by lazy { randomHex(8) }
 
     // Precomputed static HMAC over "err|<cert>|000|err_open"
     private val staticAttestationMac: String by lazy {

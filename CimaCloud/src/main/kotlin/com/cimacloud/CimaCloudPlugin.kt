@@ -7,7 +7,6 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class CimaCloudPlugin : Plugin() {
     override fun load(context: Context) {
-        CimaCloudCrypto.initialize(context)
         registerMainAPI(CimaCloud())
         registerExtractorAPI(GooglePhotosExtractor())
         registerExtractorAPI(VidaraCimaExtractor())
