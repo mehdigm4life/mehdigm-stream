@@ -46,6 +46,7 @@ test("cloudflare-id is a 15-character prefix plus a stable-format device key", (
   const pair = makeCloudflarePair();
   assert.match(pair.cloudflareId, /^[A-Za-z0-9]{15}[a-f0-9]{16}$/);
   assert.equal(pair.cloudflareId.slice(15), pair.deviceKey);
+  assert.equal(makeCloudflarePair(pair.deviceKey).cloudflareId.slice(15), pair.deviceKey);
 });
 
 test("raw Base64 response decrypts and exposes a top-level servers array", () => {

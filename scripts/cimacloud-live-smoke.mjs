@@ -58,8 +58,7 @@ function randomAlnum(length) {
   return result;
 }
 
-function makeCloudflarePair() {
-  const deviceKey = crypto.randomBytes(8).toString("hex");
+function makeCloudflarePair(deviceKey = crypto.randomBytes(8).toString("hex")) {
   return { cloudflareId: `${randomAlnum(15)}${deviceKey}`, deviceKey };
 }
 
@@ -192,8 +191,8 @@ async function getApiRoot() {
   return `${DEFAULT_API_BASE}${API_VERSION_PATH}`;
 }
 
-async function requestServerList(apiRoot, label, path, attestation = {}) {
-  const { cloudflareId, deviceKey } = makeCloudflarePair();
+async function requestServerList(apiRoot, label, path, attestation = {}, sessionDeviceKey) {
+  const { cloudflareId, deviceKey } = makeCloudflarePair(sessionDeviceKey);
   const url = `${apiRoot.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
   const headers = {
     "User-Agent": APP_USER_AGENT,
@@ -320,11 +319,12 @@ function summarizeProbe(result) {
 
 async function probeAttestationVariants(apiRoot) {
   const variants = tokenAttestationVariants();
+  const sessionDeviceKey = process.env.CIMA_DEVICE_KEY?.trim() || crypto.randomBytes(8).toString("hex");
   const attempts = [];
   let winner = null;
   for (const variant of variants) {
     try {
-      const result = await requestServerList(apiRoot, variant.name, "movie/27295/servers", variant.token);
+      const result = await requestServerList(apiRoot, variant.name, "movie/27295/servers", variant.token, sessionDeviceKey);
       attempts.push(result);
       if (result.apiStatus === true && result.blocked !== true && result.acceptedLinkCount > 0) {
         winner = variant;
@@ -349,7 +349,7 @@ async function probeAttestationVariants(apiRoot) {
     for (const target of targets) {
       if (followUps.some((item) => item.path === target.path)) continue;
       try {
-        followUps.push(await requestServerList(apiRoot, target.label, target.path, winner.token));
+        followUps.push(await requestServerList(apiRoot, target.label, target.path, winner.token, sessionDeviceKey));
       } catch (error) {
         followUps.push({
           label: target.label,
@@ -405,6 +405,7 @@ async function main() {
   const episodeId = process.env.CIMA_EPISODE_ID?.trim() || "384876";
   const referenceEpisodeId = process.env.CIMA_REFERENCE_EPISODE_ID?.trim() || "370096";
   const movieId = process.env.CIMA_MOVIE_ID?.trim() || "27295";
+  const sessionDeviceKey = process.env.CIMA_DEVICE_KEY?.trim() || crypto.randomBytes(8).toString("hex");
   const targets = [
     { label: "reported episode", path: `episode/${episodeId}/servers` },
     { label: "known episode reference", path: `episode/${referenceEpisodeId}/servers` },
@@ -415,7 +416,7 @@ async function main() {
   const results = [];
   for (const target of targets) {
     try {
-      const result = await requestServerList(apiRoot, target.label, target.path);
+      const result = await requestServerList(apiRoot, target.label, target.path, {}, sessionDeviceKey);
       results.push(result);
       console.log(JSON.stringify(result));
     } catch (error) {
