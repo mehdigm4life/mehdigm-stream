@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Run crypto and response-schema regression tests
+        run: node --test scripts/cimacloud-live-smoke.test.mjs
+
       - name: Probe authenticated CimaCloud server-list endpoints
         run: node scripts/cimacloud-live-smoke.mjs
         env:
