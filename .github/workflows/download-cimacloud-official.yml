@@ -1,0 +1,78 @@
+name: Download Official CimaCloud APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/download-cimacloud-official.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Download the official APK with curl
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/cima-cloud-latest.apk"
+          url='https://cima-cloud.com/index.php?action=download&v=latest'
+
+          if ! http_status="$(curl \
+            --location \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --retry-max-time 120 \
+            --connect-timeout 20 \
+            --max-time 180 \
+            --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+            --output "$apk" \
+            --write-out '%{http_code}' \
+            "$url")"; then
+            echo "curl could not download the official APK (HTTP ${http_status:-unknown})." >&2
+            if [[ -f "$apk" ]]; then
+              echo "Response body size: $(wc -c < "$apk") bytes" >&2
+              head -c 512 "$apk" >&2 || true
+              echo >&2
+            fi
+            exit 1
+          fi
+
+          echo "HTTP status: $http_status"
+          echo "Downloaded bytes: $(wc -c < "$apk")"
+          if [[ "$http_status" != "200" ]]; then
+            echo "Expected HTTP 200, got $http_status." >&2
+            exit 1
+          fi
+          if ! unzip -tq "$apk" >/dev/null; then
+            echo "The downloaded response is not a valid APK/ZIP file." >&2
+            file "$apk" || true
+            head -c 512 "$apk" >&2 || true
+            echo >&2
+            exit 1
+          fi
+
+          sha256sum "$apk" | tee "$RUNNER_TEMP/cima-cloud-latest.sha256"
+          {
+            echo "## Official CimaCloud APK download"
+            echo
+            echo "- Source: $url"
+            echo "- HTTP status: $http_status"
+            echo "- Size: $(wc -c < "$apk") bytes"
+            echo "- SHA-256: $(sha256sum "$apk" | cut -d ' ' -f 1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cima-cloud-official-apk
+          path: ${{ runner.temp }}/cima-cloud-latest.apk
+          if-no-files-found: error
+          retention-days: 2
