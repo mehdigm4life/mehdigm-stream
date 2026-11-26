@@ -686,6 +686,7 @@ internal object CimaCloudExtractors {
         // Try multiple parent embedder origins in case uploader restricted domain embedding
         val candidateParents = listOf(
             "tuktukcima.com" to "https://tuktukcima.com/",
+            "cima-cloud.com" to "https://cima-cloud.com/",
             "www.cima-cloud.com" to "https://www.cima-cloud.com/",
             hostOf(origin) to embedReferer,
         )

@@ -1,0 +1,50 @@
+name: CimaCloud Live API Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode_id:
+        description: Episode ID to inspect (defaults to the reported playback target)
+        required: false
+        default: "384876"
+        type: string
+      reference_episode_id:
+        description: Known-good episode ID used as a control
+        required: false
+        default: "370096"
+        type: string
+      movie_id:
+        description: Known-good movie ID used as a control
+        required: false
+        default: "27295"
+        type: string
+  push:
+    paths:
+      - ".github/workflows/verify-cimacloud-live.yml"
+      - "scripts/cimacloud-live-smoke.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Run crypto and response-schema regression tests
+        run: node --test scripts/cimacloud-live-smoke.test.mjs
+
+      - name: Probe authenticated CimaCloud server-list endpoints
+        run: node scripts/cimacloud-live-smoke.mjs
+        env:
+          CIMA_EPISODE_ID: ${{ inputs.episode_id }}
+          CIMA_REFERENCE_EPISODE_ID: ${{ inputs.reference_episode_id }}
+          CIMA_MOVIE_ID: ${{ inputs.movie_id }}
