@@ -1,6 +1,9 @@
 package com.cimacloud
 
+import android.content.Context
+import android.provider.Settings
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -8,7 +11,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyFactory
 import java.security.MessageDigest
@@ -30,8 +32,11 @@ import javax.crypto.spec.SecretKeySpec
 internal object CimaCloudCrypto {
 
     const val APP_USER_AGENT = "okhttp/4.10.0"
-    const val CANONICAL_SITE_URL = "https://www.cima-cloud.com"
+    const val CANONICAL_SITE_URL = "https://cima-cloud.com"
     private const val DEFAULT_API_BASE = "https://1654865.xyz"
+    private const val DEVICE_PREFS_NAME = "cimacloud_extension"
+    private const val DEVICE_KEY_PREF = "cloudflare_device_key"
+    private const val LOG_TAG = "CimaCloud"
     private const val API_VERSION_PATH = "/v1.3/api"
 
     private const val DEFAULT_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/extractor.php"
@@ -60,8 +65,43 @@ internal object CimaCloudCrypto {
 
     private val rng = SecureRandom()
 
-    // Stable 16-char hex device identifier per session (mirrors Settings.Secure.ANDROID_ID)
-    private val sessionDeviceKey: String by lazy { randomHex(8) }
+    // Use the Android SSAID as the 16-char device suffix used by the API's response-key scheme.
+    // If the system value is unavailable, keep a random 64-bit fallback in the plugin's preferences.
+    @Volatile
+    private var configuredDeviceKey: String? = null
+    private val deviceKeyLock = Any()
+    private val fallbackDeviceKey: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { randomHex(8) }
+    private val sessionDeviceKey: String get() = configuredDeviceKey ?: fallbackDeviceKey
+
+    fun initialize(context: Context) {
+        if (configuredDeviceKey != null) return
+        synchronized(deviceKeyLock) {
+            if (configuredDeviceKey != null) return
+
+            val appContext = context.applicationContext ?: context
+            val androidId = runCatching {
+                Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+            }.getOrNull()?.lowercase()?.takeIf(::isDeviceKey)
+
+            if (androidId != null) {
+                configuredDeviceKey = androidId
+                return
+            }
+
+            val prefs = runCatching {
+                appContext.getSharedPreferences(DEVICE_PREFS_NAME, Context.MODE_PRIVATE)
+            }.getOrNull()
+            val stored = runCatching { prefs?.getString(DEVICE_KEY_PREF, null) }
+                .getOrNull()?.lowercase()?.takeIf(::isDeviceKey)
+            val stableFallback = stored ?: randomHex(8).also { generated ->
+                runCatching { prefs?.edit()?.putString(DEVICE_KEY_PREF, generated)?.apply() }
+            }
+            configuredDeviceKey = stableFallback
+        }
+    }
+
+    private fun isDeviceKey(value: String): Boolean =
+        value.length == 16 && value.all { it in '0'..'9' || it in 'a'..'f' } && value.any { it != '0' }
 
     // Precomputed static HMAC over "err|<cert>|000|err_open"
     private val staticAttestationMac: String by lazy {
@@ -259,47 +299,23 @@ internal object CimaCloudCrypto {
 
     private fun executeAndUnwrap(request: Request, key: String): JSONObject? {
         return try {
-            val rawBody = httpClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                resp.body?.string()
-            }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-
-            // Case 1: Raw Base64 ciphertext body (used by /movie/{id}/servers & /episode/{id}/servers)
-            if (!rawBody.startsWith("{") && !rawBody.startsWith("[")) {
-                val decryptedText = decryptResponse(rawBody, key)?.trim() ?: return null
-                return when {
-                    decryptedText.startsWith("{") -> {
-                        val obj = safeJsonObject(decryptedText) ?: return null
-                        if (obj.optBoolean("blocked", false)) null else (obj.optJSONObject("data") ?: obj)
-                    }
-                    decryptedText.startsWith("[") -> JSONObject().put("items", JSONArray(decryptedText))
-                    else -> null
+            val rawBody = httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(LOG_TAG, "HTTP ${response.code} for ${request.url.encodedPath}")
+                    return null
                 }
-            }
+                response.body?.string()
+            }?.takeIf { it.isNotBlank() } ?: return null
 
-            if (rawBody.startsWith("[")) {
-                return JSONObject().put("items", JSONArray(rawBody))
-            }
-
-            // Case 2 & 3: JSON envelope (either encrypted data field or plain JSON response)
-            val outer = safeJsonObject(rawBody) ?: return null
-            if (outer.optBoolean("blocked", false)) return null
-
-            if (outer.optBoolean("encrypted", false)) {
-                val encStr = outer.optString("data", "")
-                if (encStr.isNotBlank()) {
-                    val decryptedText = decryptResponse(encStr, key)?.trim() ?: return null
-                    if (decryptedText.startsWith("{")) {
-                        return safeJsonObject(decryptedText)
-                    } else if (decryptedText.startsWith("[")) {
-                        return JSONObject().put("items", JSONArray(decryptedText))
+            CimaCloudResponseParser.decodeBody(rawBody) { ciphertext -> decryptResponse(ciphertext, key) }
+                ?: run {
+                    if (request.url.encodedPath.endsWith("/servers")) {
+                        Log.w(LOG_TAG, "Could not decode playback server response for ${request.url.encodedPath}")
                     }
+                    null
                 }
-            }
-
-            outer.optJSONObject("data")?.let { return it }
-            outer
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Log.w(LOG_TAG, "Request failed for ${request.url.encodedPath}: ${error.javaClass.simpleName}")
             null
         }
     }

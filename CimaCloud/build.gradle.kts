@@ -1,4 +1,4 @@
-version = 36
+version = 37
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"
@@ -19,4 +19,9 @@ cloudstream {
 
 android {
     namespace = "com.cimacloud"
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

@@ -35,6 +35,9 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+private const val CIMA_CLOUD_LOG_TAG = "CimaCloud"
 
 class CimaCloud : MainAPI() {
 
@@ -675,32 +678,34 @@ class CimaCloud : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val serversApiPath = resolveServersApiPath(data) ?: return false
-        val root = CimaCloudCrypto.apiGet(serversApiPath) ?: return false
-
-        val serversArr = root.optJSONArray("servers")
-            ?: root.optJSONArray("items")
-            ?: root.optJSONArray("data")
-            ?: return false
-
-        val embedUrls = LinkedHashSet<String>()
-        for (i in 0 until serversArr.length()) {
-            val item = serversArr.optJSONObject(i)
-            val link = when {
-                item != null -> item.optString("link").ifBlank { item.optString("url") }.trim()
-                else -> serversArr.optString(i).trim()
-            }
-            if (link.startsWith("http://") || link.startsWith("https://")) {
-                embedUrls.add(link)
-            }
+        val serversApiPath = resolveServersApiPath(data) ?: run {
+            android.util.Log.w(CIMA_CLOUD_LOG_TAG, "Ignoring unrecognized playback data")
+            return false
         }
-        if (embedUrls.isEmpty()) return false
+        val root = CimaCloudCrypto.apiGet(serversApiPath) ?: run {
+            android.util.Log.w(CIMA_CLOUD_LOG_TAG, "Server-list request returned no usable payload for $serversApiPath")
+            return false
+        }
+        val embedUrls = CimaCloudResponseParser.extractServerUrls(root)
+        if (embedUrls.isEmpty()) {
+            android.util.Log.w(CIMA_CLOUD_LOG_TAG, "No HTTP(S) server URLs in response for $serversApiPath")
+            return false
+        }
 
-        return CimaCloudExtractors.extractAllServers(
-            embedUrls = embedUrls.toList(),
+        val emittedLinks = AtomicInteger(0)
+        val foundLinks = CimaCloudExtractors.extractAllServers(
+            embedUrls = embedUrls,
             subtitleCallback = subtitleCallback,
-            callback = callback,
+            callback = { link ->
+                emittedLinks.incrementAndGet()
+                callback(link)
+            },
         )
+        android.util.Log.i(
+            CIMA_CLOUD_LOG_TAG,
+            "Playback extraction for $serversApiPath: servers=${embedUrls.size}, links=${emittedLinks.get()}, success=$foundLinks",
+        )
+        return foundLinks
     }
 
     // ── Parsing & Normalization Helpers ──────────────────────────────────────
