@@ -1,5 +1,6 @@
 package com.animezid
 
+import android.util.Base64
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -11,6 +12,7 @@ import org.json.JSONObject
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+import java.security.MessageDigest
 
 class Animezid : MainAPI() {
     override var mainUrl = "https://animezid.org/"
@@ -31,6 +33,13 @@ class Animezid : MainAPI() {
         private const val BROWSER_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private const val PB_ROTATION_SOURCE_ROUTE = 1
+        private const val PB_ROTATION_ENCRYPTED_RESPONSE = 2
+        private const val PB_ROTATION_SALTED_PROOF = 4
+        private const val PB_ROTATION_WARMUP = 8
+        private const val PB_ROTATION_SCRIPT_COOKIE = 16
+        private const val PB_DEFAULT_PROOF_SALT = "a7c3e91f5d20b846"
+        private const val HEX = "0123456789abcdef"
     }
 
     private val pageHeaders = mapOf(
@@ -284,11 +293,21 @@ class Animezid : MainAPI() {
     // Load links (protected playback API)
     // =========================================================================
 
+    private data class PlaybackProof(
+        val csrf: String,
+        val token: String,
+        val rotation: Int,
+        val salt: String
+    ) {
+        val sessionToken: String get() = csrf.ifBlank { token }
+    }
+
     private data class PlaybackSession(
         val create: String,
         val id: String,
         val headers: MutableMap<String, String>,
-        val embedded: List<JSONObject>
+        val embedded: List<JSONObject>,
+        val proof: PlaybackProof
     )
 
     private class RateLimited : Exception()
@@ -311,25 +330,34 @@ class Animezid : MainAPI() {
         // processed in batches, each with a freshly opened playback session.
         val batchSize = 5
         var session = first
+        var sources = first.embedded
         var found = false
         var index = 0
 
         while (index < first.embedded.size) {
             if (index > 0 && index % batchSize == 0) {
-                session = createPlaybackSession(playUrl) ?: session
+                session = createPlaybackSession(playUrl) ?: return found
+                sources = session.embedded
             }
             val end = minOf(index + batchSize, first.embedded.size)
             for (i in index until end) {
-                val src = first.embedded[i]
+                val src = sources.getOrNull(i) ?: continue
                 val ok = try {
                     resolveAndEmit(src, session, playUrl, subtitleCallback, callback)
                 } catch (_: RateLimited) {
                     val rotated = createPlaybackSession(playUrl)
                     if (rotated != null) {
                         session = rotated
-                        try {
-                            resolveAndEmit(src, rotated, playUrl, subtitleCallback, callback)
-                        } catch (_: Exception) {
+                        sources = rotated.embedded
+                        val rotatedSource = sources.getOrNull(i)
+                            ?: sources.firstOrNull { it.optString("provider") == src.optString("provider") }
+                        if (rotatedSource != null) {
+                            try {
+                                resolveAndEmit(rotatedSource, rotated, playUrl, subtitleCallback, callback)
+                            } catch (_: Exception) {
+                                false
+                            }
+                        } else {
                             false
                         }
                     } else {
@@ -365,21 +393,55 @@ class Animezid : MainAPI() {
         if (!resp.isSuccessful) return null
 
         val doc = resp.document
-        val csrf = doc.selectFirst("[data-playback-csrf]")?.attr("data-playback-csrf") ?: return null
+        val csrf = doc.selectFirst("[data-playback-csrf]")?.attr("data-playback-csrf").orEmpty()
+        val sealedA = doc.selectFirst("[data-pb-a]")?.attr("data-pb-a").orEmpty()
+        val sealedB = doc.selectFirst("[data-pb-b]")?.attr("data-pb-b").orEmpty()
+        val token = unsealPlaybackToken(sealedA, sealedB).orEmpty()
+        val rotation = doc.selectFirst("[data-pb-v]")?.attr("data-pb-v")?.toIntOrNull() ?: 0
+        if (csrf.isBlank() && token.isBlank()) return null
+
         val rawCreate = doc.selectFirst("[data-playback-create-url]")?.attr("data-playback-create-url") ?: return null
-        val create = fixUrl(rawCreate)
+        val create = fixUrl(rawCreate).ifBlank { return null }
         val vid = doc.selectFirst("[data-video-uniq]")?.attr("data-video-uniq")
+            ?.ifBlank { null }
             ?: Regex("vid=([A-Za-z0-9]+)").find(playUrl)?.groupValues?.get(1)
             ?: return null
 
-        val headers = playbackHeaders(csrf, playUrl, resp.cookies)
-        val session = retryPost(create, headers, mapOf("content_id" to vid), playUrl) ?: return null
+        var proof = PlaybackProof(csrf, token, rotation, PB_DEFAULT_PROOF_SALT)
+        if (csrf.isBlank() && (rotation and PB_ROTATION_SALTED_PROOF) != 0) {
+            proof = proof.copy(salt = readPlaybackProofSalt(doc, playUrl) ?: PB_DEFAULT_PROOF_SALT)
+        }
+        val headers = playbackHeaders(playUrl, resp.cookies)
+
+        var extraHeaders: Map<String, String> = emptyMap()
+        if ((rotation and PB_ROTATION_WARMUP) != 0) {
+            val warmup = retryPost(
+                create,
+                headers,
+                proof,
+                mapOf<String, Any?>("content_id" to vid, "warm" to 1),
+                playUrl,
+                maxRetries = 1
+            ) ?: return null
+            val warmToken = warmup.optString("w").ifBlank { return null }
+            delay(1200L)
+            extraHeaders = mapOf("X-Playback-Warm" to warmToken)
+        }
+
+        val session = retryPost(
+            create,
+            headers,
+            proof,
+            mapOf("content_id" to vid),
+            playUrl,
+            extraHeaders = extraHeaders
+        ) ?: return null
         val sid = session.optString("session_id").ifBlank { return null }
         val arr = session.optJSONArray("sources") ?: return null
         val embedded = (0 until arr.length())
             .mapNotNull { arr.optJSONObject(it) }
             .filter { it.optString("type") == "embedded_web" }
-        return PlaybackSession(create, sid, headers, embedded)
+        return PlaybackSession(create, sid, headers, embedded, proof)
     }
 
     private suspend fun resolveAndEmit(
@@ -389,19 +451,25 @@ class Animezid : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val srcId = src.optString("id").ifBlank { return false }
         val provider = src.optString("provider")
+        val resolveUrl = if ((session.proof.rotation and PB_ROTATION_SOURCE_ROUTE) != 0) {
+            val route = src.optString("r").trim()
+            if (!route.startsWith("/web-playback/sessions/")) return false
+            fixUrl(route)
+        } else {
+            val srcId = src.optString("id").ifBlank { return false }
+            "${session.create.trimEnd('/')}/${session.id}/sources/$srcId/resolve"
+        }
+        val resolved = resolveSource(resolveUrl, session.headers, session.proof, playUrl)
+        val launchUrl = fixUrl(resolved.optString("launch_url").ifBlank { return false })
 
-        val resolveUrl = "${session.create.trimEnd('/')}/${session.id}/sources/$srcId/resolve"
-        val resolved = resolveSource(resolveUrl, session.headers, playUrl)
-        val launchUrl = resolved.optString("launch_url").ifBlank { return false }
-
-        // Animezid validates browser fetch metadata on launch redirects. This request
-        // represents loading the resolved player URL in the page's iframe.
-        val launchHeaders = session.headers.toMutableMap().apply {
+        // The launch URL is opened in the page's iframe, not as an API fetch.
+        val launchHeaders = pageHeaders.toMutableMap().apply {
+            this["Referer"] = playUrl
             this["Sec-Fetch-Dest"] = "iframe"
             this["Sec-Fetch-Mode"] = "navigate"
             this["Sec-Fetch-Site"] = "same-origin"
+            session.headers["Cookie"]?.let { this["Cookie"] = it }
         }
         val finalUrl = try {
             val response = app.get(launchUrl, headers = launchHeaders, referer = playUrl)
@@ -476,19 +544,22 @@ class Animezid : MainAPI() {
     private suspend fun retryPost(
         url: String,
         headers: MutableMap<String, String>,
-        jsonBody: Map<String, String>,
+        proof: PlaybackProof,
+        jsonBody: Map<String, Any?>,
         referer: String,
+        extraHeaders: Map<String, String> = emptyMap(),
         maxRetries: Int = 3
     ): JSONObject? {
         repeat(maxRetries) { attempt ->
             try {
-                val resp = app.post(url, headers = headers, json = jsonBody, referer = referer)
+                val requestHeaders = playbackRequestHeaders(proof, headers, url, extraHeaders)
+                val resp = app.post(url, headers = requestHeaders, json = jsonBody, referer = referer)
                 mergeResponseCookies(headers, resp.cookies)
                 if (resp.code == 200 || resp.code == 201) {
-                    return try { JSONObject(resp.text) } catch (_: Exception) { null }
+                    return decodePlaybackResponse(resp.text, proof)
                 }
             } catch (_: Exception) {
-                // retry
+                // Retry brief transport failures; the API's proof is deterministic per route.
             }
             delay(600L * (attempt + 1))
         }
@@ -502,21 +573,28 @@ class Animezid : MainAPI() {
     private suspend fun resolveSource(
         url: String,
         headers: MutableMap<String, String>,
+        proof: PlaybackProof,
         referer: String
     ): JSONObject {
         var rateLimited = false
         repeat(3) { attempt ->
             val resp = try {
-                app.post(url, headers = headers, json = mapOf<String, String>(), referer = referer)
+                val requestHeaders = playbackRequestHeaders(proof, headers, url)
+                app.post(
+                    url,
+                    headers = requestHeaders,
+                    json = emptyMap<String, Any?>(),
+                    referer = referer
+                )
             } catch (_: Exception) {
                 null
             }
             if (resp != null) {
                 mergeResponseCookies(headers, resp.cookies)
                 if (resp.code == 200 || resp.code == 201) {
-                    val obj = try { JSONObject(resp.text) } catch (_: Exception) { null }
+                    val obj = decodePlaybackResponse(resp.text, proof)
                     if (obj != null && obj.optString("error") != "rate_limited") return obj
-                    if (obj != null) rateLimited = true
+                    if (obj?.optString("error") == "rate_limited") rateLimited = true
                 } else if (resp.code == 429) {
                     rateLimited = true
                 } else {
@@ -529,9 +607,8 @@ class Animezid : MainAPI() {
         return JSONObject()
     }
 
-    // The playback API now checks Fetch Metadata like a same-origin browser fetch.
+    // Base browser/API headers; the per-request proof and rotating cookie are added below.
     private fun playbackHeaders(
-        csrf: String,
         referer: String,
         cookies: Map<String, String>
     ): MutableMap<String, String> {
@@ -539,7 +616,7 @@ class Animezid : MainAPI() {
             "User-Agent" to BROWSER_UA,
             "Accept" to "application/json, text/plain, */*",
             "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
-            "X-Playback-CSRF" to csrf,
+            "Content-Type" to "application/json",
             "Origin" to siteRoot,
             "Referer" to referer,
             "Sec-Fetch-Dest" to "empty",
@@ -548,6 +625,129 @@ class Animezid : MainAPI() {
         )
         mergeResponseCookies(headers, cookies)
         return headers
+    }
+
+    /** Build the same route-bound authentication headers that visitor.js sends. */
+    private fun playbackRequestHeaders(
+        proof: PlaybackProof,
+        baseHeaders: MutableMap<String, String>,
+        url: String,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): MutableMap<String, String> {
+        val headers = baseHeaders.toMutableMap()
+        headers.remove("X-Playback-CSRF")
+        headers.remove("X-Playback-Proof")
+        if (proof.csrf.isNotBlank()) {
+            headers["X-Playback-CSRF"] = proof.csrf
+        } else {
+            val saltPrefix = if ((proof.rotation and PB_ROTATION_SALTED_PROOF) != 0) {
+                "${proof.salt}|"
+            } else {
+                ""
+            }
+            headers["X-Playback-Proof"] = sha256Hex("$saltPrefix${proof.token}|${playbackPath(url)}")
+        }
+
+        if ((proof.rotation and PB_ROTATION_SCRIPT_COOKIE) != 0) {
+            val playerCookie = sha256Hex("pc|${proof.sessionToken}").take(32)
+            mergeResponseCookies(headers, mapOf("az_pc" to playerCookie))
+        }
+        extraHeaders.forEach { (key, value) -> headers[key] = value }
+        return headers
+    }
+
+    private fun playbackPath(url: String): String {
+        return try {
+            java.net.URI(url).rawPath?.takeIf { it.isNotBlank() } ?: "/"
+        } catch (_: Exception) {
+            url.substringAfter("://", url).substringAfter('/', "/").substringBefore('?')
+                .ifBlank { "/" }
+        }
+    }
+
+    /** Decode the optional block-XOR response wrapper used by rotation card 2. */
+    private fun decodePlaybackResponse(text: String, proof: PlaybackProof): JSONObject? {
+        val payload = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            return null
+        }
+        if ((proof.rotation and PB_ROTATION_ENCRYPTED_RESPONSE) == 0) return payload
+
+        val encoded = payload.optString("d")
+        val nonce = payload.optString("n")
+        if (encoded.isBlank() || nonce.isBlank()) return payload
+
+        return try {
+            val cipher = Base64.decode(encoded, Base64.DEFAULT)
+            val plain = ByteArray(cipher.size)
+            var block = 0
+            while (block * 32 < cipher.size) {
+                val stream = sha256Bytes("${proof.sessionToken}|enc|$nonce|$block")
+                val start = block * 32
+                val end = minOf(start + 32, cipher.size)
+                for (index in start until end) {
+                    plain[index] = (cipher[index].toInt() xor stream[index - start].toInt()).toByte()
+                }
+                block++
+            }
+            JSONObject(String(plain, Charsets.UTF_8))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun sha256Bytes(value: String): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+
+    private fun sha256Hex(value: String): String = sha256Bytes(value).toHex()
+
+    private fun ByteArray.toHex(): String {
+        val chars = CharArray(size * 2)
+        for (index in indices) {
+            val value = this[index].toInt() and 0xff
+            chars[index * 2] = HEX[value ushr 4]
+            chars[index * 2 + 1] = HEX[value and 0x0f]
+        }
+        return String(chars)
+    }
+
+    private fun unsealPlaybackToken(sealed: String, mask: String): String? {
+        val sealedBytes = hexToBytes(sealed) ?: return null
+        val maskBytes = hexToBytes(mask) ?: return null
+        if (sealedBytes.size != 32 || maskBytes.size != 32) return null
+        return ByteArray(sealedBytes.size) { index ->
+            (sealedBytes[index].toInt() xor maskBytes[index].toInt()).toByte()
+        }.toHex()
+    }
+
+    private fun hexToBytes(value: String): ByteArray? {
+        val text = value.trim()
+        if (text.isEmpty() || text.length % 2 != 0) return null
+        val result = ByteArray(text.length / 2)
+        for (index in result.indices) {
+            val high = Character.digit(text[index * 2], 16)
+            val low = Character.digit(text[index * 2 + 1], 16)
+            if (high < 0 || low < 0) return null
+            result[index] = ((high shl 4) or low).toByte()
+        }
+        return result
+    }
+
+    private suspend fun readPlaybackProofSalt(doc: Document, playUrl: String): String? {
+        val scriptUrl = doc.select("script[src]")
+            .map { it.attr("src") }
+            .firstOrNull { it.contains("visitor.js", ignoreCase = true) }
+            ?.let { fixUrl(it) }
+            ?: return null
+        return try {
+            val response = app.get(scriptUrl, headers = pageHeaders, referer = playUrl)
+            if (!response.isSuccessful) return null
+            Regex("""playbackProofSalt\s*=\s*['"]([^'"]+)['"]""")
+                .find(response.text)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun mergeResponseCookies(headers: MutableMap<String, String>, cookies: Map<String, String>) {
