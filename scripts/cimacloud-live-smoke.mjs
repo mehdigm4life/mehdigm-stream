@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -26,6 +27,22 @@ const publicKey = crypto.createPublicKey({
   format: "der",
   type: "spki",
 });
+
+// Match the transport used by the historical authenticated probe (Python urllib)
+// instead of relying on Node fetch defaults such as compression negotiation.
+const PYTHON_GET = String.raw`
+import json, sys, urllib.error, urllib.request
+args = json.load(sys.stdin)
+request = urllib.request.Request(args["url"], headers=args["headers"], method="GET")
+try:
+    with urllib.request.urlopen(request, timeout=args["timeout"]) as response:
+        result = {"status": response.status, "contentType": response.headers.get("content-type", ""), "body": response.read().decode("utf-8", "replace")}
+except urllib.error.HTTPError as error:
+    result = {"status": error.code, "contentType": error.headers.get("content-type", "") if error.headers else "", "body": error.read(2_000_000).decode("utf-8", "replace")}
+except Exception as error:
+    result = {"error": str(error)}
+sys.stdout.write(json.dumps(result))
+`;
 
 function md5Hex(value) {
   return crypto.createHash("md5").update(value, "utf8").digest("hex");
@@ -118,16 +135,23 @@ function decodeApiBody(rawBody, deviceKey) {
 }
 
 function getServerLinks(root) {
-  const values = Array.isArray(root.servers)
+  const values = Array.isArray(root?.servers)
     ? root.servers
-    : Array.isArray(root.items)
+    : Array.isArray(root?.items)
       ? root.items
-      : Array.isArray(root.data)
+      : Array.isArray(root?.data)
         ? root.data
         : [];
   return values
     .map((item) => (typeof item === "string" ? item : item?.link || item?.url || ""))
     .filter((url) => /^https?:\/\//i.test(url));
+}
+
+function pluginResponseView(root) {
+  if (!root || typeof root !== "object" || Array.isArray(root) || root.blocked === true) return {};
+  return root.data && typeof root.data === "object" && !Array.isArray(root.data)
+    ? root.data
+    : root;
 }
 
 function hostOf(link) {
@@ -165,17 +189,27 @@ async function getApiRoot() {
 async function requestServerList(apiRoot, label, path) {
   const { cloudflareId, deviceKey } = makeCloudflarePair();
   const url = `${apiRoot.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "User-Agent": APP_USER_AGENT,
-      Accept: "application/json, text/plain, */*",
-      "cloudflare-id": cloudflareId,
-      firebase_id: buildSecureToken(),
+  const headers = {
+    "User-Agent": APP_USER_AGENT,
+    Accept: "application/json, text/plain, */*",
+    "cloudflare-id": cloudflareId,
+    firebase_id: buildSecureToken(),
+  };
+  const request = spawnSync(
+    "python3",
+    ["-c", PYTHON_GET],
+    {
+      input: JSON.stringify({ url, headers, timeout: 22 }),
+      encoding: "utf8",
+      timeout: 25_000,
+      maxBuffer: 2_500_000,
     },
-    signal: AbortSignal.timeout(22_000),
-  });
-  const rawBody = await response.text();
+  );
+  if (request.error) throw request.error;
+  if (request.status !== 0) throw new Error(request.stderr || `Python HTTP helper exited with ${request.status}`);
+  const response = JSON.parse(request.stdout);
+  if (response.error) throw new Error(response.error);
+  const rawBody = response.body;
   let root;
   let decodeError = null;
   try {
@@ -185,26 +219,18 @@ async function requestServerList(apiRoot, label, path) {
     root = {};
   }
 
-  const links = getServerLinks(root);
+  const pluginView = pluginResponseView(root);
+  const links = getServerLinks(pluginView);
   const nestedServers = root.data && !Array.isArray(root.data) && Array.isArray(root.data.servers)
     ? root.data.servers
     : [];
-  const genericPluginView = root.data && !Array.isArray(root.data) && typeof root.data === "object"
-    ? root.data
-    : root;
-  const genericPluginCount = Array.isArray(genericPluginView.servers)
-    ? genericPluginView.servers.length
-    : Array.isArray(genericPluginView.items)
-      ? genericPluginView.items.length
-      : Array.isArray(genericPluginView.data)
-        ? genericPluginView.data.length
-        : 0;
+  const genericPluginCount = getServerLinks(pluginView).length;
 
   return {
     label,
     path,
     httpStatus: response.status,
-    contentType: response.headers.get("content-type") || "",
+    contentType: response.contentType || "",
     rawLength: Buffer.byteLength(rawBody),
     rawFormat: rawBody.trim().startsWith("{")
       ? "json-object"
@@ -218,9 +244,9 @@ async function requestServerList(apiRoot, label, path) {
     topLevelServerCount: Array.isArray(root.servers) ? root.servers.length : 0,
     acceptedLinkCount: links.length,
     nestedDataServerCount: nestedServers.length,
-    currentGenericUnwrapCount: genericPluginCount,
+    pluginVisibleServerCount: genericPluginCount,
     topLevelServersWouldBeLostByGenericUnwrap:
-      Boolean(root.data && !Array.isArray(root.data) && root.servers && genericPluginCount === 0),
+      Boolean(Array.isArray(root.servers) && root.servers.length > 0 && genericPluginCount === 0),
     serverHosts: [...new Set(links.map(hostOf).filter(Boolean))].sort(),
     decodeError,
   };
@@ -267,7 +293,7 @@ async function main() {
       topLevelServerCount: result.topLevelServerCount,
       acceptedLinkCount: result.acceptedLinkCount,
       nestedDataServerCount: result.nestedDataServerCount,
-      currentGenericUnwrapCount: result.currentGenericUnwrapCount,
+      pluginVisibleServerCount: result.pluginVisibleServerCount,
       topLevelServersWouldBeLostByGenericUnwrap: result.topLevelServersWouldBeLostByGenericUnwrap,
       serverHosts: result.serverHosts,
       decodeError: result.decodeError,
@@ -308,4 +334,4 @@ if (invokedDirectly) main().catch((error) => {
   process.exitCode = 1;
 });
 
-export { buildSecureToken, decodeApiBody, decryptResponse, getServerLinks, makeCloudflarePair };
+export { buildSecureToken, decodeApiBody, decryptResponse, getServerLinks, makeCloudflarePair, pluginResponseView };
