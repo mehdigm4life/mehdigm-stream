@@ -152,15 +152,14 @@ internal object CimaCloudResponseParser {
         return null
     }
 
-    private fun unwrapData(root: JSONObject, depth: Int = 0): JSONObject? {
+    private fun unwrapData(root: JSONObject): JSONObject? {
         if (root.optBoolean("blocked", false)) return null
-        if (depth >= MAX_UNWRAP_DEPTH) return root
 
-        return when (val data = root.opt("data")) {
-            is JSONObject -> unwrapData(data, depth + 1)
-            is JSONArray -> JSONObject().put("items", data)
-            else -> root
-        }
+        // Match the API's envelope: unwrap one object-valued `data` field, but keep the outer
+        // object when `data` is an array so sibling fields such as `sections` are not discarded.
+        val data = root.optJSONObject("data") ?: return root
+        if (data.optBoolean("blocked", false)) return null
+        return data
     }
 
     private fun normalizeHttpUrl(raw: String): String? {

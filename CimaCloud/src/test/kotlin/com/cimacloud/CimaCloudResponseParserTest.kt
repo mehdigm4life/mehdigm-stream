@@ -19,6 +19,19 @@ class CimaCloudResponseParserTest {
     }
 
     @Test
+    fun preservesSiblingMetadataWhenDataIsAnArray() {
+        val root = CimaCloudResponseParser.decodeBody(
+            """{"status":true,"data":[{"id":1}],"sections":[{"section_id":3}],"servers":[{"url":"https://video.example/embed/metadata"}]}""",
+        ) { error("Plain JSON must not be decrypted") }
+
+        assertEquals(1, requireNotNull(root).optJSONArray("sections")?.length() ?: 0)
+        assertEquals(
+            listOf("https://video.example/embed/metadata"),
+            CimaCloudResponseParser.extractServerUrls(requireNotNull(root)),
+        )
+    }
+
+    @Test
     fun decryptsJsonEnvelopeThenUnwrapsNestedData() {
         val root = CimaCloudResponseParser.decodeBody(
             """{"encrypted":true,"data":"opaque-ciphertext"}""",
