@@ -34,6 +34,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 class CimaCloud : MainAPI() {
 
@@ -78,6 +79,7 @@ class CimaCloud : MainAPI() {
     @Volatile
     private var cachedHomeAtMs: Long = 0L
     private val homeMutex = Mutex()
+    private val catalogCache = ConcurrentHashMap<String, JSONObject>()
 
     private suspend fun getHomeCached(): JSONObject? {
         val now = System.currentTimeMillis()
@@ -292,6 +294,9 @@ class CimaCloud : MainAPI() {
         }
 
         val url = "$mainUrl/$targetKind/$id"
+        if (!isEpisode && (targetKind == "movie" || targetKind == "series")) {
+            catalogCache["$targetKind/$id"] = JSONObject(obj.toString())
+        }
         val poster = normalizeImageUrl(
             obj.optString("poster").ifBlank { obj.optString("backdrop") },
         )
@@ -442,7 +447,9 @@ class CimaCloud : MainAPI() {
     }
 
     private suspend fun loadMovieDetail(movieId: String): LoadResponse? {
-        val root = CimaCloudCrypto.apiGet("movie/$movieId") ?: return null
+        val root = CimaCloudCrypto.apiGet("movie/$movieId")
+            ?: catalogCache["movie/$movieId"]
+            ?: return null
         val m = root.optJSONObject("movie") ?: root
         val title = m.optString("name").ifBlank { m.optString("title") }.trim()
         if (title.isEmpty()) return null
@@ -478,38 +485,70 @@ class CimaCloud : MainAPI() {
         }
     }
 
+    private fun firstEpisodeId(seasons: JSONArray?): String? {
+        if (seasons == null) return null
+        for (seasonIndex in 0 until seasons.length()) {
+            val season = seasons.optJSONObject(seasonIndex) ?: continue
+            val episodes = season.optJSONArray("episodes") ?: continue
+            for (episodeIndex in 0 until episodes.length()) {
+                val id = episodes.optJSONObject(episodeIndex)?.optString("id")?.trim().orEmpty()
+                if (id.isNotBlank() && id != "null") return id
+            }
+        }
+        return null
+    }
+
     private suspend fun loadSeriesDetail(seriesId: String): LoadResponse? = coroutineScope {
         val detailDeferred = async { CimaCloudCrypto.apiGet("series/$seriesId") }
         val episodesDeferred = async { CimaCloudCrypto.apiGet("series/$seriesId/episodes") }
 
-        val detailRoot = detailDeferred.await() ?: return@coroutineScope null
-        val s = detailRoot.optJSONObject("series") ?: detailRoot
-        val title = s.optString("name").ifBlank { s.optString("title") }.trim()
+        val detailRoot = detailDeferred.await()
+        val epRoot = episodesDeferred.await()
+        val directSeries = detailRoot?.optJSONObject("series")
+            ?: detailRoot?.takeIf {
+                it.optString("name").isNotBlank() || it.optString("title").isNotBlank()
+            }
+
+        // The current public API blocks /series/{id} without a valid app attestation,
+        // while /series/{id}/episodes and /episode/{id} still expose the show card.
+        // Keep normal detail metadata first, then use catalog/episode metadata as a safe fallback.
+        var s = directSeries ?: catalogCache["series/$seriesId"]
+        if (s == null) {
+            val firstEpisodeId = firstEpisodeId(epRoot?.optJSONArray("seasons"))
+            if (firstEpisodeId != null) {
+                val episodeRoot = CimaCloudCrypto.apiGet("episode/$firstEpisodeId")
+                val episode = episodeRoot?.optJSONObject("episode") ?: episodeRoot
+                val seriesCard = episode?.optJSONObject("series")
+                if (seriesCard?.optString("id") == seriesId) s = seriesCard
+            }
+        }
+        val seriesInfo = s ?: return@coroutineScope null
+
+        val title = seriesInfo.optString("name").ifBlank { seriesInfo.optString("title") }.trim()
         if (title.isEmpty()) return@coroutineScope null
 
         val canonicalUrl = "$mainUrl/series/$seriesId"
-        val poster = normalizeImageUrl(s.optString("poster"))
-        val backdrop = normalizeImageUrl(s.optString("backdrop"))
-        val plot = buildPlot(s)
+        val poster = normalizeImageUrl(seriesInfo.optString("poster"))
+        val backdrop = normalizeImageUrl(seriesInfo.optString("backdrop"))
+        val plot = buildPlot(seriesInfo)
         val year = extractYear(
-            s.optString("year")
-                .ifBlank { s.optString("first_air_date") }
-                .ifBlank { s.optString("release_date") },
+            seriesInfo.optString("year")
+                .ifBlank { seriesInfo.optString("first_air_date") }
+                .ifBlank { seriesInfo.optString("release_date") },
         )
-        val rating = s.optString("vote_average").toDoubleOrNull()?.takeIf { it > 0.0 && it <= 10.0 }
-        val trailer = normalizeTrailerUrl(s.optString("trailer"))
-        val isDub = s.optInt("dub", 0) == 1 || title.contains("مدبلج")
-        val tags = buildTags(s.optJSONArray("categories"), s.optJSONArray("genres"), isDub)
-        val showStatus = parseShowStatus(s.optString("status"))
+        val rating = seriesInfo.optString("vote_average").toDoubleOrNull()?.takeIf { it > 0.0 && it <= 10.0 }
+        val trailer = normalizeTrailerUrl(seriesInfo.optString("trailer"))
+        val isDub = seriesInfo.optInt("dub", 0) == 1 || title.contains("مدبلج")
+        val tags = buildTags(seriesInfo.optJSONArray("categories"), seriesInfo.optJSONArray("genres"), isDub)
+        val showStatus = parseShowStatus(seriesInfo.optString("status"))
         val tvType = classifyTvType(
             isMovie = false,
             title = title,
-            categories = s.optJSONArray("categories"),
-            genres = s.optJSONArray("genres"),
+            categories = seriesInfo.optJSONArray("categories"),
+            genres = seriesInfo.optJSONArray("genres"),
         )
 
-        val epRoot = episodesDeferred.await()
-        val seasonsArr = epRoot?.optJSONArray("seasons") ?: s.optJSONArray("seasons")
+        val seasonsArr = epRoot?.optJSONArray("seasons") ?: seriesInfo.optJSONArray("seasons")
         val episodes = buildEpisodesList(seasonsArr, defaultPoster = poster)
 
         if (tvType == TvType.Anime) {
@@ -544,6 +583,7 @@ class CimaCloud : MainAPI() {
         val showId = ep.optString("tv_show_id")
             .ifBlank { ep.optString("serie_id") }
             .ifBlank { ep.optString("series_id") }
+            .ifBlank { ep.optJSONObject("series")?.optString("id").orEmpty() }
         if (showId.isNotBlank()) {
             loadSeriesDetail(showId)?.let { return it }
         }
