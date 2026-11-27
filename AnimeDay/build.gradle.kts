@@ -2,7 +2,7 @@ import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 33
+version = 34
 
 cloudstream {
     description = "AnimeDay — أنمي وكرتون مدبلج ومترجم"

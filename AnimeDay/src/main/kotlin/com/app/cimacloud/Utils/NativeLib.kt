@@ -111,7 +111,12 @@ object NativeLib {
             }
             instance
         }
-        return method.invoke(receiver, officialContext) as? String
+        // createPackageContext() exposes AnimeDay's code and resources, but its applicationContext
+        // may still resolve to CloudStream because the official Application is not launched in
+        // this process. Preserve the package identity through all Context accessors used by JNI.
+        val attestationContext = FakeContext(officialContext)
+        Log.i(LOG_TAG, "calling installed AnimeDay native attestation with package identity context")
+        return method.invoke(receiver, attestationContext) as? String
     }
 
     fun decrypt(context: Context, data: String, key: String): String? {
