@@ -160,7 +160,7 @@ internal object AnimeDayCrypto {
     @SuppressLint("HardwareIds")
     fun generateCloudflarePair(): Pair<String, String> {
         val prefix = randomAlnum(15)
-        val context = appContext
+        val context = appContext?.let { NativeLib.deviceIdentityContext(it) }
         val androidId = try {
             context?.let { Settings.Secure.getString(it.contentResolver, Settings.Secure.ANDROID_ID) }
         } catch (_: Throwable) {

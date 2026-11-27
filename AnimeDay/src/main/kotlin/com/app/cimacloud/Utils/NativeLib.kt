@@ -75,6 +75,25 @@ object NativeLib {
     }
 
     /**
+     * ANDROID_ID is scoped to the calling app identity on modern Android releases. Read it from
+     * AnimeDay's installed package context when available, rather than CloudStream's host context.
+     */
+    fun deviceIdentityContext(context: Context): Context {
+        val appContext = context.applicationContext ?: context
+        return try {
+            val officialContext = appContext.createPackageContext(OFFICIAL_PACKAGE, 0)
+            Log.i(LOG_TAG, "using installed AnimeDay context for device identifier")
+            officialContext.applicationContext ?: officialContext
+        } catch (error: Throwable) {
+            Log.i(
+                LOG_TAG,
+                "AnimeDay context unavailable for device identifier; using host context error=${error.javaClass.simpleName}",
+            )
+            appContext
+        }
+    }
+
+    /**
      * Use the real app context and package metadata when AnimeDay is installed. Some devices
      * expose the app through createPackageContext even when the host app cannot query it directly;
      * FakeContext/FakePackageManager then supplies the compatibility identity and legacy fallback.
