@@ -1,0 +1,534 @@
+name: Diagnose and patch CimaCloud APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct HTTPS MediaFire APK URL (defaults to the supplied APK)"
+        required: false
+        type: string
+        default: "https://download946.mediafire.com/o34osa8xt16gkWvvgubSfRQBdaDwwIdATwmo30OmJt0DyqX2uiDbI4gejJtdRpEUJPDRh0yJWfLsTmW5Gnciv7_7-r-ZNeuuKVKcHG1p9TSvs0hV_viJqrjaDkJcsRCqBMzuoGdTWZOTNnULpEcFoRIuDcyJ3-Gb1WI-1Kp-AMstZQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk"
+  push:
+    paths:
+      - ".github/workflows/patch-cimacloud-mitm.yml"
+      - "scripts/diagnose-cimacloud-apk.py"
+      - "scripts/resolve-mediafire-download.py"
+      - "scripts/inspect-cimacloud-apk-context.py"
+
+permissions:
+  contents: read
+
+jobs:
+  patch-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out forensic analysis script
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Set up Java for Apktool and APK signing
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK signing tools
+        uses: android-actions/setup-android@v4.0.4
+
+      - name: Install Apktool, ELF inspection tools, and Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes apktool binutils
+          build_tools="$ANDROID_HOME/build-tools/35.0.0"
+          sdkmanager --install "build-tools;35.0.0"
+          echo "$build_tools" >> "$GITHUB_PATH"
+          export PATH="$build_tools:$PATH"
+          apktool --version
+          apksigner version
+          zipalign -h >/dev/null 2>&1 || true
+          readelf --version | head -n 1
+
+      - name: Download the supplied CimaCloud APK with curl
+        id: download
+        shell: bash
+        env:
+          APK_URL: ${{ github.event.inputs.apk_url }}
+        run: |
+          set -euo pipefail
+          apk_url="${APK_URL:-}"
+          if [[ -z "$apk_url" ]]; then
+            apk_url='https://download946.mediafire.com/o34osa8xt16gkWvvgubSfRQBdaDwwIdATwmo30OmJt0DyqX2uiDbI4gejJtdRpEUJPDRh0yJWfLsTmW5Gnciv7_7-r-ZNeuuKVKcHG1p9TSvs0hV_viJqrjaDkJcsRCqBMzuoGdTWZOTNnULpEcFoRIuDcyJ3-Gb1WI-1Kp-AMstZQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk'
+          fi
+          if [[ ! "$apk_url" =~ ^https://download[0-9]+\.mediafire\.com/ ]]; then
+            echo "Provide a direct HTTPS URL hosted on a download-numbered MediaFire host." >&2
+            exit 1
+          fi
+
+          work_dir="$RUNNER_TEMP/cima-cloud-forensics"
+          mkdir -p "$work_dir"
+          apk="$work_dir/CimaCloud_Bnhelmyy.apk"
+
+          download_method="original direct URL"
+          if ! http_status="$(curl \
+            --location \
+            --proto '=https' \
+            --proto-redir '=https' \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --retry-max-time 120 \
+            --connect-timeout 20 \
+            --max-time 600 \
+            --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+            --output "$apk" \
+            --write-out '%{http_code}' \
+            "$apk_url")" || [[ "$http_status" != "200" || ! -s "$apk" ]] || ! unzip -tq "$apk" >/dev/null 2>&1; then
+            echo "The supplied direct MediaFire URL did not return a valid APK (HTTP ${http_status:-unknown}); refreshing its temporary link from the same file page." >&2
+            echo "::warning title=MediaFire direct URL failed::HTTP ${http_status:-unknown}; attempting refresh from the same file page."
+            rm -f "$apk"
+
+            mapfile -t page_info < <(python3 scripts/resolve-mediafire-download.py page-info "$apk_url")
+            if [[ "${#page_info[@]}" -ne 2 || -z "${page_info[0]}" || -z "${page_info[1]}" ]]; then
+              echo "Could not derive the stable MediaFire file page from the supplied URL." >&2
+              echo "::error title=MediaFire URL cannot be refreshed::The supplied direct URL did not contain a usable file page and file key."
+              exit 1
+            fi
+            mediafire_page_url="${page_info[0]}"
+            mediafire_file_key="${page_info[1]}"
+            mediafire_page="$work_dir/mediafire-file-page.html"
+            mediafire_cookies="$work_dir/mediafire-cookies.txt"
+            touch "$mediafire_cookies"
+
+            if ! page_status="$(curl \
+              --location \
+              --proto '=https' \
+              --proto-redir '=https' \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --connect-timeout 20 \
+              --max-time 180 \
+              --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --cookie-jar "$mediafire_cookies" \
+              --output "$mediafire_page" \
+              --write-out '%{http_code}' \
+              "$mediafire_page_url")" || [[ "$page_status" != "200" || ! -s "$mediafire_page" ]]; then
+              echo "Could not refresh the MediaFire file page (HTTP ${page_status:-unknown})." >&2
+              echo "::error title=MediaFire file page request failed::HTTP ${page_status:-unknown}; could not fetch the stable file page."
+              exit 1
+            fi
+
+            resolver_error_file="$work_dir/mediafire-resolver-error.txt"
+            if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key" 2>"$resolver_error_file")"; then
+              resolver_error="$(tr '\r\n' '  ' < "$resolver_error_file" | cut -c 1-1100)"
+              echo "MediaFire's file page did not expose a direct link; trying its stable download endpoint for file key $mediafire_file_key." >&2
+              echo "::warning title=MediaFire direct-link extraction needs JavaScript::${resolver_error:-No matching direct URL was present in the refreshed page.}"
+              refreshed_url="https://www.mediafire.com/download/$mediafire_file_key"
+              download_method="stable MediaFire download endpoint"
+            else
+              download_method="refreshed direct URL from the same MediaFire file page"
+            fi
+            if ! http_status="$(curl \
+              --location \
+              --proto '=https' \
+              --proto-redir '=https' \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --retry-max-time 120 \
+              --connect-timeout 20 \
+              --max-time 600 \
+              --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --cookie "$mediafire_cookies" \
+              --referer "$mediafire_page_url" \
+              --output "$apk" \
+              --write-out '%{http_code}' \
+              "$refreshed_url")"; then
+              echo "curl could not download the refreshed APK URL (HTTP ${http_status:-unknown})." >&2
+              echo "::error title=MediaFire refreshed download failed::HTTP ${http_status:-unknown}; curl rejected the refreshed file URL."
+              exit 1
+            fi
+          fi
+
+          if [[ "$http_status" != "200" || ! -s "$apk" ]]; then
+            echo "Expected a non-empty APK response with HTTP 200; got HTTP ${http_status:-unknown}." >&2
+            echo "::error title=MediaFire returned no APK::Expected HTTP 200 and a non-empty file; received HTTP ${http_status:-unknown}."
+            exit 1
+          fi
+          if ! unzip -tq "$apk" >/dev/null; then
+            echo "The MediaFire response is not a valid APK/ZIP archive." >&2
+            echo "::error title=MediaFire response is not an APK::HTTP 200 returned data that failed ZIP/APK validation."
+            exit 1
+          fi
+
+          apk_bytes="$(wc -c < "$apk" | tr -d ' ')"
+          apk_sha256="$(sha256sum "$apk" | cut -d ' ' -f 1)"
+          echo "apk_path=$apk" >> "$GITHUB_OUTPUT"
+          echo "work_dir=$work_dir" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Supplied CimaCloud APK"
+            echo
+            echo "- Download method: $download_method"
+            echo "- HTTP status: $http_status"
+            echo "- Size: $apk_bytes bytes"
+            echo "- SHA-256: \`$apk_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the official CimaCloud APK for baseline comparison
+        id: official
+        shell: bash
+        run: |
+          set -euo pipefail
+          official_url='https://cima-cloud.com/index.php?action=download&v=latest'
+          official_apk="$RUNNER_TEMP/CimaCloud_official.apk"
+          if ! http_status="$(curl \
+            --location \
+            --proto '=https' \
+            --proto-redir '=https' \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --retry-max-time 120 \
+            --connect-timeout 20 \
+            --max-time 180 \
+            --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+            --output "$official_apk" \
+            --write-out '%{http_code}' \
+            "$official_url")"; then
+            echo "curl could not download the official CimaCloud APK (HTTP ${http_status:-unknown})." >&2
+            echo "::error title=Official CimaCloud download failed::HTTP ${http_status:-unknown}; could not fetch the official baseline."
+            exit 1
+          fi
+          if [[ "$http_status" != "200" || ! -s "$official_apk" ]]; then
+            echo "Expected a non-empty official APK with HTTP 200; got HTTP ${http_status:-unknown}." >&2
+            echo "::error title=Invalid official CimaCloud response::Expected an APK with HTTP 200; got HTTP ${http_status:-unknown}."
+            exit 1
+          fi
+          if ! unzip -tq "$official_apk" >/dev/null; then
+            echo "The official-site response is not a valid APK/ZIP archive." >&2
+            echo "::error title=Official CimaCloud response is not an APK::HTTP 200 returned data that failed ZIP/APK validation."
+            exit 1
+          fi
+          official_size="$(wc -c < "$official_apk" | tr -d ' ')"
+          official_sha256="$(sha256sum "$official_apk" | cut -d ' ' -f 1)"
+          sha256sum "$official_apk" | tee "$official_apk.sha256"
+          echo "apk_path=$official_apk" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Official CimaCloud baseline"
+            echo
+            echo "- Source: $official_url"
+            echo "- HTTP status: $http_status"
+            echo "- Size: $official_size bytes"
+            echo "- SHA-256: \`$official_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install apk-mitm
+        shell: bash
+        run: npm install --global --no-audit --no-fund apk-mitm@1.3.0
+
+      - name: Build MITM-patched and re-sign-only variants
+        id: patch
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+        run: |
+          set -euo pipefail
+          work_dir="$(dirname "$APK_PATH")"
+          temporary_patched="${APK_PATH%.apk}-patched.apk"
+          mitm_apk="$work_dir/CimaCloud_Bnhelmyy-mitm-patched.apk"
+          repacked_apk="$work_dir/CimaCloud_Bnhelmyy-repacked-only.apk"
+
+          # The first variant changes TLS trust/pinning behavior and is re-signed.
+          apk-mitm "$APK_PATH"
+          if [[ ! -s "$temporary_patched" ]]; then
+            echo "apk-mitm did not produce the MITM-patched APK." >&2
+            exit 1
+          fi
+          mv "$temporary_patched" "$mitm_apk"
+
+          # Control: rebuild and re-sign the exact same source but skip MITM edits.
+          apk-mitm --skip-patches --tmp-dir "$work_dir/apk-mitm-skip-patches" "$APK_PATH"
+          if [[ ! -s "$temporary_patched" ]]; then
+            echo "apk-mitm did not produce the re-sign-only control APK." >&2
+            exit 1
+          fi
+          mv "$temporary_patched" "$repacked_apk"
+
+          for candidate in "$mitm_apk" "$repacked_apk"; do
+            unzip -tq "$candidate" >/dev/null
+            sha256sum "$candidate" | tee "$candidate.sha256"
+          done
+          echo "mitm_apk=$mitm_apk" >> "$GITHUB_OUTPUT"
+          echo "repacked_apk=$repacked_apk" >> "$GITHUB_OUTPUT"
+
+      - name: Decode APKs and collect signing and ELF metadata
+        id: decode
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+          OFFICIAL_APK: ${{ steps.official.outputs.apk_path }}
+          MITM_APK: ${{ steps.patch.outputs.mitm_apk }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
+        run: |
+          set -euo pipefail
+          work_dir="$(dirname "$APK_PATH")"
+          decoded_root="$work_dir/apktool-decoded"
+          report_dir="$work_dir/forensic-report"
+          mkdir -p "$decoded_root" "$report_dir/signatures" "$report_dir/elf"
+
+          declare -A apks=(
+            ["source"]="$APK_PATH"
+            ["official"]="$OFFICIAL_APK"
+            ["repacked-only"]="$REPACKED_APK"
+            ["mitm"]="$MITM_APK"
+          )
+          decode_one() {
+            local label="$1"
+            local apk="$2"
+            local output="$decoded_root/$label"
+            local log="$report_dir/apktool-$label.log"
+            rm -rf "$output"
+            if apktool d --force --output "$output" "$apk" >"$log" 2>&1; then
+              echo "Apktool decoded $label successfully."
+            else
+              echo "Full Apktool decode failed for $label; retrying with resources disabled." >&2
+              rm -rf "$output"
+              if apktool d --force --no-res --output "$output" "$apk" >>"$log" 2>&1; then
+                echo "Apktool fallback decode succeeded for $label."
+              else
+                echo "Apktool could not decode $label; preserving its error log and continuing static ZIP analysis." >&2
+              fi
+            fi
+          }
+
+          for label in source official repacked-only mitm; do
+            apk="${apks[$label]}"
+            decode_one "$label" "$apk"
+
+            sig_report="$report_dir/signatures/$label.txt"
+            if apksigner verify --verbose --print-certs "$apk" >"$sig_report" 2>&1; then
+              printf '\nRESULT=PASS\n' >> "$sig_report"
+            else
+              printf '\nRESULT=FAIL\n' >> "$sig_report"
+            fi
+
+            if ! zipalign -c -v 4 "$apk" >"$report_dir/signatures/$label-zipalign.txt" 2>&1; then
+              echo "ZIP alignment check did not pass for $label." >> "$report_dir/signatures/$label-zipalign.txt"
+            fi
+
+            decoded="$decoded_root/$label"
+            if [[ -d "$decoded/lib" ]]; then
+              while IFS= read -r -d '' library; do
+                relative="${library#"$decoded"/}"
+                safe_name="$(printf '%s' "$relative" | tr '/ ' '__')"
+                {
+                  echo "APK variant: $label"
+                  echo "Library path: $relative"
+                  echo "SHA-256: $(sha256sum "$library" | cut -d ' ' -f 1)"
+                  echo
+                  readelf -h -d -n -Ws "$library" || true
+                } > "$report_dir/elf/$label-$safe_name.txt"
+              done < <(find "$decoded/lib" -type f -name '*.so' -print0)
+            fi
+          done
+
+          echo "decoded_root=$decoded_root" >> "$GITHUB_OUTPUT"
+          echo "report_dir=$report_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect app-specific Smali and native code paths
+        shell: bash
+        env:
+          DECODED_ROOT: ${{ steps.decode.outputs.decoded_root }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/cimacloud-focused-code.json"
+          python3 scripts/inspect-cimacloud-apk-context.py "$DECODED_ROOT/repacked-only" --apk "$REPACKED_APK" | tee "$report"
+          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare official and modified APKs, native libraries, and integrity indicators
+        id: analyze
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+          OFFICIAL_APK: ${{ steps.official.outputs.apk_path }}
+          MITM_APK: ${{ steps.patch.outputs.mitm_apk }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
+          DECODED_ROOT: ${{ steps.decode.outputs.decoded_root }}
+          REPORT_DIR: ${{ steps.decode.outputs.report_dir }}
+        run: |
+          set -euo pipefail
+          python3 scripts/diagnose-cimacloud-apk.py \
+            --apk "source=$APK_PATH" \
+            --apk "official=$OFFICIAL_APK" \
+            --apk "repacked-only=$REPACKED_APK" \
+            --apk "mitm=$MITM_APK" \
+            --decoded "source=$DECODED_ROOT/source" \
+            --decoded "official=$DECODED_ROOT/official" \
+            --decoded "repacked-only=$DECODED_ROOT/repacked-only" \
+            --decoded "mitm=$DECODED_ROOT/mitm" \
+            --signature "source=$REPORT_DIR/signatures/source.txt" \
+            --signature "official=$REPORT_DIR/signatures/official.txt" \
+            --signature "repacked-only=$REPORT_DIR/signatures/repacked-only.txt" \
+            --signature "mitm=$REPORT_DIR/signatures/mitm.txt" \
+            --output-dir "$REPORT_DIR/analysis"
+
+          cat "$REPORT_DIR/analysis/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "## Detailed forensic files"
+            echo
+            echo "The artifact includes the MediaFire input APK, the official-site baseline APK, both rebuilt variants, JSON findings, Apktool logs, signatures, and ELF metadata. The report labels the MediaFire APK as source and compares it directly with official."
+            echo "Compact comparison results are also emitted as GitHub check annotations."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK variants and forensic report
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: CimaCloud-Bnhelmyy-forensic-diagnostic
+          path: |
+            ${{ steps.download.outputs.apk_path }}
+            ${{ steps.download.outputs.apk_path }}.sha256
+            ${{ steps.official.outputs.apk_path }}
+            ${{ steps.official.outputs.apk_path }}.sha256
+            ${{ steps.patch.outputs.mitm_apk }}
+            ${{ steps.patch.outputs.mitm_apk }}.sha256
+            ${{ steps.patch.outputs.repacked_apk }}
+            ${{ steps.patch.outputs.repacked_apk }}.sha256
+            ${{ steps.decode.outputs.report_dir }}/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish artifact link
+        shell: bash
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          echo "## Forensic diagnostic artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Download: $ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  replay-previous-report:
+    name: Replay previous successful static findings
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out analysis script
+        uses: actions/checkout@v5
+
+      - name: Download the previous successful forensic artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CimaCloud-Bnhelmyy-forensic-diagnostic
+          repository: ${{ github.repository }}
+          run-id: "45973002462"
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous-cimacloud-forensic
+
+      - name: Publish previous report findings as check annotations
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_root="$RUNNER_TEMP/previous-cimacloud-forensic"
+          report_json="$(find "$report_root" -type f -name report.json -print -quit)"
+          if [[ -z "$report_json" ]]; then
+            echo "Could not locate report.json in the previous forensic artifact." >&2
+            find "$report_root" -maxdepth 5 -type f -print >&2
+            exit 1
+          fi
+          python3 scripts/diagnose-cimacloud-apk.py --report-json "$report_json" | tee "$RUNNER_TEMP/previous-cimacloud-summary.md"
+          cat "$RUNNER_TEMP/previous-cimacloud-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Java for Apktool context inspection
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Apktool for focused Smali/native analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes apktool
+
+      - name: Decode the control APK and inspect app-specific code paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$RUNNER_TEMP/previous-cimacloud-forensic"
+          artifact_files="$(find "$artifact_root" -maxdepth 5 -type f -printf '%P;')"
+          repacked_apk="$(find "$artifact_root" -type f -iname '*repacked-only*.apk' -print -quit)"
+          if [[ -z "$repacked_apk" ]]; then
+            echo "::error title=Missing control APK::Artifact files: ${artifact_files:0:2500}"
+            exit 1
+          fi
+          echo "::notice title=Control APK found::$repacked_apk"
+          decoded="$RUNNER_TEMP/cimacloud-repacked-smali"
+          apktool_log="$RUNNER_TEMP/apktool-focused.log"
+          if ! apktool d --force --output "$decoded" "$repacked_apk" > "$apktool_log" 2>&1; then
+            apktool_error="$(tail -n 25 "$apktool_log" | tr '\n' ' ')"
+            echo "::error title=Apktool decode failed::${apktool_error:0:2500}"
+            exit 1
+          fi
+          report="$RUNNER_TEMP/cimacloud-focused-code.json"
+          report_error="$RUNNER_TEMP/cimacloud-focused-code.stderr"
+          if ! python3 scripts/inspect-cimacloud-apk-context.py "$decoded" --apk "$repacked_apk" > "$report" 2> "$report_error"; then
+            python_error="$(tail -n 15 "$report_error" | tr '\n' ' ')"
+            echo "::error title=Focused code scan failed::${python_error:0:2500}"
+            exit 1
+          fi
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          report_text = "\n".join(line for line in raw.splitlines() if not line.startswith("::notice "))
+          report = json.loads(report_text)
+          native = report.get("native", [])
+          files = [item for item in native if isinstance(item, dict) and item.get("file")]
+          app_files = [
+              item for item in files
+              if any(marker in str(item["file"]).lower() for marker in ("bnhe", "cima", "cloud"))
+          ]
+          selected = app_files or files
+          count = native[0].get("native_libraries_found", len(files)) if native else 0
+          print(f"::notice title=CimaCloud native library count::{count}")
+          details = [
+              {
+                  "file": item.get("file"),
+                  "sha256": item.get("sha256"),
+                  "interesting_strings": item.get("interesting_strings", []),
+              }
+              for item in selected
+          ]
+          message = json.dumps(details, separators=(",", ":"), ensure_ascii=True)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=CimaCloud native string scan::{message}")
+          PY
+          cat "$report"
+          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
