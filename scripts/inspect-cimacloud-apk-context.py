@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
 import sys
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 PATTERNS: dict[str, re.Pattern[str]] = {
     "signature_api": re.compile(
@@ -34,10 +36,10 @@ PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 
-def context(lines: list[str], index: int, radius: int = 5) -> str:
+def context(lines: list[str], index: int, radius: int = 12) -> str:
     start = max(0, index - radius)
     end = min(len(lines), index + radius + 1)
-    return "\n".join(f"{line_number + 1}: {lines[line_number][:220]}" for line_number in range(start, end))
+    return "\n".join(f"{line_number + 1}: {lines[line_number][:120]}" for line_number in range(start, end))
 
 
 def scan_smali(decoded_dir: Path) -> list[dict[str, object]]:
@@ -82,10 +84,23 @@ def scan_smali(decoded_dir: Path) -> list[dict[str, object]]:
     ]
 
 
-def scan_native(decoded_dir: Path) -> list[dict[str, object]]:
+def scan_native(decoded_dir: Path, apk_path: Path | None = None) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
-    for library in sorted((decoded_dir / "lib").rglob("libBnHeImyy.so")) if (decoded_dir / "lib").is_dir() else []:
-        data = library.read_bytes()
+    libraries: list[tuple[str, bytes]] = []
+    if apk_path is not None:
+        with ZipFile(apk_path) as archive:
+            libraries.extend(
+                (name, archive.read(name))
+                for name in sorted(archive.namelist())
+                if name.startswith("lib/") and name.endswith("/libBnHeImyy.so")
+            )
+    if not libraries and (decoded_dir / "lib").is_dir():
+        libraries.extend(
+            (library.relative_to(decoded_dir).as_posix(), library.read_bytes())
+            for library in sorted((decoded_dir / "lib").rglob("libBnHeImyy.so"))
+        )
+
+    for path, data in libraries:
         strings = [match.group().decode("ascii", errors="replace") for match in re.finditer(rb"[\x20-\x7e]{4,}", data)]
         interesting = [
             value[:160]
@@ -99,7 +114,7 @@ def scan_native(decoded_dir: Path) -> list[dict[str, object]]:
         ][:10]
         results.append(
             {
-                "file": library.relative_to(decoded_dir).as_posix(),
+                "file": path,
                 "size": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "interesting_strings": interesting,
@@ -109,17 +124,23 @@ def scan_native(decoded_dir: Path) -> list[dict[str, object]]:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} APKTOOL_DECODE_DIR", file=sys.stderr)
-        return 2
-    decoded_dir = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("decoded_dir", type=Path, help="apktool output directory")
+    parser.add_argument("--apk", type=Path, help="original APK for direct native-library string scanning")
+    args = parser.parse_args()
+    decoded_dir = args.decoded_dir
     if not decoded_dir.is_dir():
         print(f"Decode directory not found: {decoded_dir}", file=sys.stderr)
         return 1
 
+    try:
+        native = scan_native(decoded_dir, args.apk)
+    except (BadZipFile, OSError) as error:
+        print(f"Native library inspection failed: {type(error).__name__}: {error}", file=sys.stderr)
+        return 1
     report = {
         "smali": scan_smali(decoded_dir),
-        "native": scan_native(decoded_dir),
+        "native": native,
     }
     print(json.dumps(report, indent=2, ensure_ascii=True))
     counts = report["smali"][0]["category_counts"]

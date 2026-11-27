@@ -289,10 +289,11 @@ jobs:
         shell: bash
         env:
           DECODED_ROOT: ${{ steps.decode.outputs.decoded_root }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
         run: |
           set -euo pipefail
           report="$RUNNER_TEMP/cimacloud-focused-code.json"
-          python3 scripts/inspect-cimacloud-apk-context.py "$DECODED_ROOT/repacked-only" | tee "$report"
+          python3 scripts/inspect-cimacloud-apk-context.py "$DECODED_ROOT/repacked-only" --apk "$REPACKED_APK" | tee "$report"
           sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compare manifests, DEX, native libraries, and integrity indicators
@@ -418,7 +419,7 @@ jobs:
           fi
           report="$RUNNER_TEMP/cimacloud-focused-code.json"
           report_error="$RUNNER_TEMP/cimacloud-focused-code.stderr"
-          if ! python3 scripts/inspect-cimacloud-apk-context.py "$decoded" > "$report" 2> "$report_error"; then
+          if ! python3 scripts/inspect-cimacloud-apk-context.py "$decoded" --apk "$repacked_apk" > "$report" 2> "$report_error"; then
             python_error="$(tail -n 15 "$report_error" | tr '\n' ' ')"
             echo "::error title=Focused code scan failed::${python_error:0:2500}"
             exit 1
