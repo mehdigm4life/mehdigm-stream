@@ -49,7 +49,7 @@ import javax.crypto.spec.SecretKeySpec
  * watch/download streams across:
  * - VidTube (`down.vidtube.one` via CimaCloud extractor API + direct fallback)
  * - StreamRuby (`stmruby.com`, `streamruby.*`, `rubystm.*`)
- * - Morencius (`morencius.com`)
+ * - Morencius (`morencius.com`) and LPlayGo (`lplaygo.com`)
  * - LuluStream / LuluVdo (`luluvdo.com`, `lulustream.com`)
  * - 1Vid (`1vid.xyz`, `1vid.online`)
  * - Vidmoly (`vidmoly.org`, `vidmoly.to`, `vidmoly.me`)
@@ -78,6 +78,23 @@ internal object CimaCloudExtractors {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+    private const val VIDTUBE_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private const val VIDTUBE_PARENT_REFERER = "https://topcinemaa.co/"
+    private const val VIDTUBE_PARENT_ORIGIN = "https://topcinemaa.co"
+    private const val VIDARA_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
+    internal data class ServerRequestContext(
+        val userAgent: String,
+        val pageReferer: String,
+        val pageOrigin: String?,
+        val mediaReferer: String,
+        val mediaOrigin: String?,
+    )
+
     private const val TOTAL_EXTRACTION_BUDGET_MS = 35_000L
     private const val PER_SERVER_TIMEOUT_MS = 14_000L
     private const val MAX_CONCURRENT_SERVERS = 8
@@ -85,6 +102,31 @@ internal object CimaCloudExtractors {
 
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val byseAttestCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
+
+    internal fun serverRequestContext(rawUrl: String): ServerRequestContext? {
+        val host = hostOf(rawUrl)
+        val embedOrigin = originOf(rawUrl).trimEnd('/')
+        val embedReferer = "$embedOrigin/"
+        return when {
+            isVidTubeHost(host) -> ServerRequestContext(
+                userAgent = VIDTUBE_UA,
+                pageReferer = VIDTUBE_PARENT_REFERER,
+                pageOrigin = VIDTUBE_PARENT_ORIGIN,
+                mediaReferer = embedReferer,
+                mediaOrigin = embedOrigin,
+            )
+
+            isSelfRefererCimaServer(host) -> ServerRequestContext(
+                userAgent = DESKTOP_UA,
+                pageReferer = embedReferer,
+                pageOrigin = null,
+                mediaReferer = embedReferer,
+                mediaOrigin = null,
+            )
+
+            else -> null
+        }
+    }
 
     suspend fun extractAllServers(
         embedUrls: List<String>,
@@ -148,6 +190,8 @@ internal object CimaCloudExtractors {
         if (!url.startsWith("http://") && !url.startsWith("https://")) return
 
         val host = hostOf(url)
+        val requestContext = serverRequestContext(url)
+        val effectiveReferer = requestContext?.pageReferer ?: referer
         val localCount = AtomicInteger(0)
         val countingCallback: (ExtractorLink) -> Unit = { link ->
             localCount.incrementAndGet()
@@ -181,12 +225,12 @@ internal object CimaCloudExtractors {
                     extractMediaFire(url, subtitleCallback, countingCallback)
                 }
 
-                // 6. VidTube (`down.vidtube.one`, `vidtube.*`) — Cloudflare-gated on direct GET,
-                //    resolved cleanly into 5 HLS variants via CimaCloud remote extractor.php
-                host.contains("vidtube.") -> {
-                    extractViaRemotePhp(url, "VidTube", countingCallback)
+                // 6. VidTube (`down.vidtube.one`, `vidtube.*`) — requires the captured
+                //    TopCinema parent headers; its packed page contains the HLS source.
+                isVidTubeHost(host) -> {
+                    extractPackerAndHtmlEmbed(url, "VidTube", subtitleCallback, countingCallback)
                     if (localCount.get() == 0) {
-                        extractPackerAndHtmlEmbed(url, "VidTube", subtitleCallback, countingCallback)
+                        extractViaRemotePhp(url, "VidTube", countingCallback)
                     }
                 }
 
@@ -244,13 +288,13 @@ internal object CimaCloudExtractors {
             // Universal fallback chain if primary handler yielded nothing
             if (localCount.get() == 0) {
                 runCatching {
-                    loadExtractor(url, referer, subtitleCallback, countingCallback)
+                    loadExtractor(url, effectiveReferer, subtitleCallback, countingCallback)
                 }
             }
-            if (localCount.get() == 0 && !host.contains("vidtube.")) {
+            if (localCount.get() == 0 && !isVidTubeHost(host)) {
                 extractPackerAndHtmlEmbed(url, prettyProviderName(host), subtitleCallback, countingCallback)
             }
-            if (localCount.get() == 0 && !host.contains("vidtube.")) {
+            if (localCount.get() == 0 && !isVidTubeHost(host)) {
                 extractViaRemotePhp(url, prettyProviderName(host), countingCallback)
             }
         } catch (ce: CancellationException) {
@@ -597,7 +641,6 @@ internal object CimaCloudExtractors {
             val postBody = JSONObject()
                 .put("filecode", fileCode)
                 .put("device", "web")
-                .put("codecs", JSONArray())
                 .toString()
                 .toRequestBody(JSON_MEDIA_TYPE)
 
@@ -605,7 +648,7 @@ internal object CimaCloudExtractors {
                 val req = Request.Builder()
                     .url("$candOrigin/api/stream")
                     .post(postBody)
-                    .header("User-Agent", DESKTOP_UA)
+                    .header("User-Agent", VIDARA_UA)
                     .header("Accept", "application/json")
                     .header("Origin", candOrigin)
                     .header("Referer", "$candOrigin/e/$fileCode")
@@ -625,7 +668,7 @@ internal object CimaCloudExtractors {
             // GET fallback (`?filecode=`)
             val getObj = fetchText(
                 "$candOrigin/api/stream?filecode=$fileCode",
-                headers = mapOf("User-Agent" to DESKTOP_UA, "Referer" to "$candOrigin/e/$fileCode"),
+                headers = mapOf("User-Agent" to VIDARA_UA, "Referer" to "$candOrigin/e/$fileCode"),
             )?.let { CimaCloudCrypto.safeJsonObject(it) }
             if (getObj != null && getObj.optString("streaming_url").startsWith("http")) {
                 data = getObj
@@ -640,9 +683,8 @@ internal object CimaCloudExtractors {
 
         val titleQual = detectQualityInt(resolved.optString("title"))
         val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
+            "User-Agent" to VIDARA_UA,
             "Referer" to "$activeOrigin/",
-            "Origin" to activeOrigin,
         )
 
         if (streamUrl.contains(".m3u8", ignoreCase = true)) {
@@ -1459,11 +1501,27 @@ internal object CimaCloudExtractors {
 
     // ── 15. Unified HTML + JWPlayer + P.A.C.K.E.R. Extractor Engine ──────────
 
-    private fun isPackerOrDirectHtmlHost(host: String): Boolean =
+    internal fun isVidTubeHost(rawHost: String): Boolean {
+        val host = rawHost.lowercase().removePrefix("www.")
+        return host == "vidtube" ||
+            listOf("vidtube.one", "vidtube.to", "vidtube.cc", "vidtube.pro")
+                .any { host == it || host.endsWith(".$it") }
+    }
+
+    private fun isSelfRefererCimaServer(rawHost: String): Boolean {
+        val host = rawHost.lowercase().removePrefix("www.")
+        return listOf("stmruby.com", "morencius.com", "lplaygo.com")
+            .any { host == it || host.endsWith(".$it") } ||
+            host.contains("streamruby.") ||
+            host.contains("rubystm.")
+    }
+
+    internal fun isPackerOrDirectHtmlHost(host: String): Boolean =
         host.contains("stmruby.") ||
             host.contains("streamruby.") ||
             host.contains("rubystm.") ||
             host.contains("morencius.") ||
+            host.contains("lplaygo.") ||
             host.contains("luluvdo.") ||
             host.contains("lulustream.") ||
             host.contains("lulust.") ||
@@ -1490,25 +1548,29 @@ internal object CimaCloudExtractors {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val fetched = fetchTextWithFinalUrl(
-            url,
-            headers = mapOf(
-                "User-Agent" to DESKTOP_UA,
-                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Referer" to CimaCloudCrypto.CANONICAL_SITE_URL + "/",
-            ),
-        ) ?: return@withContext
+        val requestContext = serverRequestContext(url)
+        val pageHeaders = linkedMapOf(
+            "User-Agent" to (requestContext?.userAgent ?: DESKTOP_UA),
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer" to (requestContext?.pageReferer ?: CimaCloudCrypto.CANONICAL_SITE_URL + "/"),
+        )
+        requestContext?.pageOrigin?.let { pageHeaders["Origin"] = it }
 
+        val fetched = fetchTextWithFinalUrl(url, headers = pageHeaders) ?: return@withContext
         val (finalUrl, html) = fetched
         if (html.isBlank()) return@withContext
 
         val activeOrigin = originOf(finalUrl)
-        val effReferer = "$activeOrigin/"
-        val headers = mapOf(
-            "User-Agent" to DESKTOP_UA,
+        val effReferer = requestContext?.mediaReferer ?: "$activeOrigin/"
+        val headers = linkedMapOf(
+            "User-Agent" to (requestContext?.userAgent ?: DESKTOP_UA),
             "Referer" to effReferer,
-            "Origin" to activeOrigin,
         )
+        if (requestContext != null) {
+            requestContext.mediaOrigin?.let { headers["Origin"] = it }
+        } else {
+            headers["Origin"] = activeOrigin
+        }
 
         val unpackedBlocks = unpackAllPacker(html)
         val combined = buildString(html.length + unpackedBlocks.sumOf { it.length } + 16) {
@@ -1749,10 +1811,11 @@ internal object CimaCloudExtractors {
         }
     }
 
-    private fun prettyProviderName(host: String): String = when {
+    internal fun prettyProviderName(host: String): String = when {
         host.contains("vidtube") -> "VidTube"
         host.contains("stmruby") || host.contains("streamruby") || host.contains("rubystm") -> "StreamRuby"
         host.contains("morencius") -> "Morencius"
+        host.contains("lplaygo") -> "LPlayGo"
         host.contains("luluvdo") || host.contains("lulustream") || host.contains("lulust") -> "LuluStream"
         host.contains("1vid") -> "1Vid"
         host.contains("vidmoly") -> "Vidmoly"
