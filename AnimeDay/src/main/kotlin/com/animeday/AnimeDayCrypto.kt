@@ -237,16 +237,18 @@ internal object AnimeDayCrypto {
         val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
         val (cfId, key) = if (auth.useCloudflareId) generateCloudflarePair() else ("" to "")
         val route = safeApiRoute(pathOrUrl)
-        Log.i(
-            API_LOG_TAG,
-            "API request method=GET route=$route firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
-        )
         val request = Request.Builder()
             .url(fullUrl)
             .header("User-Agent", APP_USER_AGENT)
         if (secureToken != null) request.header("firebase_id", secureToken)
         if (auth.useCloudflareId) request.header("cloudflare-id", cfId)
-        val response = executeAndUnwrap(request.get().build(), key)
+        val builtRequest = request.get().build()
+        Log.i(
+            API_LOG_TAG,
+            "API request method=GET host=${builtRequest.url.host} route=$route " +
+                "firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
+        )
+        val response = executeAndUnwrap(builtRequest, key)
         if (response != null) {
             val keys = response.keys().asSequence().sorted().joinToString(",")
             Log.i(API_LOG_TAG, "API response decoded method=GET route=$route keys=$keys")
@@ -272,16 +274,18 @@ internal object AnimeDayCrypto {
                 formBuilder.add(k, v)
             }
             val route = safeApiRoute(pathOrUrl)
-            Log.i(
-                API_LOG_TAG,
-                "API request method=POST route=$route firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
-            )
             val request = Request.Builder()
                 .url(fullUrl)
                 .header("User-Agent", APP_USER_AGENT)
             if (secureToken != null) request.header("firebase_id", secureToken)
             if (auth.useCloudflareId) request.header("cloudflare-id", cfId)
-            val response = executeAndUnwrap(request.post(formBuilder.build()).build(), key)
+            val builtRequest = request.post(formBuilder.build()).build()
+            Log.i(
+                API_LOG_TAG,
+                "API request method=POST host=${builtRequest.url.host} route=$route " +
+                    "firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
+            )
+            val response = executeAndUnwrap(builtRequest, key)
             if (response != null) {
                 val keys = response.keys().asSequence().sorted().joinToString(",")
                 Log.i(API_LOG_TAG, "API response decoded method=POST route=$route keys=$keys")
