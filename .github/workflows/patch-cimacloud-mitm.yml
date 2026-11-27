@@ -372,3 +372,32 @@ jobs:
           fi
           python3 scripts/diagnose-cimacloud-apk.py --report-json "$report_json" | tee "$RUNNER_TEMP/previous-cimacloud-summary.md"
           cat "$RUNNER_TEMP/previous-cimacloud-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Java for Apktool context inspection
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Apktool for focused Smali/native analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes apktool
+
+      - name: Decode the control APK and inspect app-specific code paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$RUNNER_TEMP/previous-cimacloud-forensic"
+          repacked_apk="$(find "$artifact_root" -type f -name 'CimaCloud_Bnhelmyy-repacked-only.apk' -print -quit)"
+          if [[ -z "$repacked_apk" ]]; then
+            echo "Could not locate the re-sign-only APK in the previous artifact." >&2
+            exit 1
+          fi
+          decoded="$RUNNER_TEMP/cimacloud-repacked-smali"
+          apktool d --force --no-res --output "$decoded" "$repacked" > "$RUNNER_TEMP/apktool-focused.log" 2>&1
+          report="$RUNNER_TEMP/cimacloud-focused-code.json"
+          python3 scripts/inspect-cimacloud-apk-context.py "$decoded" | tee "$report"
+          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"

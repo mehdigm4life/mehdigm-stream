@@ -509,25 +509,20 @@ def emit_github_notices(report: dict[str, object]) -> None:
         manifest = item.get("manifest") or {}
         smali_scan = item["smali"].get("scan", {})
         smali_hits = {
-            category: {
-                "count": finding["count"],
-                "samples": finding["samples"][:2],
-            }
+            category: finding["count"]
             for category, finding in smali_scan.items()
             if finding.get("count", 0)
         }
-        native_hits = []
+        native_hits: dict[str, dict[str, object]] = {}
         for library, categories in item["native_string_scan"].get("libraries", {}).items():
             for category, finding in categories.items():
-                if finding.get("count", 0):
-                    native_hits.append(
-                        {
-                            "library": library,
-                            "category": category,
-                            "count": finding["count"],
-                            "samples": finding["samples"][:2],
-                        }
-                    )
+                if not finding.get("count", 0):
+                    continue
+                aggregate = native_hits.setdefault(category, {"count": 0, "libraries": []})
+                aggregate["count"] = int(aggregate["count"]) + int(finding["count"])
+                libraries = aggregate["libraries"]
+                if library not in libraries and len(libraries) < 3:
+                    libraries.append(library)
         comparison = comparisons.get(label, {})
         native_diff = comparison.get("native_libraries", {})
         dex_diff = comparison.get("dex", {})
