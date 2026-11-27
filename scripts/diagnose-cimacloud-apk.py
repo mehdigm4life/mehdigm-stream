@@ -11,6 +11,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -495,6 +496,76 @@ def markdown_report(report: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def emit_github_notices(report: dict[str, object]) -> None:
+    """Expose compact findings through the Checks API as well as the artifact."""
+    if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+        return
+
+    apks = report["apks"]
+    source_manifest = (apks["source"].get("manifest") or {})
+    comparisons = report["comparisons_against_source"]
+    for label, item in apks.items():
+        signature = item["signature"]
+        manifest = item.get("manifest") or {}
+        smali_scan = item["smali"].get("scan", {})
+        smali_hits = {
+            category: {
+                "count": finding["count"],
+                "samples": finding["samples"][:2],
+            }
+            for category, finding in smali_scan.items()
+            if finding.get("count", 0)
+        }
+        native_hits = []
+        for library, categories in item["native_string_scan"].get("libraries", {}).items():
+            for category, finding in categories.items():
+                if finding.get("count", 0):
+                    native_hits.append(
+                        {
+                            "library": library,
+                            "category": category,
+                            "count": finding["count"],
+                            "samples": finding["samples"][:2],
+                        }
+                    )
+        comparison = comparisons.get(label, {})
+        native_diff = comparison.get("native_libraries", {})
+        dex_diff = comparison.get("dex", {})
+        report_summary = {
+            "variant": label,
+            "sha256": item["sha256"],
+            "package": manifest.get("package"),
+            "version": manifest.get("version_name"),
+            "signer_sha256": signature.get("cert_sha256", []),
+            "signature_verified": signature.get("verified"),
+            "signature_schemes": signature.get("schemes", {}),
+            "signer_matches_source": comparison.get("signer_sha256_matches_source"),
+            "native_libraries": {
+                "unchanged": native_diff.get("unchanged_count"),
+                "changed": native_diff.get("changed", [])[:12],
+                "added": native_diff.get("added", [])[:12],
+                "removed": native_diff.get("removed", [])[:12],
+            },
+            "dex": {
+                "unchanged": dex_diff.get("unchanged_count"),
+                "changed": dex_diff.get("changed", [])[:12],
+                "added": dex_diff.get("added", [])[:12],
+                "removed": dex_diff.get("removed", [])[:12],
+            },
+            "smali_tree_identical": comparison.get("smali_tree_sha256_equal"),
+            "manifest_changed_fields": sorted(
+                key
+                for key in set(source_manifest) | set(manifest)
+                if source_manifest.get(key) != manifest.get(key)
+            ) if label != "source" else [],
+            "smali_indicators": smali_hits,
+            "native_string_indicators": native_hits[:12],
+        }
+        encoded = json.dumps(report_summary, separators=(",", ":"), ensure_ascii=True)
+        encoded = encoded.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::notice title=CimaCloud {label} forensic result::{encoded}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", action="append", default=[], metavar="LABEL=PATH", help="APK to compare (repeatable; source is required)")
@@ -518,6 +589,7 @@ def main() -> int:
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     markdown_path.write_text(markdown_report(report), encoding="utf-8")
     print(markdown_path.read_text(encoding="utf-8"))
+    emit_github_notices(report)
     return 0
 
 
