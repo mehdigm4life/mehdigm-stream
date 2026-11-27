@@ -252,6 +252,30 @@ class MySeedParserTest {
     }
 
     @Test
+    fun watchParserDropsMySeedVideoPageAndKeepsPlayableAlternateServer() {
+        val watchUrl = "$base/episode-22/watch/"
+        val document = Jsoup.parse(
+            """
+            <div class="player-area">
+              <video src="$base/video/489308.mp4"></video>
+              <div class="server-option" data-quality="480p">
+                <iframe title="سيرفر 1" src="https://embed.example/e/episode-480"></iframe>
+              </div>
+            </div>
+            """.trimIndent(),
+            watchUrl
+        )
+
+        val servers = MySeedParser.parseWatchServers(document, watchUrl)
+
+        assertTrue(MySeedParser.isKnownNonMediaEndpoint("$base/video/489308.mp4"))
+        assertFalse(MySeedParser.isKnownNonMediaEndpoint("https://media.example/video/489308.mp4"))
+        assertEquals(1, servers.size)
+        assertEquals("https://embed.example/e/episode-480", servers.single().url)
+        assertEquals(480, servers.single().quality)
+    }
+
+    @Test
     fun downloadParserDecodesMySeedLBase64AndRetainsAllFour720pServers() {
         val downloadUrl = "$base/episode-22/download/"
         val document = Jsoup.parse(
