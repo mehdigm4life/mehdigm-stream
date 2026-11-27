@@ -1,6 +1,9 @@
 package com.app.cimacloud.Utils
 
+import android.app.Application
+import android.app.Instrumentation
 import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import android.util.Log
 import com.animeday.FakeContext
@@ -111,12 +114,29 @@ object NativeLib {
             }
             instance
         }
-        // createPackageContext() exposes AnimeDay's code and resources, but its applicationContext
-        // may still resolve to CloudStream because the official Application is not launched in
-        // this process. Preserve the package identity through all Context accessors used by JNI.
-        val attestationContext = FakeContext(officialContext)
-        Log.i(LOG_TAG, "calling installed AnimeDay native attestation with package identity context")
-        return method.invoke(receiver, attestationContext) as? String
+        // The official APK calls this native method with its MyApplication instance. A plain
+        // createPackageContext() may return CloudStream from getApplicationContext(), while the
+        // old FakeContext also substituted PackageManager methods (including UID/signature
+        // lookups) despite returning real PackageInfo objects for the common calls. Attach the
+        // APK's declared Application to a narrow identity wrapper instead: all package metadata,
+        // resources, services, and PackageManager calls still come from Android's real package
+        // context. Do not call onCreate(); it has unrelated app/session side effects.
+        val packageContext = OfficialPackageContext(officialContext)
+        val applicationClass = officialContext.applicationInfo.className
+            ?.takeIf { it.isNotBlank() }
+            ?: Application::class.java.name
+        val application = Instrumentation().newApplication(classLoader, applicationClass, packageContext)
+        Log.i(LOG_TAG, "calling installed AnimeDay native attestation with official Application and platform PackageManager")
+        return method.invoke(receiver, application) as? String
+    }
+
+    /** Keeps Context.getApplicationContext() inside the installed package without faking PackageManager data. */
+    private class OfficialPackageContext(base: Context) : ContextWrapper(base) {
+        override fun getPackageName(): String = OFFICIAL_PACKAGE
+
+        override fun getOpPackageName(): String = OFFICIAL_PACKAGE
+
+        override fun getApplicationContext(): Context = this
     }
 
     fun decrypt(context: Context, data: String, key: String): String? {
