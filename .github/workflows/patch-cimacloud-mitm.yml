@@ -44,8 +44,10 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes apktool binutils
+          build_tools="$ANDROID_HOME/build-tools/35.0.0"
           sdkmanager --install "build-tools;35.0.0"
-          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+          echo "$build_tools" >> "$GITHUB_PATH"
+          export PATH="$build_tools:$PATH"
           apktool --version
           apksigner version
           zipalign -h >/dev/null 2>&1 || true
