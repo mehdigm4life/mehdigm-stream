@@ -7,7 +7,7 @@ on:
         description: "Direct HTTPS MediaFire APK URL (defaults to the supplied APK)"
         required: false
         type: string
-        default: "https://download946.mediafire.com/nmnndf34oawgzYyQ5L1yJHHvlmWbU1NvVrd7bBwp6e2VjAS10B-MFpHB4e0euUn3ba8e0jvjaEV13FqWKFOibpSnq7NRzXJ2MsLH8CbNvcNyxffO08gJSqgyXfKMVZa4ZeJ8E6u9_BeUG9khouoLQSd6gkhIDsgXUyFME-WZB4LdfQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk"
+        default: "https://download946.mediafire.com/o34osa8xt16gkWvvgubSfRQBdaDwwIdATwmo30OmJt0DyqX2uiDbI4gejJtdRpEUJPDRh0yJWfLsTmW5Gnciv7_7-r-ZNeuuKVKcHG1p9TSvs0hV_viJqrjaDkJcsRCqBMzuoGdTWZOTNnULpEcFoRIuDcyJ3-Gb1WI-1Kp-AMstZQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk"
   push:
     paths:
       - ".github/workflows/patch-cimacloud-mitm.yml"
@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           apk_url="${APK_URL:-}"
           if [[ -z "$apk_url" ]]; then
-            apk_url='https://download946.mediafire.com/nmnndf34oawgzYyQ5L1yJHHvlmWbU1NvVrd7bBwp6e2VjAS10B-MFpHB4e0euUn3ba8e0jvjaEV13FqWKFOibpSnq7NRzXJ2MsLH8CbNvcNyxffO08gJSqgyXfKMVZa4ZeJ8E6u9_BeUG9khouoLQSd6gkhIDsgXUyFME-WZB4LdfQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk'
+            apk_url='https://download946.mediafire.com/o34osa8xt16gkWvvgubSfRQBdaDwwIdATwmo30OmJt0DyqX2uiDbI4gejJtdRpEUJPDRh0yJWfLsTmW5Gnciv7_7-r-ZNeuuKVKcHG1p9TSvs0hV_viJqrjaDkJcsRCqBMzuoGdTWZOTNnULpEcFoRIuDcyJ3-Gb1WI-1Kp-AMstZQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk'
           fi
           if [[ ! "$apk_url" =~ ^https://download[0-9]+\.mediafire\.com/ ]]; then
             echo "Provide a direct HTTPS URL hosted on a download-numbered MediaFire host." >&2
