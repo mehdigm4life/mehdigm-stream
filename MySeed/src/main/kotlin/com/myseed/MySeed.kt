@@ -195,7 +195,7 @@ class MySeed : MainAPI() {
                 }
             }
 
-    private fun unavailable(url: String) = newMovieLoadResponse(
+    private suspend fun unavailable(url: String) = newMovieLoadResponse(
         "تعذّر تحميل بيانات MySeed",
         url,
         TvType.Movie,
