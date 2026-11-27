@@ -255,6 +255,7 @@ jobs:
             echo "## Detailed forensic files"
             echo
             echo "The attached diagnostic artifact includes JSON findings, Apktool decode logs, apksigner/zipalign results, and ELF headers/dependencies/symbol tables for each native library."
+            echo "Compact comparison results are also emitted as GitHub check annotations."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK variants and forensic report
