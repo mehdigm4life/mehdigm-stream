@@ -338,7 +338,7 @@ class MySeed : MainAPI() {
         depth: Int = 0
     ): Boolean {
         val url = option.url.trim()
-        if (url.isBlank() || !visited.add(url)) return false
+        if (url.isBlank() || MySeedParser.isKnownNonMediaEndpoint(url) || !visited.add(url)) return false
 
         val quality = option.quality ?: MySeedParser.qualityFromText(url)
         val mediaType = directMediaType(url)
@@ -351,8 +351,8 @@ class MySeed : MainAPI() {
 
         val uri = runCatching { URI(url) }.getOrNull()
         val isInternalPage = uri?.host.equals("m.myseed.tv", ignoreCase = true)
-        val isHtmlLandingPage = uri?.path?.endsWith(".html", ignoreCase = true) == true
-        if ((isInternalPage || isHtmlLandingPage) && depth < 2) {
+        // Scrape MySeed pages only; third-party pages must go through their own extractor.
+        if (isInternalPage && depth < 2) {
             val nestedDocument = getDocument(url, referer)
             if (nestedDocument != null) {
                 val nestedOptions = if (isDownload) {
@@ -360,6 +360,8 @@ class MySeed : MainAPI() {
                 } else {
                     MySeedParser.parseWatchServers(nestedDocument, url)
                 }
+                // Keep every discovered hoster so a 429 from one does not hide the alternatives.
+                var resolvedNested = false
                 for (nested in nestedOptions) {
                     if (resolveServerOption(
                             nested,
@@ -372,8 +374,11 @@ class MySeed : MainAPI() {
                             visited,
                             depth + 1
                         )
-                    ) return true
+                    ) {
+                        resolvedNested = true
+                    }
                 }
+                if (resolvedNested) return true
             }
         }
 
@@ -863,6 +868,13 @@ internal object MySeedParser {
             .find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 
+    /** MySeed's legacy /video/<post-id>.mp4 route serves an HTML page, not a media stream. */
+    fun isKnownNonMediaEndpoint(url: String): Boolean {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        return uri.host.equals(SITE_HOST, ignoreCase = true) &&
+            Regex("(?i)^/video/\\d+\\.mp4$").matches(uri.path.orEmpty())
+    }
+
     private fun resolvePlayerTarget(raw: String, base: String): String? {
         val clean = cleanUrl(raw)
         if (clean.isBlank()) return null
@@ -993,6 +1005,7 @@ internal object MySeedParser {
             !Regex("(?i)^\\d{3,4}p$").matches(value)
 
     private fun addServerOption(result: LinkedHashMap<String, MySeedServerOption>, option: MySeedServerOption) {
+        if (isKnownNonMediaEndpoint(option.url)) return
         val existing = result[option.url]
         if (existing == null || (existing.name == "MySeed" && option.name != "MySeed") ||
             (existing.quality == null && option.quality != null)
