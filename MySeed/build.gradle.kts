@@ -1,7 +1,7 @@
 version = 1
 
 cloudstream {
-    description = "MySeed — فهرس للبحث وتصفح بيانات الأفلام والمسلسلات والحلقات فقط."
+    description = "MySeed — بحث وتصفح ومشاهدة وتحميل الأفلام والمسلسلات والحلقات."
     authors = listOf("mehdigm4life")
     language = "ar"
 

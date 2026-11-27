@@ -503,7 +503,7 @@
         "iconUrl": "https://m.myseed.tv/wp-content/uploads/2022/09/logo333.webp",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 37017,
+        "fileSize": 56059,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -517,6 +517,6 @@
         "internalName": "MySeed",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/MySeed.cs3",
         "name": "ماي سيد (MySeed)",
-        "description": "MySeed — تصفح وبحث في بيانات الأفلام والمسلسلات والحلقات فقط، دون تشغيل أو تنزيل."
+        "description": "MySeed — بحث وتصفح ومشاهدة وتحميل الأفلام والمسلسلات والحلقات."
     }
 ]

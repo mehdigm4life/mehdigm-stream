@@ -156,4 +156,132 @@ class MySeedParserTest {
         assertEquals((1..22).toList(), episodes.mapNotNull { it.number }.sorted())
         assertTrue(episodes.all { it.season == 1 })
     }
+
+    @Test
+    fun realSupernaturalSeasonSlugsKeepAllFifteenSeasonsInNumericOrder() {
+        val seasonPaths = listOf(
+            "الاول", "الثاني", "الثاني-عشر", "الثالث", "الثالث-عشر", "الرابع-r26", "الرابع-عشر-مسلسل-supernatural",
+            "الخامس", "الخامس-عشر-مسلسل-supernatural", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي-عشر"
+        )
+        val seasonAnchors = seasonPaths.joinToString("\n") { ordinal ->
+            val label = ordinal.substringBefore("-مسلسل").replace('-',' ')
+            """<a href="/selary/مسلسل-supernatural-الموسم-$ordinal/">مسلسل Supernatural الموسم $label</a>"""
+        }
+        val rootUrl = "$base/selary/مسلسل-supernatural/"
+        val document = Jsoup.parse("<h2>مواسم المسلسل</h2>$seasonAnchors", rootUrl)
+
+        val seasons = MySeedParser.parseSeasons(document, rootUrl)
+
+        assertEquals((1..15).toList(), seasons.map { it.number })
+        assertTrue(seasons.all { MySeedParser.seriesRootUrl(it.url) == MySeedParser.seriesRootUrl(rootUrl) })
+    }
+
+    @Test
+    fun realSupernaturalArabicEpisodeSlugRetainsSeasonFiveEpisodeTwentyTwo() {
+        val pageUrl = "$base/selary/مسلسل-supernatural-الموسم-الخامس/"
+        val document = Jsoup.parse(
+            """
+            <section>
+              <h2>الحلقات والمواسم</h2>
+              <nav class="season-tabs"><a href="/selary/مسلسل-supernatural-الموسم-السادس/">الموسم السادس</a></nav>
+              <div class="episodes-list">
+                <a href="/مسلسل-supernatural-الموسم-الخامس-الحلقة-1-الاولى/">الحلقة 1</a>
+                <a href="/مسلسل-supernatural-الموسم-الخامس-الحلقة-22-الثانية/">الحلقة 22</a>
+                <a href="/مسلسل-another-show-الموسم-الخامس-الحلقة-22-الثانية/">حلقة مسلسل آخر</a>
+              </div>
+            </section>
+            """.trimIndent(),
+            pageUrl
+        )
+
+        val episodes = MySeedParser.parseEpisodes(document, pageUrl)
+
+        assertEquals(listOf(1, 22), episodes.mapNotNull { it.number }.sorted())
+        assertTrue(episodes.all { it.season == 5 })
+        assertEquals("مسلسل Supernatural", MySeedParser.seriesTitleFromEpisode("مسلسل Supernatural الموسم الخامس الحلقة 22 الثانية"))
+    }
+
+    @Test
+    fun episodeWatchAndDownloadRoutesAreBuiltFromTheMetadataUrl() {
+        val episode = "$base/مسلسل-supernatural-الموسم-الخامس-الحلقة-22-الثانية/"
+        val watchUrl = MySeedParser.routeUrl(episode, "watch")
+        val downloadUrl = MySeedParser.routeUrl(episode, "download")
+
+        assertTrue(watchUrl.orEmpty().endsWith("/watch/"))
+        assertTrue(downloadUrl.orEmpty().endsWith("/download/"))
+        assertEquals(22, MySeedParser.episodeNumber(watchUrl.orEmpty()))
+        val unwrapped = MySeedParser.episodeContentUrl(downloadUrl.orEmpty())
+        assertEquals(MySeedParser.seriesRootUrl(episode), MySeedParser.seriesRootUrl(unwrapped.orEmpty()))
+        assertEquals(22, MySeedParser.episodeNumber(unwrapped.orEmpty()))
+        assertNull(MySeedParser.episodeContentUrl("https://other.example/episode-22/"))
+    }
+
+    @Test
+    fun watchParserFindsSelectableServerAndQualityFromPlayerMarkup() {
+        val watchUrl = "$base/episode-22/watch/"
+        val document = Jsoup.parse(
+            """
+            <div class="player-area">
+              <div class="server-option" data-quality="480p">
+                <button data-server="سيرفر ماي سيد المباشر" data-url="https://media.example/episode-480.m3u8">
+                  سيرفر ماي سيد المباشر
+                </button>
+              </div>
+              <div class="server-option" data-quality="720p">
+                <iframe title="سيرفر 1" src="https://embed.example/e/episode-720"></iframe>
+              </div>
+              <a class="server-option" href="https://embed.example/e/episode-1080">سيرفر 2 · 1080p</a>
+            </div>
+            """.trimIndent(),
+            watchUrl
+        )
+
+        val servers = MySeedParser.parseWatchServers(document, watchUrl)
+        val metaDocument = Jsoup.parse(
+            """<meta property="og:video" content="https://media.example/episode-4k.m3u8">""",
+            watchUrl
+        )
+        val metaServers = MySeedParser.parseWatchServers(metaDocument, watchUrl)
+
+        assertEquals(3, servers.size)
+        assertTrue(servers.any { it.name == "سيرفر ماي سيد المباشر" && it.quality == 480 && it.url.endsWith("episode-480.m3u8") })
+        assertTrue(servers.any { it.name == "سيرفر 1" && it.quality == 720 && it.url == "https://embed.example/e/episode-720" })
+        assertTrue(servers.any { it.quality == 1080 && it.url == "https://embed.example/e/episode-1080" })
+        assertEquals(2160, metaServers.single().quality)
+        assertEquals("https://media.example/episode-4k.m3u8", metaServers.single().url)
+    }
+
+    @Test
+    fun downloadParserDecodesMySeedLBase64AndRetainsAllFour720pServers() {
+        val downloadUrl = "$base/episode-22/download/"
+        val document = Jsoup.parse(
+            """
+            <section class="downloads">
+              <h3>تحميل 720p</h3>
+              <a href="/l/aHR0cHM6Ly9kLmFyYWJzZWVkLnRvcC84NHUwcDBsanlpMGcvJTVCYXJhYnNlZWQlNUQuU3VwZXJuYXR1cmFsLlMwNUUyMi43MjBwLm1wNC5odG1s">
+                <strong>سيرفر ماي سيد المباشر</strong><span>التحميل الآن - 720p</span>
+              </a>
+              <a href="/l/aHR0cHM6Ly9mYXN0ZHJpdmUuaW8vNWxMdC8lNUJhcmFic2VlZCU1RC5TdXBlcm5hdHVyYWwuUzA1RTIyLjcyMHAubXA0">
+                <strong>Fastdrive</strong><span>التحميل الآن - 720p</span>
+              </a>
+              <a href="/l/aHR0cHM6Ly91c2VybG9hZC5jby9mLzk0MjAzYTgyZTVlZA==">
+                <strong>Userload</strong><span>التحميل الآن - 720p</span>
+              </a>
+              <a href="/l/aHR0cHM6Ly91cHRvYm94LmNvbS9lbWc5bzBhb3RmdjA=">
+                <strong>Uptobox</strong><span>التحميل الآن - 720p</span>
+              </a>
+            </section>
+            """.trimIndent(),
+            downloadUrl
+        )
+
+        val servers = MySeedParser.parseDownloadServers(document, downloadUrl)
+
+        assertEquals(4, servers.size)
+        assertTrue(servers.all { it.quality == 720 })
+        assertTrue(servers.any { it.name == "سيرفر ماي سيد المباشر" && it.url.startsWith("https://d.arabseed.top/") })
+        assertTrue(servers.any { it.name == "Fastdrive" && it.url.startsWith("https://fastdrive.io/") })
+        assertTrue(servers.any { it.name == "Userload" && it.url.startsWith("https://userload.co/") })
+        assertTrue(servers.any { it.name == "Uptobox" && it.url.startsWith("https://uptobox.com/") })
+    }
 }
