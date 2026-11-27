@@ -378,11 +378,10 @@ class MySeed : MainAPI() {
         }
 
         val before = emitted.size
+        val extractedLinks = mutableListOf<ExtractorLink>()
         val extracted = try {
             loadExtractor(url, referer, subtitleCallback) { link ->
-                if (link.url.isNotBlank() && emitted.add(link.url.trim())) {
-                    callbackForOption(option, link.url, link.type, referer, routeLabel, quality, link, callback)
-                }
+                if (link.url.isNotBlank()) extractedLinks += link
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -390,10 +389,16 @@ class MySeed : MainAPI() {
             Log.i(TAG, "Could not resolve MySeed server ${option.name}: ${error.message}")
             false
         }
+        for (link in extractedLinks) {
+            val linkUrl = link.url.trim()
+            if (linkUrl.isNotBlank() && emitted.add(linkUrl)) {
+                callbackForOption(option, linkUrl, link.type, referer, routeLabel, quality, link, callback)
+            }
+        }
         return extracted || emitted.size > before
     }
 
-    private fun callbackForOption(
+    private suspend fun callbackForOption(
         option: MySeedServerOption,
         url: String,
         type: ExtractorLinkType,
