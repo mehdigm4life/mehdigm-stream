@@ -402,13 +402,26 @@ jobs:
         run: |
           set -euo pipefail
           artifact_root="$RUNNER_TEMP/previous-cimacloud-forensic"
-          repacked_apk="$(find "$artifact_root" -type f -name 'CimaCloud_Bnhelmyy-repacked-only.apk' -print -quit)"
+          artifact_files="$(find "$artifact_root" -maxdepth 5 -type f -printf '%P;')"
+          repacked_apk="$(find "$artifact_root" -type f -iname '*repacked-only*.apk' -print -quit)"
           if [[ -z "$repacked_apk" ]]; then
-            echo "Could not locate the re-sign-only APK in the previous artifact." >&2
+            echo "::error title=Missing control APK::Artifact files: ${artifact_files:0:2500}"
             exit 1
           fi
+          echo "::notice title=Control APK found::$repacked_apk"
           decoded="$RUNNER_TEMP/cimacloud-repacked-smali"
-          apktool d --force --no-res --output "$decoded" "$repacked" > "$RUNNER_TEMP/apktool-focused.log" 2>&1
+          apktool_log="$RUNNER_TEMP/apktool-focused.log"
+          if ! apktool d --force --output "$decoded" "$repacked_apk" > "$apktool_log" 2>&1; then
+            apktool_error="$(tail -n 25 "$apktool_log" | tr '\n' ' ')"
+            echo "::error title=Apktool decode failed::${apktool_error:0:2500}"
+            exit 1
+          fi
           report="$RUNNER_TEMP/cimacloud-focused-code.json"
-          python3 scripts/inspect-cimacloud-apk-context.py "$decoded" | tee "$report"
+          report_error="$RUNNER_TEMP/cimacloud-focused-code.stderr"
+          if ! python3 scripts/inspect-cimacloud-apk-context.py "$decoded" > "$report" 2> "$report_error"; then
+            python_error="$(tail -n 15 "$report_error" | tr '\n' ' ')"
+            echo "::error title=Focused code scan failed::${python_error:0:2500}"
+            exit 1
+          fi
+          cat "$report"
           sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
