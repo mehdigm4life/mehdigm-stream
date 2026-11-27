@@ -498,5 +498,25 @@
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/TimeMovies.cs3",
         "name": "تايم موفيز (TimeMovies)",
         "description": "تايم موفيز (TimeMovies) — التطبيق الرسمي (v4.7 + DoomPlayer): مشاهدة وتحميل الأفلام والمسلسلات والأنمي بجودات متعددة مع الترجمة العربية المدمجة."
+    },
+    {
+        "iconUrl": "https://m.myseed.tv/wp-content/uploads/2022/09/logo333.webp",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
+        "fileSize": 0,
+        "status": 1,
+        "language": "ar",
+        "authors": [
+            "mehdigm4life"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "MySeed",
+        "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/MySeed.cs3",
+        "name": "ماي سيد (MySeed)",
+        "description": "MySeed — تصفح وبحث في بيانات الأفلام والمسلسلات والحلقات فقط، دون تشغيل أو تنزيل."
     }
 ]
