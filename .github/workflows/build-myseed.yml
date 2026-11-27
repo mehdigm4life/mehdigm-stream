@@ -1,0 +1,129 @@
+name: Build MySeed Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'MySeed/**'
+      - 'plugins.json'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - '.github/workflows/build-myseed.yml'
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  build:
+    if: github.event_name != 'push' || (!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '🤖'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Test and build MySeed
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew :MySeed:testDebugUnitTest :MySeed:make --no-daemon --stacktrace 2>&1 | tee gradle.log
+          test -s MySeed/build/MySeed.cs3
+
+      - name: Publish build log to GitHub Checks
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          import subprocess
+
+          log = Path("gradle.log")
+          lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
+          diagnostics = [line for line in lines if (
+              "MySeed.kt:" in line or "MySeedParserTest.kt:" in line or
+              re.search(r"(?i)(^e:\s|error:|unresolved reference|type mismatch|expecting|overload resolution ambiguity|cannot infer)", line)
+          )]
+          diagnostic_text = "\n".join(diagnostics[-120:]) or "No compiler diagnostic lines matched."
+          tail = "\n".join(lines[-120:]) or "Gradle log was not created."
+          conclusion = "success" if os.environ.get("JOB_STATUS") == "success" else "failure"
+          payload = {
+              "name": "MySeed Gradle Log",
+              "head_sha": os.environ["GH_SHA"],
+              "status": "completed",
+              "conclusion": conclusion,
+              "output": {
+                  "title": f"MySeed Gradle log ({conclusion})",
+                  "summary": f"Gradle test/build job: {conclusion}\n\nCompiler diagnostics:\n{diagnostic_text}",
+                  "text": f"Compiler diagnostics:\n{diagnostic_text}\n\nLast Gradle lines:\n{tail}",
+              },
+          }
+          Path("gradle-check.json").write_text(json.dumps(payload), encoding="utf-8")
+          subprocess.run(
+              ["gh", "api", "--method", "POST", f"repos/{os.environ['GH_REPO']}/check-runs", "--input", "gradle-check.json"],
+              check=False,
+          )
+          PY
+
+      - name: Upload MySeed plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MySeed
+          path: MySeed/build/MySeed.cs3
+
+      - name: Copy artifact and update repository catalog
+        run: |
+          mkdir -p build
+          cp -f MySeed/build/MySeed.cs3 build/MySeed.cs3
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          catalog = Path("plugins.json")
+          text = catalog.read_text(encoding="utf-8")
+          size = os.path.getsize("build/MySeed.cs3")
+          found = False
+
+          def update(match):
+              global found
+              block = match.group(0)
+              if '"internalName": "MySeed"' not in block:
+                  return block
+              found = True
+              return re.sub(r'("fileSize"\s*:\s*)\d+', rf'\g<1>{size}', block, count=1)
+
+          updated = re.sub(r'\{[^{}]*"internalName"\s*:\s*"MySeed"[^{}]*\}', update, text, flags=re.S)
+          if not found:
+              raise SystemExit("MySeed manifest entry was not found")
+          catalog.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Publish built plugin to the current branch
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f build/MySeed.cs3 plugins.json
+          if ! git diff --cached --quiet; then
+            git commit -m "🤖 Build MySeed.cs3 [skip ci]"
+            git pull --rebase origin "$GITHUB_REF_NAME"
+            git push origin "$GITHUB_REF_NAME"
+          fi
