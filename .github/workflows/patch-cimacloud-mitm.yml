@@ -128,9 +128,11 @@ jobs:
               exit 1
             fi
 
-            if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key")"; then
+            resolver_error_file="$work_dir/mediafire-resolver-error.txt"
+            if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key" 2>"$resolver_error_file")"; then
+              resolver_error="$(tr '\r\n' '  ' < "$resolver_error_file" | cut -c 1-1100)"
               echo "MediaFire did not provide a fresh direct link for file key $mediafire_file_key." >&2
-              echo "::error title=MediaFire file page has no direct link::The refreshed page did not contain a download URL for file key $mediafire_file_key."
+              echo "::error title=MediaFire file page has no direct link::${resolver_error:-No matching direct URL was present in the refreshed page.}"
               exit 1
             fi
             download_method="refreshed direct URL from the same MediaFire file page"
@@ -431,8 +433,6 @@ jobs:
             echo "::error title=Focused code scan failed::${python_error:0:2500}"
             exit 1
           fi
-          cat "$report"
-          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
           python3 - "$report" <<'PY'
           import json
           import sys
@@ -462,3 +462,5 @@ jobs:
           message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           print(f"::notice title=CimaCloud native string scan::{message}")
           PY
+          cat "$report"
+          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"

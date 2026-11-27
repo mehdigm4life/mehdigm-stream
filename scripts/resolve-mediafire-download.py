@@ -32,25 +32,53 @@ def page_info(direct_url: str) -> tuple[str, str]:
     return page_url, file_key
 
 
+def page_summary(page_html: str) -> tuple[str, str]:
+    title_match = re.search(r"<title\b[^>]*>(.*?)</title\s*>", page_html, re.IGNORECASE | re.DOTALL)
+    title = ""
+    if title_match:
+        title = re.sub(r"<[^>]+>", " ", html.unescape(title_match.group(1)))
+        title = " ".join(title.split())[:160]
+
+    visible = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", " ", page_html, flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<[^>]+>", " ", visible)
+    visible = " ".join(html.unescape(visible).split())[:320]
+    return title, visible
+
+
 def extract_download_url(page_html: str, expected_file_key: str) -> str:
     normalized = html.unescape(page_html)
-    normalized = (
-        normalized.replace(r"\/", "/")
-        .replace(r"\u0026", "&")
-        .replace(r"\u003d", "=")
-    )
+    for escaped, value in (
+        (r"\/", "/"),
+        (r"\u0026", "&"),
+        (r"\u003d", "="),
+        (r"\u003a", ":"),
+        (r"\u002f", "/"),
+        (r"\\/", "/"),
+    ):
+        normalized = normalized.replace(escaped, value)
+        normalized = normalized.replace(escaped.upper(), value)
+
     candidates: list[str] = []
-    for match in URL_PATTERN.finditer(normalized):
-        candidate = match.group().rstrip(".,;)")
-        parsed = urlsplit(candidate)
-        segments = [unquote(segment) for segment in parsed.path.split("/") if segment]
-        if DOWNLOAD_HOST.fullmatch(parsed.hostname or "") and expected_file_key in segments:
-            if candidate not in candidates:
-                candidates.append(candidate)
+    sources = (normalized, unquote(normalized))
+    for source in sources:
+        for match in URL_PATTERN.finditer(source):
+            candidate = match.group().rstrip(".,;)")
+            parsed = urlsplit(candidate)
+            segments = [unquote(segment) for segment in parsed.path.split("/") if segment]
+            if DOWNLOAD_HOST.fullmatch(parsed.hostname or "") and expected_file_key in segments:
+                if candidate not in candidates:
+                    candidates.append(candidate)
     if not candidates:
+        title, visible = page_summary(normalized)
+        details = []
+        if title:
+            details.append(f"page title {title!r}")
+        if visible:
+            details.append(f"visible text {visible!r}")
+        suffix = f"; {'; '.join(details)}" if details else "; the response contained no readable page title or text"
         raise ValueError(
             "The MediaFire file page did not expose a fresh download URL for "
-            f"file key {expected_file_key!r}"
+            f"file key {expected_file_key!r}{suffix}"
         )
     return candidates[0]
 
