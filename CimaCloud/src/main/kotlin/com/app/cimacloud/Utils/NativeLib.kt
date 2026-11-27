@@ -2,6 +2,7 @@ package com.app.cimacloud.Utils
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import com.cimacloud.FakeContext
 import java.io.File
 import java.io.InputStream
@@ -16,6 +17,8 @@ import java.util.zip.ZipFile
 object NativeLib {
     private const val LIB_NAME = "libnative-lib.so"
     private const val TOKEN_PROP = "cimacloud.native.token"
+    private const val OFFICIAL_PACKAGE = "com.app.cimacloud"
+    private const val LOG_TAG = "CimaNative"
 
     @Volatile
     private var loaded = false
@@ -28,8 +31,8 @@ object NativeLib {
 
     /**
      * Extracts libnative-lib.so from this plugin package and loads it.
-     * buildSecure() reads the caller's package signature, so a [FakeContext]
-     * impersonating com.app.cimacloud is passed to it.
+     * buildSecure() reads package metadata, so [attestationContext] prefers the real installed
+     * CimaCloud context and otherwise supplies the compatibility identity through [FakeContext].
      */
     fun load(context: Context) {
         if (loaded) return
@@ -40,7 +43,7 @@ object NativeLib {
             // The native library shares global OpenSSL/BoringSSL state and is NOT
             // thread-safe. Perform the first (one-time initialisation) call while
             // still holding the lock so concurrent callers never race the init.
-            runCatching { buildSecure(FakeContext(context.applicationContext ?: context)) }
+            runCatching { buildSecure(attestationContext(context)) }
             loaded = true
         }
     }
@@ -51,7 +54,7 @@ object NativeLib {
         // concurrent calls corrupt the heap (crashes surface in unrelated threads).
         synchronized(lock) {
             val fresh = runCatching {
-                buildSecure(FakeContext(context.applicationContext ?: context))
+                buildSecure(attestationContext(context))
             }.getOrNull()
             if (!fresh.isNullOrEmpty() && fresh.length > 8) {
                 // Process-global cache survives CloudStream plugin (re)loads, which
@@ -68,6 +71,26 @@ object NativeLib {
         load(context)
         synchronized(lock) {
             return runCatching { decryptResponse(data, key) }.getOrNull()
+        }
+    }
+
+    /**
+     * Use the real app context and package metadata when CimaCloud is installed. Some devices
+     * expose the app through createPackageContext even when the host app cannot query it directly;
+     * FakeContext/FakePackageManager then supplies the compatibility identity and legacy fallback.
+     */
+    private fun attestationContext(context: Context): Context {
+        val appContext = context.applicationContext ?: context
+        return try {
+            val officialContext = appContext.createPackageContext(OFFICIAL_PACKAGE, 0)
+            Log.i(LOG_TAG, "installed package context available for native attestation")
+            FakeContext(officialContext)
+        } catch (error: Throwable) {
+            Log.i(
+                LOG_TAG,
+                "installed package context unavailable; using compatibility context error=${error.javaClass.simpleName}",
+            )
+            FakeContext(appContext)
         }
     }
 
