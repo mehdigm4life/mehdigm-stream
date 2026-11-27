@@ -73,7 +73,7 @@ class MySeedParserTest {
         assertEquals("قصة مسلسل تجريبية.", details.plot)
         assertTrue(details.tags.contains("WEB-DL"))
         assertTrue(details.tags.contains("أكشن"))
-        assertEquals(listOf(1, 2), details.episodes.map { it.number }.sorted())
+        assertEquals(listOf(1, 2), details.episodes.mapNotNull { it.number }.sorted())
         assertTrue(details.episodes.all { it.season == 2 })
         assertTrue(details.episodes.none { it.url.contains("/watch/") || it.url.contains("/download/") })
     }
