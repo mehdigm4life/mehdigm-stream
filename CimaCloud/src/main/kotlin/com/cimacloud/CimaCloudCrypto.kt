@@ -1,7 +1,11 @@
 package com.cimacloud
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.provider.Settings
 import android.util.Base64
 import android.util.Log
+import com.app.cimacloud.Utils.NativeLib
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -12,22 +16,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.KeyFactory
 import java.security.MessageDigest
-import java.security.PublicKey
 import java.security.SecureRandom
-import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
-import javax.crypto.Mac
-import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Pure-Kotlin implementation of the CimaCloud Android v1.3 native security & API transport layer.
- * Replaces libnative-lib.so (buildSecure + decryptResponse) and FakeContext/FakePackageManager
- * with standard JCA primitives, supporting all CPU architectures (ARM64, ARMv7, x86, x86_64).
+ * CimaCloud v1.3 API transport. The official native library generates the app-attestation token;
+ * the response decoder remains in Kotlin so API parsing is testable and independent of native ABI.
  */
 internal object CimaCloudCrypto {
 
@@ -47,34 +45,20 @@ internal object CimaCloudCrypto {
         "https://api-config.animegateshorts.workers.dev/",
     )
 
-    private const val CERT_SHA256 = "021bb8f6029e4e63e4b5b0ff922788b4fe24739e261e637dddf70bf95e0aacd7"
-    private const val HMAC_SECRET = "97a54e5dec15b4f1754abc5939643bbe57a0d8ae8db88529e268289457728002"
     private const val DECRYPT_SALT = "Gm4il@G00Gl3.Com"
     private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     private const val HEX_CHARS = "0123456789abcdef"
 
-    private const val RSA_PUB_SPKI_B64 =
-        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwDPYEppEb3xys/R99+zmZW54vhcQIcV+6+BtHI/" +
-            "Qmb4I0M2hw0fQ9fzLY/RhKM33yuOOZNAulpq4ByJ7b556fkkplaPMI3vbESmoJqCk3QCh65Nbi4mKRFFJyDk" +
-            "JVepBX2BDr3+zECzdSy0oVSn+nFqw5YJcS+d06Lgyyr5oZSaZSeGh9FtgJkuz17n265rLB6ruUUrHQVeEDl8" +
-            "ph3t/x/NynwtwQDA5VX+a/AVmedgb2JZCQLry8Za/lvsq4Lhuthcts6gtVq3uPExSKdLBpbqbwQNvhRgB3IE" +
-            "YV47OyddG32qbriJbxdvW+n5OzowiYQrsC8hG65GPBGCuj3zO7wIDAQAB"
-
     private const val CONFIG_TTL_MS = 30 * 60 * 1000L
 
     private val rng = SecureRandom()
-
-    // Stable 16-char hex device identifier per session (mirrors Settings.Secure.ANDROID_ID)
     private val sessionDeviceKey: String by lazy { randomHex(8) }
 
-    // Precomputed static HMAC over "err|<cert>|000|err_open"
-    private val staticAttestationMac: String by lazy {
-        hmacSha256Hex(HMAC_SECRET, "err|$CERT_SHA256|000|err_open")
-    }
+    @Volatile
+    private var appContext: Context? = null
 
-    private val rsaPublicKey: PublicKey by lazy {
-        val spkiBytes = Base64.decode(RSA_PUB_SPKI_B64, Base64.DEFAULT)
-        KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(spkiBytes))
+    fun initialize(context: Context) {
+        appContext = context.applicationContext ?: context
     }
 
     val httpClient: OkHttpClient by lazy {
@@ -163,36 +147,42 @@ internal object CimaCloudCrypto {
      * Generates a fresh `cloudflare-id` header and returns `(cloudflareId, decryptionKey)`.
      * Format: 15 random alphanumeric chars + 16-char device key; key = cloudflareId.substring(15).
      */
+    @SuppressLint("HardwareIds")
     fun generateCloudflarePair(): Pair<String, String> {
         val prefix = randomAlnum(15)
-        val key = sessionDeviceKey
+        val context = appContext
+        val androidId = try {
+            context?.let { Settings.Secure.getString(it.contentResolver, Settings.Secure.ANDROID_ID) }
+        } catch (_: Throwable) {
+            null
+        }
+        val key = androidId?.takeIf { it.isNotBlank() } ?: sessionDeviceKey.also {
+            Log.w(API_LOG_TAG, "Android ID unavailable; using a session key for cloudflare-id")
+        }
         return (prefix + key) to key
     }
 
-    /**
-     * Pure-Kotlin replica of JNI `NativeLib.buildSecure(Context)` producing the `firebase_id`
-     * hybrid RSA-2048-PKCS1v1.5 + AES-256-GCM envelope: `B64(encKey).B64(iv).B64(ct||tag)`.
-     */
-    fun buildSecureToken(): String {
-        val nowSec = System.currentTimeMillis() / 1000L
-        val nonce = randomHex(8)
-        val payloadJson =
-            """{"a":"err","b":"$CERT_SHA256|/data/app/com.app.cimacloud/base.apk","c":"false",""" +
-                """"d":"empty","e":"empty","f":"false","g":"false","h":"false","i":"false",""" +
-                """"j":"false","r":"false","s":"err_open","m":"$staticAttestationMac","t":$nowSec,"n":"$nonce"}"""
-
-        val aesKey = ByteArray(32).also { rng.nextBytes(it) }
-        val iv = ByteArray(12).also { rng.nextBytes(it) }
-
-        val gcmCipher = Cipher.getInstance("AES/GCM/NoPadding")
-        gcmCipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"), GCMParameterSpec(128, iv))
-        val sealedBytes = gcmCipher.doFinal(payloadJson.toByteArray(Charsets.UTF_8))
-
-        val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        rsaCipher.init(Cipher.ENCRYPT_MODE, rsaPublicKey)
-        val encKeyBytes = rsaCipher.doFinal(aesKey)
-
-        return "${b64NoWrap(encKeyBytes)}.${b64NoWrap(iv)}.${b64NoWrap(sealedBytes)}"
+    /** Uses the CimaCloud app's native attestation routine; never sends the old error sentinel token. */
+    private fun buildSecureToken(resource: String): String? {
+        val context = appContext
+        if (context == null) {
+            Log.w(API_LOG_TAG, "API request skipped: plugin context unavailable resource=$resource")
+            return null
+        }
+        return try {
+            NativeLib.secureId(context)?.takeIf { it.isNotBlank() }?.also {
+                Log.i(API_LOG_TAG, "native secure token generated resource=$resource")
+            } ?: run {
+                Log.w(API_LOG_TAG, "native secure token unavailable resource=$resource")
+                null
+            }
+        } catch (error: Throwable) {
+            Log.w(
+                API_LOG_TAG,
+                "native secure token failed resource=$resource error=${error.javaClass.simpleName}",
+            )
+            null
+        }
     }
 
     /**
@@ -223,6 +213,8 @@ internal object CimaCloudCrypto {
      * unwraps encrypted (`{"encrypted":true,"data":"..."}`) or plain JSON payloads.
      */
     suspend fun apiGet(pathOrUrl: String): JSONObject? = withContext(Dispatchers.IO) {
+        val resource = apiResourceKind(pathOrUrl)
+        val secureToken = buildSecureToken(resource) ?: return@withContext null
         val cfg = resolveConfig()
         val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
         val (cfId, key) = generateCloudflarePair()
@@ -231,10 +223,10 @@ internal object CimaCloudCrypto {
             .header("User-Agent", APP_USER_AGENT)
             .header("Accept", "application/json, text/plain, */*")
             .header("cloudflare-id", cfId)
-            .header("firebase_id", buildSecureToken())
+            .header("firebase_id", secureToken)
             .get()
             .build()
-        executeAndUnwrap(req, key, apiResourceKind(pathOrUrl))
+        executeAndUnwrap(req, key, resource)
     }
 
     /**
@@ -243,6 +235,8 @@ internal object CimaCloudCrypto {
      */
     suspend fun apiPost(pathOrUrl: String, formFields: Map<String, String>): JSONObject? =
         withContext(Dispatchers.IO) {
+            val resource = apiResourceKind(pathOrUrl)
+            val secureToken = buildSecureToken(resource) ?: return@withContext null
             val cfg = resolveConfig()
             val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
             val (cfId, key) = generateCloudflarePair()
@@ -255,10 +249,10 @@ internal object CimaCloudCrypto {
                 .header("User-Agent", APP_USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("cloudflare-id", cfId)
-                .header("firebase_id", buildSecureToken())
+                .header("firebase_id", secureToken)
                 .post(formBuilder.build())
                 .build()
-            executeAndUnwrap(req, key, apiResourceKind(pathOrUrl))
+            executeAndUnwrap(req, key, resource)
         }
 
     private fun executeAndUnwrap(request: Request, key: String, resource: String): JSONObject? {
@@ -389,9 +383,6 @@ internal object CimaCloudCrypto {
         }
     }
 
-    private fun b64NoWrap(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.NO_WRAP)
-
     private fun randomAlnum(length: Int): String {
         val sb = StringBuilder(length)
         for (i in 0 until length) {
@@ -409,12 +400,6 @@ internal object CimaCloudCrypto {
         MessageDigest.getInstance("MD5")
             .digest(input.toByteArray(Charsets.UTF_8))
             .toHexLower()
-
-    private fun hmacSha256Hex(secret: String, data: String): String {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        return mac.doFinal(data.toByteArray(Charsets.UTF_8)).toHexLower()
-    }
 
     private fun ByteArray.toHexLower(): String {
         val out = CharArray(size * 2)
