@@ -1,6 +1,7 @@
 package com.cimacloud
 
 import android.util.Base64
+import android.util.Log
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorApi
@@ -74,6 +75,8 @@ import javax.crypto.spec.SecretKeySpec
  */
 internal object CimaCloudExtractors {
 
+    private const val LOG_TAG = "CimaCloudLinks"
+
     internal const val DESKTOP_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -133,7 +136,12 @@ internal object CimaCloudExtractors {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        if (embedUrls.isEmpty()) return false
+        val distinctEmbedUrls = embedUrls.distinct()
+        if (distinctEmbedUrls.isEmpty()) {
+            Log.w(LOG_TAG, "extractAllServers: received zero embed URLs")
+            return false
+        }
+        Log.i(LOG_TAG, "extractAllServers: starting servers=${distinctEmbedUrls.size}")
 
         val emittedUrls = ConcurrentHashMap.newKeySet<String>()
         val emittedSubs = ConcurrentHashMap.newKeySet<String>()
@@ -155,9 +163,9 @@ internal object CimaCloudExtractors {
 
         val semaphore = Semaphore(MAX_CONCURRENT_SERVERS)
 
-        withTimeoutOrNull(TOTAL_EXTRACTION_BUDGET_MS) {
+        val completed = withTimeoutOrNull(TOTAL_EXTRACTION_BUDGET_MS) {
             supervisorScope {
-                embedUrls.distinct().map { rawUrl ->
+                distinctEmbedUrls.map { rawUrl ->
                     async(Dispatchers.IO) {
                         semaphore.withPermit {
                             withTimeoutOrNull(PER_SERVER_TIMEOUT_MS) {
@@ -173,9 +181,16 @@ internal object CimaCloudExtractors {
                     }
                 }.awaitAll()
             }
-        }
+            true
+        } ?: false
 
-        return emittedCount.get() > 0
+        val foundLinks = emittedCount.get()
+        Log.i(
+            LOG_TAG,
+            "extractAllServers: completed=$completed links=$foundLinks subtitles=${emittedSubs.size}",
+        )
+        if (!completed) Log.w(LOG_TAG, "extractAllServers: total extraction time budget exhausted")
+        return foundLinks > 0
     }
 
     internal suspend fun dispatchSingleUrl(
@@ -198,6 +213,7 @@ internal object CimaCloudExtractors {
             callback(link)
         }
 
+        Log.i(LOG_TAG, "server start host=${host.ifBlank { "unknown" }} depth=$depth")
         try {
             when {
                 // 1. Direct progressive MP4 / MKV / WEBM or direct M3U8 URL
@@ -289,6 +305,11 @@ internal object CimaCloudExtractors {
             if (localCount.get() == 0) {
                 runCatching {
                     loadExtractor(url, effectiveReferer, subtitleCallback, countingCallback)
+                }.onFailure { error ->
+                    Log.w(
+                        LOG_TAG,
+                        "CloudStream fallback failed host=${host.ifBlank { "unknown" }} error=${error.javaClass.simpleName}",
+                    )
                 }
             }
             if (localCount.get() == 0 && !isVidTubeHost(host)) {
@@ -298,9 +319,18 @@ internal object CimaCloudExtractors {
                 extractViaRemotePhp(url, prettyProviderName(host), countingCallback)
             }
         } catch (ce: CancellationException) {
+            Log.w(LOG_TAG, "server canceled host=${host.ifBlank { "unknown" }}")
             throw ce
-        } catch (_: Throwable) {
-            // Isolated per-server failure; never aborts sibling servers
+        } catch (t: Throwable) {
+            Log.w(
+                LOG_TAG,
+                "server failed host=${host.ifBlank { "unknown" }} error=${t.javaClass.simpleName}",
+            )
+        } finally {
+            Log.i(
+                LOG_TAG,
+                "server completed host=${host.ifBlank { "unknown" }} links=${localCount.get()}",
+            )
         }
     }
 
@@ -548,15 +578,29 @@ internal object CimaCloudExtractors {
         val encoded = URLEncoder.encode(embedUrl, "UTF-8")
         val reqUrl = "${cfg.extractorUrl}?url=$encoded"
         val body = fetchText(reqUrl, headers = mapOf("User-Agent" to CimaCloudCrypto.APP_USER_AGENT))
-            ?: return@withContext
-        val json = CimaCloudCrypto.safeJsonObject(body) ?: return@withContext
-        if (json.has("error")) return@withContext
+        if (body == null) {
+            Log.w(LOG_TAG, "remote extractor unavailable provider=$providerLabel")
+            return@withContext
+        }
+        val json = CimaCloudCrypto.safeJsonObject(body)
+        if (json == null) {
+            Log.w(LOG_TAG, "remote extractor returned non-JSON provider=$providerLabel")
+            return@withContext
+        }
+        if (json.has("error")) {
+            Log.w(LOG_TAG, "remote extractor reported an error provider=$providerLabel")
+            return@withContext
+        }
 
         val linksArr = json.optJSONArray("servers")
             ?: json.optJSONArray("links")
             ?: json.optJSONArray("sources")
             ?: json.optJSONArray("data")
-            ?: return@withContext
+        if (linksArr == null) {
+            Log.w(LOG_TAG, "remote extractor returned no link array provider=$providerLabel")
+            return@withContext
+        }
+        Log.i(LOG_TAG, "remote extractor provider=$providerLabel entries=${linksArr.length()}")
 
         val defaultRef = "${originOf(embedUrl)}/"
         for (i in 0 until linksArr.length()) {
@@ -1741,11 +1785,21 @@ internal object CimaCloudExtractors {
                 reqBuilder.header(k, if (k.equals("Referer", true) || k.equals("Origin", true)) asciiSafeHeaderUrl(v) else v)
             }
             CimaCloudCrypto.httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(LOG_TAG, "HTTP status=${resp.code} host=${hostOf(resp.request.url.toString())}")
+                }
                 if (resp.code >= 500) return null
-                val bodyStr = resp.body?.string() ?: return null
+                val bodyStr = resp.body?.string()
+                if (bodyStr == null) {
+                    Log.w(LOG_TAG, "HTTP response had no body host=${hostOf(resp.request.url.toString())}")
+                    return null
+                }
                 resp.request.url.toString() to bodyStr
             }
-        } catch (_: Throwable) {
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (error: Throwable) {
+            Log.w(LOG_TAG, "HTTP request failed host=${hostOf(url)} error=${error.javaClass.simpleName}")
             null
         }
     }

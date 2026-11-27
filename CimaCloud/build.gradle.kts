@@ -1,7 +1,7 @@
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 37
+version = 38
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"
