@@ -92,7 +92,7 @@ jobs:
             --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
             --output "$apk" \
             --write-out '%{http_code}' \
-            "$apk_url")" || [[ "$http_status" != "200" || ! -s "$apk" ]]; then
+            "$apk_url")" || [[ "$http_status" != "200" || ! -s "$apk" ]] || ! unzip -tq "$apk" >/dev/null 2>&1; then
             echo "The supplied direct MediaFire URL did not return a valid APK (HTTP ${http_status:-unknown}); refreshing its temporary link from the same file page." >&2
             echo "::warning title=MediaFire direct URL failed::HTTP ${http_status:-unknown}; attempting refresh from the same file page."
             rm -f "$apk"
@@ -433,3 +433,32 @@ jobs:
           fi
           cat "$report"
           sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          report_text = "\n".join(line for line in raw.splitlines() if not line.startswith("::notice "))
+          report = json.loads(report_text)
+          native = report.get("native", [])
+          files = [item for item in native if isinstance(item, dict) and item.get("file")]
+          app_files = [
+              item for item in files
+              if any(marker in str(item["file"]).lower() for marker in ("bnhe", "cima", "cloud"))
+          ]
+          selected = app_files or files
+          count = native[0].get("native_libraries_found", len(files)) if native else 0
+          print(f"::notice title=CimaCloud native library count::{count}")
+          details = [
+              {
+                  "file": item.get("file"),
+                  "sha256": item.get("sha256"),
+                  "interesting_strings": item.get("interesting_strings", []),
+              }
+              for item in selected
+          ]
+          message = json.dumps(details, separators=(",", ":"), ensure_ascii=True)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=CimaCloud native string scan::{message}")
+          PY
