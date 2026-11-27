@@ -94,11 +94,13 @@ jobs:
             --write-out '%{http_code}' \
             "$apk_url")" || [[ "$http_status" != "200" || ! -s "$apk" ]]; then
             echo "The supplied direct MediaFire URL did not return a valid APK (HTTP ${http_status:-unknown}); refreshing its temporary link from the same file page." >&2
+            echo "::warning title=MediaFire direct URL failed::HTTP ${http_status:-unknown}; attempting refresh from the same file page."
             rm -f "$apk"
 
             mapfile -t page_info < <(python3 scripts/resolve-mediafire-download.py page-info "$apk_url")
             if [[ "${#page_info[@]}" -ne 2 || -z "${page_info[0]}" || -z "${page_info[1]}" ]]; then
               echo "Could not derive the stable MediaFire file page from the supplied URL." >&2
+              echo "::error title=MediaFire URL cannot be refreshed::The supplied direct URL did not contain a usable file page and file key."
               exit 1
             fi
             mediafire_page_url="${page_info[0]}"
@@ -122,11 +124,13 @@ jobs:
               --write-out '%{http_code}' \
               "$mediafire_page_url")" || [[ "$page_status" != "200" || ! -s "$mediafire_page" ]]; then
               echo "Could not refresh the MediaFire file page (HTTP ${page_status:-unknown})." >&2
+              echo "::error title=MediaFire file page request failed::HTTP ${page_status:-unknown}; could not fetch the stable file page."
               exit 1
             fi
 
             if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key")"; then
               echo "MediaFire did not provide a fresh direct link for file key $mediafire_file_key." >&2
+              echo "::error title=MediaFire file page has no direct link::The refreshed page did not contain a download URL for file key $mediafire_file_key."
               exit 1
             fi
             download_method="refreshed direct URL from the same MediaFire file page"
@@ -148,16 +152,19 @@ jobs:
               --write-out '%{http_code}' \
               "$refreshed_url")"; then
               echo "curl could not download the refreshed APK URL (HTTP ${http_status:-unknown})." >&2
+              echo "::error title=MediaFire refreshed download failed::HTTP ${http_status:-unknown}; curl rejected the refreshed file URL."
               exit 1
             fi
           fi
 
           if [[ "$http_status" != "200" || ! -s "$apk" ]]; then
             echo "Expected a non-empty APK response with HTTP 200; got HTTP ${http_status:-unknown}." >&2
+            echo "::error title=MediaFire returned no APK::Expected HTTP 200 and a non-empty file; received HTTP ${http_status:-unknown}."
             exit 1
           fi
           if ! unzip -tq "$apk" >/dev/null; then
             echo "The MediaFire response is not a valid APK/ZIP archive." >&2
+            echo "::error title=MediaFire response is not an APK::HTTP 200 returned data that failed ZIP/APK validation."
             exit 1
           fi
 
