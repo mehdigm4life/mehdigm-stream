@@ -87,15 +87,19 @@ def scan_smali(decoded_dir: Path) -> list[dict[str, object]]:
 def scan_native(decoded_dir: Path, apk_path: Path | None = None) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     libraries: list[tuple[str, bytes]] = []
+    archive_libraries: list[str] = []
     is_app_library = lambda name: name.lower().endswith(".so") and any(
         marker in name.lower() for marker in ("bnhe", "cima", "cloud", "native-lib")
     )
     if apk_path is not None:
         with ZipFile(apk_path) as archive:
+            archive_libraries = sorted(
+                name for name in archive.namelist() if name.startswith("lib/") and name.lower().endswith(".so")
+            )
             libraries.extend(
                 (name, archive.read(name))
-                for name in sorted(archive.namelist())
-                if name.startswith("lib/") and is_app_library(name)
+                for name in archive_libraries
+                if is_app_library(name)
             )
     if not libraries and (decoded_dir / "lib").is_dir():
         libraries.extend(
@@ -103,6 +107,8 @@ def scan_native(decoded_dir: Path, apk_path: Path | None = None) -> list[dict[st
             for library in sorted((decoded_dir / "lib").rglob("*.so"))
             if is_app_library(library.name)
         )
+    if not libraries and archive_libraries:
+        return [{"matching_app_library": False, "archive_native_files": archive_libraries[:40]}]
 
     for path, data in libraries:
         strings = [match.group().decode("ascii", errors="replace") for match in re.finditer(rb"[\x20-\x7e]{4,}", data)]
