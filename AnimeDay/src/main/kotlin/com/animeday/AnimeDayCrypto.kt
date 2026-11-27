@@ -1,6 +1,12 @@
 package com.animeday
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.provider.Settings
 import android.util.Base64
+import android.util.Log
+import com.app.cimacloud.Utils.NativeLib
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -10,25 +16,18 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.KeyFactory
 import java.security.MessageDigest
-import java.security.PublicKey
 import java.security.SecureRandom
-import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
-import javax.crypto.Mac
-import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Pure-Kotlin implementation of the AnimeDay Android v3.8 (`com.anime.day`) native security
- * and API transport layer.
+ * AnimeDay v3.8 API transport and response decoder.
  *
- * Replaces `libnative-lib.so` (`NativeLib.buildSecure` + `NativeLib.decryptResponse`) and
- * `FakeContext` / `FakePackageManager` reflection spoofing with standard JCA primitives,
- * working cleanly across all Android CPU architectures (arm64-v8a, armeabi-v7a, x86, x86_64).
+ * Server authentication is delegated to the official native `buildSecure(Context)` routine;
+ * response decryption and API parsing remain in Kotlin for testability.
  */
 internal object AnimeDayCrypto {
 
@@ -45,35 +44,24 @@ internal object AnimeDayCrypto {
         "https://backup-animeday.animegateshorts.workers.dev/",
     )
 
-    private const val CERT_SHA256 = "021bb8f6029e4e63e4b5b0ff922788b4fe24739e261e637dddf70bf95e0aacd7"
-    private const val APK_PATH = "/data/app/com.anime.day/base.apk"
-    private const val HMAC_SECRET = "97a54e5dec15b4f1754abc5939643bbe57a0d8ae8db88529e268289457728002"
+    private const val API_LOG_TAG = "AnimeDayLinks"
+    private const val OFFICIAL_PACKAGE = "com.anime.day"
     private const val DECRYPT_SALT = "Gm4il@G00Gl3.Com"
     private const val ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     private const val HEX_CHARS = "0123456789abcdef"
-
-    private const val RSA_PUB_SPKI_B64 =
-        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwDPYEppEb3xys/R99+zmZW54vhcQIcV+6+BtHI/" +
-            "Qmb4I0M2hw0fQ9fzLY/RhKM33yuOOZNAulpq4ByJ7b556fkkplaPMI3vbESmoJqCk3QCh65Nbi4mKRFFJyDk" +
-            "JVepBX2BDr3+zECzdSy0oVSn+nFqw5YJcS+d06Lgyyr5oZSaZSeGh9FtgJkuz17n265rLB6ruUUrHQVeEDl8" +
-            "ph3t/x/NynwtwQDA5VX+a/AVmedgb2JZCQLry8Za/lvsq4Lhuthcts6gtVq3uPExSKdLBpbqbwQNvhRgB3IE" +
-            "YV47OyddG32qbriJbxdvW+n5OzowiYQrsC8hG65GPBGCuj3zO7wIDAQAB"
 
     private const val CONFIG_TTL_MS = 30 * 60 * 1000L
 
     private val rng = SecureRandom()
 
-    // Stable 16-char hex device identifier per session (mirrors Settings.Secure.ANDROID_ID)
+    // Stable fallback for devices that cannot expose ANDROID_ID through the app context.
     private val sessionDeviceKey: String by lazy { randomHex(8) }
 
-    // Precomputed static HMAC-SHA256 over "err|<cert>|000|err_open"
-    private val staticAttestationMac: String by lazy {
-        hmacSha256Hex(HMAC_SECRET, "err|$CERT_SHA256|000|err_open")
-    }
+    @Volatile
+    private var appContext: Context? = null
 
-    private val rsaPublicKey: PublicKey by lazy {
-        val spkiBytes = Base64.decode(RSA_PUB_SPKI_B64, Base64.DEFAULT)
-        KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(spkiBytes))
+    fun initialize(context: Context) {
+        appContext = context.applicationContext ?: context
     }
 
     val httpClient: OkHttpClient by lazy {
@@ -169,37 +157,42 @@ internal object AnimeDayCrypto {
      * Generates a fresh `cloudflare-id` header and returns `(cloudflareId, decryptionKey)`.
      * Format: 15 random alphanumeric chars + 16-char device key; `key = cloudflareId.substring(15)`.
      */
+    @SuppressLint("HardwareIds")
     fun generateCloudflarePair(): Pair<String, String> {
         val prefix = randomAlnum(15)
-        val key = sessionDeviceKey
+        val context = appContext
+        val androidId = try {
+            context?.let { Settings.Secure.getString(it.contentResolver, Settings.Secure.ANDROID_ID) }
+        } catch (_: Throwable) {
+            null
+        }
+        val key = androidId?.takeIf { it.isNotBlank() } ?: sessionDeviceKey.also {
+            Log.w(API_LOG_TAG, "Android ID unavailable; using a session key for cloudflare-id")
+        }
         return (prefix + key) to key
     }
 
-    /**
-     * Pure-Kotlin replica of `com.anime.day.Utils.NativeLib.buildSecure(Context)` producing the
-     * `firebase_id` hybrid RSA-2048-PKCS1v1.5 + AES-256-GCM attestation envelope:
-     * `B64(encKey).B64(iv).B64(ct||tag)`.
-     */
-    fun buildSecureToken(): String {
-        val nowSec = System.currentTimeMillis() / 1000L
-        val nonce = randomHex(8)
-        val payloadJson =
-            """{"a":"err","b":"$CERT_SHA256|$APK_PATH","c":"false",""" +
-                """"d":"empty","e":"empty","f":"false","g":"false","h":"false","i":"false",""" +
-                """"j":"false","r":"false","s":"err_open","m":"$staticAttestationMac","t":$nowSec,"n":"$nonce"}"""
-
-        val aesKey = ByteArray(32).also { rng.nextBytes(it) }
-        val iv = ByteArray(12).also { rng.nextBytes(it) }
-
-        val gcmCipher = Cipher.getInstance("AES/GCM/NoPadding")
-        gcmCipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"), GCMParameterSpec(128, iv))
-        val sealedBytes = gcmCipher.doFinal(payloadJson.toByteArray(Charsets.UTF_8))
-
-        val rsaCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        rsaCipher.init(Cipher.ENCRYPT_MODE, rsaPublicKey)
-        val encKeyBytes = rsaCipher.doFinal(aesKey)
-
-        return "${b64NoWrap(encKeyBytes)}.${b64NoWrap(iv)}.${b64NoWrap(sealedBytes)}"
+    /** Uses the official app's native attestation routine; never sends the old `err` sentinel token. */
+    private fun buildSecureToken(resource: String): String? {
+        val context = appContext
+        if (context == null) {
+            Log.w(API_LOG_TAG, "API request skipped: plugin context unavailable resource=$resource")
+            return null
+        }
+        return try {
+            NativeLib.secureId(context)?.takeIf { it.isNotBlank() }?.also {
+                Log.i(API_LOG_TAG, "native secure token generated resource=$resource")
+            } ?: run {
+                Log.w(API_LOG_TAG, "native secure token unavailable resource=$resource")
+                null
+            }
+        } catch (error: Throwable) {
+            Log.w(
+                API_LOG_TAG,
+                "native secure token failed resource=$resource error=${error.javaClass.simpleName}",
+            )
+            null
+        }
     }
 
     /**
@@ -230,15 +223,18 @@ internal object AnimeDayCrypto {
      * unwraps raw Base64 ciphertexts, encrypted envelopes, or plain JSON responses.
      */
     suspend fun apiGet(pathOrUrl: String): JSONObject? = withContext(Dispatchers.IO) {
+        val resource = apiResourceKind(pathOrUrl)
+        val secureToken = buildSecureToken(resource) ?: return@withContext null
         val cfg = resolveConfig()
         val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
         val (cfId, key) = generateCloudflarePair()
+        Log.i(API_LOG_TAG, "API request method=GET route=${safeApiRoute(pathOrUrl)}")
         val req = Request.Builder()
             .url(fullUrl)
             .header("User-Agent", APP_USER_AGENT)
             .header("Accept", "application/json, text/plain, */*")
             .header("cloudflare-id", cfId)
-            .header("firebase_id", buildSecureToken())
+            .header("firebase_id", secureToken)
             .get()
             .build()
         executeAndUnwrap(req, key)
@@ -250,6 +246,8 @@ internal object AnimeDayCrypto {
      */
     suspend fun apiPost(pathOrUrl: String, formFields: Map<String, String>): JSONObject? =
         withContext(Dispatchers.IO) {
+            val resource = apiResourceKind(pathOrUrl)
+            val secureToken = buildSecureToken(resource) ?: return@withContext null
             val cfg = resolveConfig()
             val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
             val (cfId, key) = generateCloudflarePair()
@@ -257,28 +255,39 @@ internal object AnimeDayCrypto {
             for ((k, v) in formFields) {
                 formBuilder.add(k, v)
             }
+            Log.i(API_LOG_TAG, "API request method=POST route=${safeApiRoute(pathOrUrl)}")
             val req = Request.Builder()
                 .url(fullUrl)
                 .header("User-Agent", APP_USER_AGENT)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("cloudflare-id", cfId)
-                .header("firebase_id", buildSecureToken())
+                .header("firebase_id", secureToken)
                 .post(formBuilder.build())
                 .build()
             executeAndUnwrap(req, key)
         }
 
     private fun executeAndUnwrap(request: Request, key: String): JSONObject? {
+        val route = safeApiRoute(request.url.encodedPath)
         return try {
             val rawBody = httpClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return null
+                if (!resp.isSuccessful) {
+                    Log.w(API_LOG_TAG, "API HTTP status=${resp.code} method=${request.method} route=$route")
+                    return null
+                }
                 resp.body?.string()
-            }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            }?.trim()?.takeIf { it.isNotEmpty() } ?: run {
+                Log.w(API_LOG_TAG, "API response empty method=${request.method} route=$route")
+                return null
+            }
 
             // Case 1: Raw Base64 ciphertext body (used by /movie/{id}/servers & /episode/{id}/servers)
             if (!rawBody.startsWith("{") && !rawBody.startsWith("[")) {
-                val decryptedText = decryptResponse(rawBody, key)?.trim() ?: return null
-                return parseDecryptedJson(decryptedText)
+                val decryptedText = decryptResponse(rawBody, key)?.trim() ?: run {
+                    Log.w(API_LOG_TAG, "API response decryption failed method=${request.method} route=$route")
+                    return null
+                }
+                return parseDecryptedJson(decryptedText, route)
             }
 
             if (rawBody.startsWith("[")) {
@@ -286,14 +295,23 @@ internal object AnimeDayCrypto {
             }
 
             // Case 2 & 3: JSON envelope (either encrypted data field or plain JSON response)
-            val outer = safeJsonObject(rawBody) ?: return null
-            if (outer.optBoolean("blocked", false)) return null
+            val outer = safeJsonObject(rawBody) ?: run {
+                Log.w(API_LOG_TAG, "API response invalid JSON method=${request.method} route=$route")
+                return null
+            }
+            if (outer.optBoolean("blocked", false)) {
+                Log.w(API_LOG_TAG, "API response blocked method=${request.method} route=$route")
+                return null
+            }
 
             if (outer.optBoolean("encrypted", false)) {
                 val encStr = outer.optString("data", "")
                 if (encStr.isNotBlank()) {
-                    val decryptedText = decryptResponse(encStr, key)?.trim() ?: return null
-                    return parseDecryptedJson(decryptedText)
+                    val decryptedText = decryptResponse(encStr, key)?.trim() ?: run {
+                        Log.w(API_LOG_TAG, "encrypted API response decryption failed route=$route")
+                        return null
+                    }
+                    return parseDecryptedJson(decryptedText, route)
                 }
             }
 
@@ -301,7 +319,7 @@ internal object AnimeDayCrypto {
             val rawDataStr = outer.opt("data") as? String
             if (!rawDataStr.isNullOrBlank() && !rawDataStr.startsWith("{") && !rawDataStr.startsWith("[")) {
                 decryptResponse(rawDataStr, key)?.trim()?.let { dec ->
-                    parseDecryptedJson(dec)?.let { return it }
+                    parseDecryptedJson(dec, route)?.let { return it }
                 }
             }
 
@@ -313,18 +331,52 @@ internal object AnimeDayCrypto {
                 }
             }
             outer
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            Log.w(
+                API_LOG_TAG,
+                "API request failed method=${request.method} route=$route error=${error.javaClass.simpleName}",
+            )
             null
         }
     }
 
-    private fun parseDecryptedJson(decryptedText: String): JSONObject? = when {
+    private fun parseDecryptedJson(decryptedText: String, route: String): JSONObject? = when {
         decryptedText.startsWith("{") -> {
-            val obj = safeJsonObject(decryptedText) ?: return null
-            if (obj.optBoolean("blocked", false)) null else (obj.optJSONObject("data") ?: obj)
+            val obj = safeJsonObject(decryptedText) ?: run {
+                Log.w(API_LOG_TAG, "decrypted API response invalid JSON route=$route")
+                return null
+            }
+            if (obj.optBoolean("blocked", false)) {
+                Log.w(API_LOG_TAG, "decrypted API response blocked route=$route")
+                null
+            } else {
+                obj.optJSONObject("data") ?: obj
+            }
         }
         decryptedText.startsWith("[") -> JSONObject().put("items", JSONArray(decryptedText))
-        else -> null
+        else -> {
+            Log.w(API_LOG_TAG, "decrypted API response unexpected format route=$route")
+            null
+        }
+    }
+
+    private fun apiResourceKind(pathOrUrl: String): String =
+        Regex("""(?:^|/)(home|section|movies|series|search|movie|episode)(?:/|[?#]|$)""", RegexOption.IGNORE_CASE)
+            .find(pathOrUrl)
+            ?.groupValues
+            ?.get(1)
+            ?.lowercase()
+            ?: "other"
+
+    private fun safeApiRoute(pathOrUrl: String): String {
+        val route = pathOrUrl
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringAfter(API_VERSION_PATH, pathOrUrl)
+            .trimStart('/')
+        return route.take(160).ifBlank { "unknown" }
     }
 
     private fun resolveApiUrl(apiRoot: String, pathOrUrl: String): String {
@@ -351,9 +403,6 @@ internal object AnimeDayCrypto {
         }
     }
 
-    private fun b64NoWrap(bytes: ByteArray): String =
-        Base64.encodeToString(bytes, Base64.NO_WRAP)
-
     private fun randomAlnum(length: Int): String {
         val sb = StringBuilder(length)
         for (i in 0 until length) {
@@ -371,12 +420,6 @@ internal object AnimeDayCrypto {
         MessageDigest.getInstance("MD5")
             .digest(input.toByteArray(Charsets.UTF_8))
             .toHexLower()
-
-    private fun hmacSha256Hex(secret: String, data: String): String {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        return mac.doFinal(data.toByteArray(Charsets.UTF_8)).toHexLower()
-    }
 
     private fun ByteArray.toHexLower(): String {
         val out = CharArray(size * 2)

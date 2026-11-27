@@ -1,5 +1,6 @@
 package com.animeday
 
+import android.util.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageList
@@ -621,13 +622,24 @@ class AnimeDay : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val serversApiPath = resolveServersApiPath(data) ?: return false
-        val root = AnimeDayCrypto.apiGet(serversApiPath) ?: return false
+        val serversApiPath = resolveServersApiPath(data) ?: run {
+            Log.w(LINK_LOG_TAG, "loadLinks: unsupported data kind=${dataKind(data)}")
+            return false
+        }
+        Log.i(LINK_LOG_TAG, "loadLinks: fetching server list route=$serversApiPath")
+        val root = AnimeDayCrypto.apiGet(serversApiPath) ?: run {
+            Log.w(LINK_LOG_TAG, "loadLinks: server API returned no JSON route=$serversApiPath")
+            return false
+        }
 
         val serversArr = root.optJSONArray("servers")
             ?: root.optJSONArray("items")
             ?: root.optJSONArray("data")
-            ?: return false
+            ?: run {
+                Log.w(LINK_LOG_TAG, "loadLinks: response had no server array route=$serversApiPath")
+                return false
+            }
+        Log.i(LINK_LOG_TAG, "loadLinks: server entries=${serversArr.length()} route=$serversApiPath")
 
         val cfg = AnimeDayCrypto.resolveConfig()
         val targets = ArrayList<AnimeDayExtractors.ServerTarget>()
@@ -656,13 +668,19 @@ class AnimeDay : MainAPI() {
                 targets.add(AnimeDayExtractors.ServerTarget(url = fullLink))
             }
         }
-        if (targets.isEmpty()) return false
+        if (targets.isEmpty()) {
+            Log.w(LINK_LOG_TAG, "loadLinks: no valid embed targets route=$serversApiPath")
+            return false
+        }
 
-        return AnimeDayExtractors.extractAllServers(
+        Log.i(LINK_LOG_TAG, "loadLinks: resolving embed targets=${targets.size}")
+        val found = AnimeDayExtractors.extractAllServers(
             targets = targets,
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
+        Log.i(LINK_LOG_TAG, "loadLinks: extraction completed found=$found")
+        return found
     }
 
     // ── Parsing & Normalization Helpers ──────────────────────────────────────
@@ -672,6 +690,14 @@ class AnimeDay : MainAPI() {
             ?: return null
         return m.groupValues[1].lowercase() to m.groupValues[2]
     }
+
+    private fun dataKind(data: String): String =
+        Regex("""(?:^|/)(movie|episode|series|serie)(?:/|$)""", RegexOption.IGNORE_CASE)
+            .find(data)
+            ?.groupValues
+            ?.get(1)
+            ?.lowercase()
+            ?: "unknown"
 
     private fun resolveServersApiPath(data: String): String? {
         Regex("""/(movie|episode)/(\d+)/servers""", RegexOption.IGNORE_CASE).find(data)?.let {
@@ -772,5 +798,6 @@ class AnimeDay : MainAPI() {
 
     companion object {
         private const val HOME_CACHE_TTL_MS = 5 * 60 * 1000L
+        private const val LINK_LOG_TAG = "AnimeDayLinks"
     }
 }
