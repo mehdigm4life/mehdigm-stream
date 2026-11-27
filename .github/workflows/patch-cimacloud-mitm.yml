@@ -1,0 +1,136 @@
+name: Patch CimaCloud APK for HTTPS Inspection
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "Direct HTTPS MediaFire APK URL (defaults to the link supplied for this run)"
+        required: false
+        type: string
+        default: "https://download946.mediafire.com/nmnndf34oawgzYyQ5L1yJHHvlmWbU1NvVrd7bBwp6e2VjAS10B-MFpHB4e0euUn3ba8e0jvjaEV13FqWKFOibpSnq7NRzXJ2MsLH8CbNvcNyxffO08gJSqgyXfKMVZa4ZeJ8E6u9_BeUG9khouoLQSd6gkhIDsgXUyFME-WZB4LdfQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk"
+  push:
+    paths:
+      - ".github/workflows/patch-cimacloud-mitm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  patch-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Set up Java for Apktool and APK signing
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download the supplied CimaCloud APK with curl
+        id: download
+        shell: bash
+        env:
+          APK_URL: ${{ github.event.inputs.apk_url }}
+        run: |
+          set -euo pipefail
+          apk_url="${APK_URL:-}"
+          if [[ -z "$apk_url" ]]; then
+            apk_url='https://download946.mediafire.com/nmnndf34oawgzYyQ5L1yJHHvlmWbU1NvVrd7bBwp6e2VjAS10B-MFpHB4e0euUn3ba8e0jvjaEV13FqWKFOibpSnq7NRzXJ2MsLH8CbNvcNyxffO08gJSqgyXfKMVZa4ZeJ8E6u9_BeUG9khouoLQSd6gkhIDsgXUyFME-WZB4LdfQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk'
+          fi
+          if [[ ! "$apk_url" =~ ^https://download[0-9]+\.mediafire\.com/ ]]; then
+            echo "Provide a direct HTTPS URL hosted on a download-numbered MediaFire host." >&2
+            exit 1
+          fi
+
+          work_dir="$RUNNER_TEMP/cima-cloud-mitm"
+          mkdir -p "$work_dir"
+          apk="$work_dir/CimaCloud_Bnhelmyy.apk"
+
+          if ! http_status="$(curl \
+            --location \
+            --proto '=https' \
+            --proto-redir '=https' \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --retry-max-time 120 \
+            --connect-timeout 20 \
+            --max-time 600 \
+            --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+            --output "$apk" \
+            --write-out '%{http_code}' \
+            "$apk_url")"; then
+            echo "curl could not download the APK (HTTP ${http_status:-unknown})." >&2
+            exit 1
+          fi
+
+          if [[ "$http_status" != "200" || ! -s "$apk" ]]; then
+            echo "Expected a non-empty APK response with HTTP 200; got HTTP ${http_status:-unknown}." >&2
+            exit 1
+          fi
+          if ! unzip -tq "$apk" >/dev/null; then
+            echo "The MediaFire response is not a valid APK/ZIP archive." >&2
+            exit 1
+          fi
+
+          apk_bytes="$(wc -c < "$apk" | tr -d ' ')"
+          apk_sha256="$(sha256sum "$apk" | cut -d ' ' -f 1)"
+          echo "apk_path=$apk" >> "$GITHUB_OUTPUT"
+          echo "work_dir=$work_dir" >> "$GITHUB_OUTPUT"
+          {
+            echo "## CimaCloud APK download"
+            echo
+            echo "- HTTP status: $http_status"
+            echo "- Size: $apk_bytes bytes"
+            echo "- SHA-256: \`$apk_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install apk-mitm
+        shell: bash
+        run: npm install --global --no-audit --no-fund apk-mitm@1.3.0
+
+      - name: Patch the APK to trust user-installed MITM certificates
+        id: patch
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+        run: |
+          set -euo pipefail
+          apk-mitm "$APK_PATH"
+          patched_apk="${APK_PATH%.apk}-patched.apk"
+          if [[ ! -s "$patched_apk" ]]; then
+            echo "apk-mitm did not produce the expected patched APK." >&2
+            exit 1
+          fi
+          unzip -tq "$patched_apk" >/dev/null
+          echo "patched_apk=$patched_apk" >> "$GITHUB_OUTPUT"
+          sha256sum "$patched_apk" | tee "$patched_apk.sha256"
+
+      - name: Upload patched APK artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: CimaCloud-Bnhelmyy-apk-mitm-patched
+          path: |
+            ${{ steps.patch.outputs.patched_apk }}
+            ${{ steps.patch.outputs.patched_apk }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish the artifact download link in the run summary
+        shell: bash
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          echo "## Patched APK artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Download: $ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
