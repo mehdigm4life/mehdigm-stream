@@ -106,6 +106,8 @@ jobs:
             mediafire_page_url="${page_info[0]}"
             mediafire_file_key="${page_info[1]}"
             mediafire_page="$work_dir/mediafire-file-page.html"
+            mediafire_cookies="$work_dir/mediafire-cookies.txt"
+            touch "$mediafire_cookies"
 
             if ! page_status="$(curl \
               --location \
@@ -120,6 +122,7 @@ jobs:
               --connect-timeout 20 \
               --max-time 180 \
               --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --cookie-jar "$mediafire_cookies" \
               --output "$mediafire_page" \
               --write-out '%{http_code}' \
               "$mediafire_page_url")" || [[ "$page_status" != "200" || ! -s "$mediafire_page" ]]; then
@@ -131,11 +134,13 @@ jobs:
             resolver_error_file="$work_dir/mediafire-resolver-error.txt"
             if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key" 2>"$resolver_error_file")"; then
               resolver_error="$(tr '\r\n' '  ' < "$resolver_error_file" | cut -c 1-1100)"
-              echo "MediaFire did not provide a fresh direct link for file key $mediafire_file_key." >&2
-              echo "::error title=MediaFire file page has no direct link::${resolver_error:-No matching direct URL was present in the refreshed page.}"
-              exit 1
+              echo "MediaFire's file page did not expose a direct link; trying its stable download endpoint for file key $mediafire_file_key." >&2
+              echo "::warning title=MediaFire direct-link extraction needs JavaScript::${resolver_error:-No matching direct URL was present in the refreshed page.}"
+              refreshed_url="https://www.mediafire.com/download/$mediafire_file_key"
+              download_method="stable MediaFire download endpoint"
+            else
+              download_method="refreshed direct URL from the same MediaFire file page"
             fi
-            download_method="refreshed direct URL from the same MediaFire file page"
             if ! http_status="$(curl \
               --location \
               --proto '=https' \
@@ -150,6 +155,8 @@ jobs:
               --connect-timeout 20 \
               --max-time 600 \
               --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --cookie "$mediafire_cookies" \
+              --referer "$mediafire_page_url" \
               --output "$apk" \
               --write-out '%{http_code}' \
               "$refreshed_url")"; then
