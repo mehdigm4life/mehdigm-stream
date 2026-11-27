@@ -96,5 +96,64 @@ class MySeedParserTest {
         assertEquals(3, MySeedParser.seasonNumber("$base/selary/show/", "الموسم الثالث"))
         assertNull(MySeedParser.seasonNumber("$base/show/", "الحلقة 2 الثانية"))
         assertEquals("مسلسل Alpha", MySeedParser.seriesTitleFromEpisode("مسلسل Alpha الموسم الثاني الحلقة ١١ الحادية عشر"))
+        assertEquals("مسلسل Alpha", MySeedParser.seriesTitleFromEpisode("مسلسل Alpha الموسم الخامس"))
+    }
+
+    @Test
+    fun seasonAndEpisodeUrlsResolveToTheSameParentSeries() {
+        val parent = MySeedParser.normalizeContentUrl("/selary/show-alpha/", base)
+
+        assertEquals(parent, MySeedParser.seriesRootUrl("$base/selary/show-alpha-season-5/"))
+        assertEquals(parent, MySeedParser.seriesRootUrl("$base/selary/show-alpha-الموسم-الثالث-عشر/"))
+        assertEquals(parent, MySeedParser.seriesRootUrl("$base/show-alpha-الموسم-الخامس-الحلقة-22/"))
+        assertEquals(parent, MySeedParser.seriesRootUrl("$base/show-alpha-s2-eps3/"))
+    }
+
+    @Test
+    fun seasonParserReturnsOnlySameShowsSeasonsInNumericOrder() {
+        val slugs = listOf(
+            "الاول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن",
+            "التاسع", "العاشر", "الحادي-عشر", "الثاني-عشر", "الثالث-عشر", "الرابع-عشر", "الخامس-عشر"
+        )
+        val labels = listOf(
+            "الاول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن",
+            "التاسع", "العاشر", "الحادي عشر", "الثاني عشر", "الثالث عشر", "الرابع عشر", "الخامس عشر"
+        )
+        val seasonLinks = (15 downTo 1).joinToString("\n") { number ->
+            """<a href="/selary/show-alpha-الموسم-${slugs[number - 1]}/">مسلسل Alpha الموسم ${labels[number - 1]}</a>"""
+        }
+        val document = Jsoup.parse(
+            """<h2>مواسم المسلسل</h2>$seasonLinks
+                <a href="/selary/other-show-الموسم-الثالث/">مسلسل Other Show الموسم الثالث</a>""",
+            "$base/selary/show-alpha/"
+        )
+        val root = MySeedParser.normalizeContentUrl("/selary/show-alpha/", base)
+        val seasons = MySeedParser.parseSeasons(document, "$base/selary/show-alpha/")
+        val seasonPageUrl = "$base/selary/show-alpha-الموسم-الخامس/"
+        val seasonPage = Jsoup.parse(seasonLinks, seasonPageUrl)
+        val seasonsFromSeasonPage = MySeedParser.parseSeasons(seasonPage, seasonPageUrl)
+
+        assertEquals((1..15).toList(), seasons.map { it.number })
+        assertEquals((1..15).toList(), seasonsFromSeasonPage.map { it.number })
+        assertTrue(seasons.all { MySeedParser.seriesRootUrl(it.url) == root })
+    }
+
+    @Test
+    fun seasonEpisodesExcludeSeasonTabsAndRetainEpisodeNumbers() {
+        val seasonTabs = (15 downTo 1).joinToString("") { number ->
+            """<a href="/selary/show-alpha-season-$number/">مسلسل Alpha الموسم $number</a>"""
+        }
+        val episodeLinks = (1..22).joinToString("") { number ->
+            """<a href="/show-alpha-season-1-episode-$number/">الحلقة $number</a>"""
+        }
+        val document = Jsoup.parse(
+            """<section><h2>الحلقات والمواسم</h2><nav class="season-tabs">$seasonTabs</nav>
+                <div class="episodes-list">$episodeLinks</div></section>""",
+            "$base/selary/show-alpha-season-1/"
+        )
+        val episodes = MySeedParser.parseEpisodes(document, "$base/selary/show-alpha-season-1/")
+
+        assertEquals((1..22).toList(), episodes.mapNotNull { it.number }.sorted())
+        assertTrue(episodes.all { it.season == 1 })
     }
 }

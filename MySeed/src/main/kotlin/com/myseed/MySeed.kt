@@ -106,7 +106,21 @@ class MySeed : MainAPI() {
             }.awaitAll().flatten()
         }
 
-        return cards.distinctBy { it.url }.mapNotNull(::toSearchResponse)
+        // MySeed's search mixes the main show, its individual season pages, and matching episodes.
+        // Collapse all non-movie hits to the canonical parent series so every related result opens
+        // the same complete season/episode catalog instead of a partial season or a one-episode stub.
+        val canonicalCards = cards.map { card ->
+            if (card.kind == MySeedContentKind.MOVIE) {
+                card
+            } else {
+                card.copy(
+                    title = MySeedParser.seriesTitleFromEpisode(card.title).ifBlank { card.title },
+                    url = MySeedParser.seriesRootUrl(card.url) ?: card.url,
+                    kind = MySeedContentKind.SERIES
+                )
+            }
+        }
+        return canonicalCards.distinctBy { it.url }.mapNotNull(::toSearchResponse)
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -127,58 +141,92 @@ class MySeed : MainAPI() {
 
     override suspend fun load(url: String): com.lagradost.cloudstream3.LoadResponse {
         val metadataUrl = MySeedParser.normalizeContentUrl(url, mainUrl) ?: return unavailable(url)
-        val document = getDocument(metadataUrl) ?: return unavailable(metadataUrl)
-        val details = MySeedParser.parseDetails(document, metadataUrl)
+        val inputDocument = getDocument(metadataUrl) ?: return unavailable(metadataUrl)
+        val inputDetails = MySeedParser.parseDetails(inputDocument, metadataUrl)
 
-        return when (details.kind) {
-            MySeedContentKind.MOVIE -> newMovieLoadResponse(
-                details.title.ifBlank { "بدون عنوان" },
+        if (inputDetails.kind == MySeedContentKind.MOVIE) {
+            return newMovieLoadResponse(
+                inputDetails.title.ifBlank { "بدون عنوان" },
                 metadataUrl,
                 TvType.Movie,
                 ""
             ) {
-                this.posterUrl = details.posterUrl
-                this.plot = details.plot
-                this.year = details.year
-                this.tags = details.tags
+                this.posterUrl = inputDetails.posterUrl
+                this.plot = inputDetails.plot
+                this.year = inputDetails.year
+                this.tags = inputDetails.tags
             }
+        }
 
-            MySeedContentKind.SERIES -> newTvSeriesLoadResponse(
-                details.title.ifBlank { "بدون عنوان" },
-                metadataUrl,
-                TvType.TvSeries,
-                toEpisodes(details.episodes, details.posterUrl)
-            ) {
-                this.posterUrl = details.posterUrl
-                this.plot = details.plot
-                this.year = details.year
-                this.tags = details.tags
-            }
-
-            MySeedContentKind.EPISODE -> {
-                val episodeItems = details.episodes.ifEmpty {
+        // Search can return the parent show, one of its season pages, or an episode page.
+        // Resolve all three to the same parent catalog before constructing the series response.
+        val seriesUrl = MySeedParser.seriesRootUrl(metadataUrl) ?: metadataUrl
+        val parentDocument = if (seriesUrl == metadataUrl) inputDocument else getDocument(seriesUrl)
+        val catalogDocument = parentDocument ?: inputDocument
+        val catalogUrl = if (parentDocument != null) seriesUrl else metadataUrl
+        val details = if (parentDocument != null && parentDocument !== inputDocument) {
+            MySeedParser.parseDetails(catalogDocument, catalogUrl)
+        } else {
+            inputDetails
+        }
+        val fallbackEpisodes = details.episodes.ifEmpty {
+            inputDetails.episodes.ifEmpty {
+                if (inputDetails.kind == MySeedContentKind.EPISODE) {
                     listOf(
                         MySeedEpisode(
-                            name = "الحلقة ${MySeedParser.episodeNumber(metadataUrl, details.title) ?: 1}",
+                            name = "الحلقة ${MySeedParser.episodeNumber(metadataUrl, inputDetails.title) ?: 1}",
                             url = metadataUrl,
-                            season = MySeedParser.seasonNumber(metadataUrl, details.title),
-                            number = MySeedParser.episodeNumber(metadataUrl, details.title)
+                            season = MySeedParser.seasonNumber(metadataUrl, inputDetails.title),
+                            number = MySeedParser.episodeNumber(metadataUrl, inputDetails.title)
                         )
                     )
-                }
-                newTvSeriesLoadResponse(
-                    MySeedParser.seriesTitleFromEpisode(details.title),
-                    metadataUrl,
-                    TvType.TvSeries,
-                    toEpisodes(episodeItems, details.posterUrl)
-                ) {
-                    this.posterUrl = details.posterUrl
-                    this.plot = details.plot
-                    this.year = details.year
-                    this.tags = details.tags
+                } else {
+                    emptyList()
                 }
             }
         }
+        val episodeItems = loadSeriesEpisodes(catalogDocument, catalogUrl, fallbackEpisodes)
+        val title = MySeedParser.seriesTitleFromEpisode(details.title).ifBlank { details.title.ifBlank { "بدون عنوان" } }
+
+        return newTvSeriesLoadResponse(
+            title,
+            seriesUrl,
+            TvType.TvSeries,
+            toEpisodes(episodeItems, details.posterUrl)
+        ) {
+            this.posterUrl = details.posterUrl
+            this.plot = details.plot
+            this.year = details.year
+            this.tags = details.tags
+        }
+    }
+
+    private suspend fun loadSeriesEpisodes(
+        document: Document,
+        pageUrl: String,
+        fallbackEpisodes: List<MySeedEpisode>
+    ): List<MySeedEpisode> {
+        val seasons = MySeedParser.parseSeasons(document, pageUrl)
+        if (seasons.isEmpty()) return fallbackEpisodes
+
+        val seasonEpisodes = supervisorScope {
+            seasons.map { season ->
+                async(Dispatchers.IO) {
+                    val seasonDocument = if (season.url == pageUrl) document else getDocument(season.url)
+                    if (seasonDocument == null) return@async emptyList()
+                    MySeedParser.parseEpisodes(seasonDocument, season.url).mapIndexed { index, episode ->
+                        episode.copy(
+                            season = season.number,
+                            number = episode.number ?: index + 1
+                        )
+                    }
+                }
+            }.awaitAll().flatten()
+        }
+
+        val uniqueEpisodes = LinkedHashMap<String, MySeedEpisode>()
+        seasonEpisodes.forEach { episode -> uniqueEpisodes.putIfAbsent(episode.url, episode) }
+        return uniqueEpisodes.values.toList().ifEmpty { fallbackEpisodes }
     }
 
     private fun toEpisodes(items: List<MySeedEpisode>, posterUrl: String?): List<Episode> =
@@ -243,6 +291,11 @@ internal data class MySeedEpisode(
     val url: String,
     val season: Int?,
     val number: Int?
+)
+
+internal data class MySeedSeason(
+    val number: Int,
+    val url: String
 )
 
 internal data class MySeedDetails(
@@ -383,6 +436,54 @@ internal object MySeedParser {
         )
     }
 
+    /**
+     * Returns the parent /selary/ URL for a main-show, season, or episode URL. MySeed's episode
+     * slugs contain the show slug followed by Arabic season/episode markers (or Sxx/Epx markers).
+     */
+    fun seriesRootUrl(rawUrl: String): String? {
+        val normalized = normalizeContentUrl(rawUrl, BASE_URL) ?: return null
+        val path = parsedPath(normalized, BASE_URL)?.trimEnd('/') ?: return null
+        val segments = path.split('/').filter(String::isNotBlank)
+        val isSeriesPath = segments.firstOrNull().equals("selary", ignoreCase = true)
+        val slug = segments.lastOrNull() ?: return null
+
+        val hasSeasonOrEpisode = seasonNumber(normalized) != null || isEpisodeUrl(normalized, "")
+        if (!hasSeasonOrEpisode) return if (isSeriesPath) canonicalSiteUrl(path) else null
+
+        val marker = Regex(
+            """(?i)(?:[-_ ](?:الموسم|موسم|season)(?:[-_ ]|$)|[-_]s\d{1,2}(?:[-_]|$)|[-_ ](?:الحلقة|episode|eps?|ep)(?:[-_ ]|\d|$))"""
+        ).find(slug) ?: return if (isSeriesPath) canonicalSiteUrl(path) else null
+        val rootSlug = slug.substring(0, marker.range.first).trimEnd('-', '_', ' ')
+        if (rootSlug.isBlank()) return null
+
+        return canonicalSiteUrl("/selary/$rootSlug/")
+    }
+
+    private fun canonicalSiteUrl(decodedPath: String): String? {
+        val path = if (decodedPath.endsWith('/')) decodedPath else "$decodedPath/"
+        return runCatching { URI("https", SITE_HOST, path, null, null).toASCIIString() }.getOrNull()
+    }
+
+    /** Extract this show's season pages only, and normalize MySeed's alphabetically ordered tabs. */
+    fun parseSeasons(document: Document, pageUrl: String): List<MySeedSeason> {
+        val base = document.baseUri().ifBlank { pageUrl.ifBlank { BASE_URL } }
+        val rootUrl = seriesRootUrl(pageUrl) ?: return emptyList()
+        val seasons = LinkedHashMap<Int, MySeedSeason>()
+
+        for (anchor in document.select("a[href]")) {
+            val seasonUrl = normalizeContentUrl(anchor.absUrl("href").ifBlank { anchor.attr("href") }, base)
+                ?: continue
+            val path = parsedPath(seasonUrl, base)?.trimEnd('/').orEmpty()
+            if (!path.startsWith("/selary/", ignoreCase = true) || seasonUrl == rootUrl) continue
+
+            val number = seasonNumber(seasonUrl, anchorText(anchor)) ?: continue
+            if (seriesRootUrl(seasonUrl) != rootUrl) continue
+            seasons.putIfAbsent(number, MySeedSeason(number, seasonUrl))
+        }
+
+        return seasons.values.sortedBy { it.number }
+    }
+
     fun parseEpisodes(document: Document, pageUrl: String): List<MySeedEpisode> {
         val base = document.baseUri().ifBlank { pageUrl.ifBlank { BASE_URL } }
         val explicitAnchors = document.select(
@@ -461,7 +562,7 @@ internal object MySeedParser {
     }
 
     fun seasonNumber(url: String, label: String = ""): Int? {
-        val text = normalizeDigits("${decodePath(url)} $label")
+        val text = normalizeDigits("${decodePath(url)} $label").replace(Regex("[-_]+"), " ")
         Regex("(?i)(?:season|s)\\s*[-_ ]?(\\d{1,2})").find(text)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
         Regex("(?:الموسم|موسم)\\s*(?:رقم\\s*)?(\\d{1,2})").find(text)
