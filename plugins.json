@@ -185,7 +185,7 @@
         "iconUrl": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 3361871,
+        "fileSize": 3362856,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -197,7 +197,7 @@
             "Movie",
             "Cartoon"
         ],
-        "version": 31,
+        "version": 32,
         "internalName": "AnimeDay",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/AnimeDay.cs3",
         "name": "أنمي داي (AnimeDay)",
