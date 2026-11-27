@@ -36,7 +36,7 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK signing tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4.0.4
 
       - name: Install Apktool, ELF inspection tools, and Android build tools
         shell: bash
