@@ -31,7 +31,7 @@ jobs:
           chmod +x gradlew
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew :CimaCloud:clean :CimaCloud:testDebugUnitTest :CimaCloud:make --no-daemon
-          ./gradlew :AnimeDay:clean :AnimeDay:make --no-daemon
+          ./gradlew :AnimeDay:clean :AnimeDay:testDebugUnitTest :AnimeDay:make --no-daemon
 
       - name: Copy artifacts and sync plugins.json fileSize
         run: |
