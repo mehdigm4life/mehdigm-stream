@@ -87,17 +87,21 @@ def scan_smali(decoded_dir: Path) -> list[dict[str, object]]:
 def scan_native(decoded_dir: Path, apk_path: Path | None = None) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     libraries: list[tuple[str, bytes]] = []
+    is_app_library = lambda name: name.lower().endswith(".so") and any(
+        marker in name.lower() for marker in ("bnhe", "cima", "cloud", "native-lib")
+    )
     if apk_path is not None:
         with ZipFile(apk_path) as archive:
             libraries.extend(
                 (name, archive.read(name))
                 for name in sorted(archive.namelist())
-                if name.startswith("lib/") and name.endswith("/libBnHeImyy.so")
+                if name.startswith("lib/") and is_app_library(name)
             )
     if not libraries and (decoded_dir / "lib").is_dir():
         libraries.extend(
             (library.relative_to(decoded_dir).as_posix(), library.read_bytes())
-            for library in sorted((decoded_dir / "lib").rglob("libBnHeImyy.so"))
+            for library in sorted((decoded_dir / "lib").rglob("*.so"))
+            if is_app_library(library.name)
         )
 
     for path, data in libraries:
