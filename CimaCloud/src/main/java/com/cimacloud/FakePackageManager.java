@@ -54,50 +54,103 @@ public final class FakePackageManager extends PackageManager {
         return pi;
     }
 
-    private static void attachSigningInfo(PackageInfo pi) {
+    private PackageInfo packageInfoForCimaCloud(int flags) {
         try {
-            if (android.os.Build.VERSION.SDK_INT < 28) return;
-            Class<?> sc = Class.forName("android.content.pm.SigningInfo");
-            java.lang.reflect.Constructor<?> ctor = sc.getDeclaredConstructor(Signature[].class);
-            ctor.setAccessible(true);
-            Object info = ctor.newInstance(new Object[]{ pi.signatures });
-            java.lang.reflect.Field f = PackageInfo.class.getField("signingInfo");
-            f.set(pi, info);
+            PackageInfo installed = real.getPackageInfo(PKG, flags);
+            if (installed != null) {
+                log("using installed CimaCloud package metadata");
+                return installed;
+            }
+        } catch (PackageManager.NameNotFoundException | SecurityException ignored) {
+            // The official app is optional/not visible to the host app. Use the compatibility record.
+        }
+        log("using synthetic CimaCloud package metadata");
+        return fakePackageInfo(flags);
+    }
+
+    private ApplicationInfo applicationInfoForCimaCloud(int flags) {
+        try {
+            ApplicationInfo installed = real.getApplicationInfo(PKG, flags);
+            if (installed != null) {
+                log("using installed CimaCloud application metadata");
+                return installed;
+            }
+        } catch (PackageManager.NameNotFoundException | SecurityException ignored) {
+            // Fall through to the compatibility record below.
+        }
+        return fakeAppInfo(flags);
+    }
+
+    private static void attachSigningInfo(PackageInfo pi) {
+        if (android.os.Build.VERSION.SDK_INT < 28 || pi.signatures == null || pi.signatures.length == 0) return;
+        try {
+            Class<?> signingInfoClass = Class.forName("android.content.pm.SigningInfo");
+            Class<?> signingDetailsClass = Class.forName("android.content.pm.PackageParser$SigningDetails");
+
+            // SigningInfo has no Signature[] constructor. Build the same SigningDetails value
+            // PackageManager wraps on Android 9-14, then pass it to SigningInfo's hidden constructor.
+            java.lang.reflect.Constructor<?> detailsConstructor =
+                    signingDetailsClass.getDeclaredConstructor(Signature[].class, int.class);
+            detailsConstructor.setAccessible(true);
+            Object details = detailsConstructor.newInstance(new Object[]{pi.signatures, 3});
+
+            java.lang.reflect.Constructor<?> infoConstructor =
+                    signingInfoClass.getDeclaredConstructor(signingDetailsClass);
+            infoConstructor.setAccessible(true);
+            Object info = infoConstructor.newInstance(details);
+
+            java.lang.reflect.Field field = PackageInfo.class.getField("signingInfo");
+            field.set(pi, info);
             log("signingInfo attached");
-        } catch (Throwable e) {
-            log("signingInfo failed: " + e);
+        } catch (Throwable error) {
+            // PackageInfo.signatures remains populated for legacy and JNI callers.
+            log("signingInfo unavailable; legacy signatures retained error=" + error.getClass().getSimpleName());
         }
     }
 
     @Override public PackageInfo getPackageInfo(java.lang.String name, int flags) throws PackageManager.NameNotFoundException {
         log("getPackageInfo(" + name + ",0x" + Integer.toHexString(flags) + ")");
-        if (PKG.equals(name)) return fakePackageInfo(flags);
+        if (PKG.equals(name)) return packageInfoForCimaCloud(flags);
         return real.getPackageInfo(name, flags);
     }
 
     @Override public PackageInfo getPackageInfo(android.content.pm.VersionedPackage vp, int flags) throws PackageManager.NameNotFoundException {
         log("getPackageInfo(VP,0x" + Integer.toHexString(flags) + ")");
-        if (vp != null && PKG.equals(vp.getPackageName())) return fakePackageInfo(flags);
+        if (vp != null && PKG.equals(vp.getPackageName())) return packageInfoForCimaCloud(flags);
         return real.getPackageInfo(vp, flags);
     }
 
     @Override public ApplicationInfo getApplicationInfo(java.lang.String name, int flags) throws PackageManager.NameNotFoundException {
         log("getApplicationInfo(" + name + ",0x" + Integer.toHexString(flags) + ")");
-        if (PKG.equals(name)) return fakeAppInfo(flags);
+        if (PKG.equals(name)) return applicationInfoForCimaCloud(flags);
         return real.getApplicationInfo(name, flags);
     }
 
     @Override public List<PackageInfo> getInstalledPackages(int flags) {
         log("getInstalledPackages(0x" + Integer.toHexString(flags) + ")");
         List<PackageInfo> list = new ArrayList<>(real.getInstalledPackages(flags));
-        list.add(fakePackageInfo(flags));
+        boolean hasCimaCloud = false;
+        for (PackageInfo info : list) {
+            if (info != null && PKG.equals(info.packageName)) {
+                hasCimaCloud = true;
+                break;
+            }
+        }
+        if (!hasCimaCloud) list.add(fakePackageInfo(flags));
         return list;
     }
 
     @Override public List<ApplicationInfo> getInstalledApplications(int flags) {
         log("getInstalledApplications(0x" + Integer.toHexString(flags) + ")");
         List<ApplicationInfo> list = new ArrayList<>(real.getInstalledApplications(flags));
-        list.add(fakeAppInfo(flags));
+        boolean hasCimaCloud = false;
+        for (ApplicationInfo info : list) {
+            if (info != null && PKG.equals(info.packageName)) {
+                hasCimaCloud = true;
+                break;
+            }
+        }
+        if (!hasCimaCloud) list.add(fakeAppInfo(flags));
         return list;
     }
 

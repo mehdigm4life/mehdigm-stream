@@ -685,7 +685,7 @@ class CimaCloud : MainAPI() {
         }
 
         val resourceKind = serversApiPath.substringBefore('/')
-        Log.i(LINK_LOG_TAG, "loadLinks: fetching server list for $resourceKind")
+        Log.i(LINK_LOG_TAG, "loadLinks: fetching server list for $resourceKind route=$serversApiPath")
         val root = CimaCloudCrypto.apiGet(serversApiPath)
         if (root == null) {
             Log.w(LINK_LOG_TAG, "loadLinks: server API returned no JSON for $resourceKind")

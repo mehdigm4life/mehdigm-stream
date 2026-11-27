@@ -2,7 +2,7 @@ import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 39
+version = 40
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"
