@@ -40,7 +40,10 @@ internal object AnimeDayCrypto {
     private const val DEFAULT_HTML_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/html_extractor.php"
     private const val DEFAULT_ADVANCED_EXTRACTOR_URL = "https://cloud-day.online/cimacloud/advanced_extractor.php"
 
-    private val CONFIG_WORKER_URLS = listOf(
+    // The official v3.8 client fetches this config directly from the API host; keep the worker
+    // only as a fallback in case the official config endpoint is temporarily unreachable.
+    private val CONFIG_URLS = listOf(
+        "$DEFAULT_API_BASE/json/config-3.8.json",
         "https://backup-animeday.animegateshorts.workers.dev/",
     )
 
@@ -103,12 +106,11 @@ internal object AnimeDayCrypto {
     }
 
     private suspend fun fetchRemoteConfig(): ConfigEndpoints? = withContext(Dispatchers.IO) {
-        for (workerUrl in CONFIG_WORKER_URLS) {
+        for (configUrl in CONFIG_URLS) {
             try {
                 val req = Request.Builder()
-                    .url(workerUrl)
+                    .url(configUrl)
                     .header("User-Agent", APP_USER_AGENT)
-                    .header("Accept", "application/json")
                     .build()
                 val text = httpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@use null
@@ -181,7 +183,7 @@ internal object AnimeDayCrypto {
         }
         return try {
             NativeLib.secureId(context)?.takeIf { it.isNotBlank() }?.also {
-                Log.i(API_LOG_TAG, "native secure token generated resource=$resource")
+                Log.i(API_LOG_TAG, "native secure token generated resource=$resource length=${it.length}")
             } ?: run {
                 Log.w(API_LOG_TAG, "native secure token unavailable resource=$resource")
                 null
@@ -219,52 +221,72 @@ internal object AnimeDayCrypto {
     }
 
     /**
-     * Executes an authenticated GET request against the AnimeDay v3.8 API and transparently
-     * unwraps raw Base64 ciphertexts, encrypted envelopes, or plain JSON responses.
+     * Executes a v3.8 GET using the route-specific headers observed in the official AnimeDay HAR.
+     * Server-list responses are encrypted with the key carried by `cloudflare-id`; other routes
+     * return plain JSON and must not receive that header.
      */
     suspend fun apiGet(pathOrUrl: String): JSONObject? = withContext(Dispatchers.IO) {
         val resource = apiResourceKind(pathOrUrl)
-        val secureToken = buildSecureToken(resource) ?: return@withContext null
+        val auth = AnimeDayApiRequestPolicy.forRequest("GET", pathOrUrl)
+        val secureToken = if (auth.useFirebaseId) {
+            buildSecureToken(resource) ?: return@withContext null
+        } else {
+            null
+        }
         val cfg = resolveConfig()
         val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
-        val (cfId, key) = generateCloudflarePair()
-        Log.i(API_LOG_TAG, "API request method=GET route=${safeApiRoute(pathOrUrl)}")
-        val req = Request.Builder()
+        val (cfId, key) = if (auth.useCloudflareId) generateCloudflarePair() else ("" to "")
+        val route = safeApiRoute(pathOrUrl)
+        Log.i(
+            API_LOG_TAG,
+            "API request method=GET route=$route firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
+        )
+        val request = Request.Builder()
             .url(fullUrl)
             .header("User-Agent", APP_USER_AGENT)
-            .header("Accept", "application/json, text/plain, */*")
-            .header("cloudflare-id", cfId)
-            .header("firebase_id", secureToken)
-            .get()
-            .build()
-        executeAndUnwrap(req, key)
+        if (secureToken != null) request.header("firebase_id", secureToken)
+        if (auth.useCloudflareId) request.header("cloudflare-id", cfId)
+        val response = executeAndUnwrap(request.get().build(), key)
+        if (response != null) {
+            val keys = response.keys().asSequence().sorted().joinToString(",")
+            Log.i(API_LOG_TAG, "API response decoded method=GET route=$route keys=$keys")
+        }
+        response
     }
 
-    /**
-     * Executes an authenticated form-encoded POST request against the AnimeDay v3.8 API and
-     * transparently unwraps encrypted or plain JSON payloads.
-     */
+    /** Executes the form-encoded POST routes using the official client's route auth policy. */
     suspend fun apiPost(pathOrUrl: String, formFields: Map<String, String>): JSONObject? =
         withContext(Dispatchers.IO) {
             val resource = apiResourceKind(pathOrUrl)
-            val secureToken = buildSecureToken(resource) ?: return@withContext null
+            val auth = AnimeDayApiRequestPolicy.forRequest("POST", pathOrUrl)
+            val secureToken = if (auth.useFirebaseId) {
+                buildSecureToken(resource) ?: return@withContext null
+            } else {
+                null
+            }
             val cfg = resolveConfig()
             val fullUrl = resolveApiUrl(cfg.apiRoot, pathOrUrl)
-            val (cfId, key) = generateCloudflarePair()
+            val (cfId, key) = if (auth.useCloudflareId) generateCloudflarePair() else ("" to "")
             val formBuilder = FormBody.Builder()
             for ((k, v) in formFields) {
                 formBuilder.add(k, v)
             }
-            Log.i(API_LOG_TAG, "API request method=POST route=${safeApiRoute(pathOrUrl)}")
-            val req = Request.Builder()
+            val route = safeApiRoute(pathOrUrl)
+            Log.i(
+                API_LOG_TAG,
+                "API request method=POST route=$route firebase=${auth.useFirebaseId} cloudflare=${auth.useCloudflareId}",
+            )
+            val request = Request.Builder()
                 .url(fullUrl)
                 .header("User-Agent", APP_USER_AGENT)
-                .header("Accept", "application/json, text/plain, */*")
-                .header("cloudflare-id", cfId)
-                .header("firebase_id", secureToken)
-                .post(formBuilder.build())
-                .build()
-            executeAndUnwrap(req, key)
+            if (secureToken != null) request.header("firebase_id", secureToken)
+            if (auth.useCloudflareId) request.header("cloudflare-id", cfId)
+            val response = executeAndUnwrap(request.post(formBuilder.build()).build(), key)
+            if (response != null) {
+                val keys = response.keys().asSequence().sorted().joinToString(",")
+                Log.i(API_LOG_TAG, "API response decoded method=POST route=$route keys=$keys")
+            }
+            response
         }
 
     private fun executeAndUnwrap(request: Request, key: String): JSONObject? {

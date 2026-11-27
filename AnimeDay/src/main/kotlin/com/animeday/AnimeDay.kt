@@ -406,7 +406,10 @@ class AnimeDay : MainAPI() {
         val root = AnimeDayCrypto.apiGet("movie/$movieId") ?: return null
         val m = root.optJSONObject("movie") ?: root
         val title = m.optString("name").ifBlank { m.optString("title") }.trim()
-        if (title.isEmpty()) return null
+        if (title.isEmpty()) {
+            Log.w(LINK_LOG_TAG, "loadMovieDetail: response has no title movieId=$movieId")
+            return null
+        }
 
         val canonicalUrl = "$mainUrl/movie/$movieId"
         val serversDataUrl = "$mainUrl/movie/$movieId/servers"
@@ -454,7 +457,14 @@ class AnimeDay : MainAPI() {
         val title = s?.optString("name")?.ifBlank { s.optString("title") }?.trim()
             .orEmpty()
             .ifBlank { inferTitleFromSeasons(seasonsArr) }
-        if (title.isEmpty()) return@coroutineScope null
+        if (title.isEmpty()) {
+            Log.w(
+                LINK_LOG_TAG,
+                "loadSeriesDetail: no usable title seriesId=$seriesId detail=${detailRoot != null} " +
+                    "episodes=${epRoot != null} seasons=${seasonsArr?.length() ?: 0}",
+            )
+            return@coroutineScope null
+        }
 
         val canonicalUrl = "$mainUrl/series/$seriesId"
         val poster = normalizeImageUrl(s?.optString("poster"))
