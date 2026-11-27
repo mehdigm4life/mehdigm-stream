@@ -52,11 +52,18 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
           import subprocess
 
           log = Path("gradle.log")
-          text = log.read_text(encoding="utf-8", errors="replace")[-12000:] if log.exists() else "Gradle log was not created."
+          lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
+          diagnostics = [line for line in lines if (
+              "MySeed.kt:" in line or "MySeedParserTest.kt:" in line or
+              re.search(r"(?i)(^e:\s|error:|unresolved reference|type mismatch|expecting|overload resolution ambiguity|cannot infer)", line)
+          )]
+          diagnostic_text = "\n".join(diagnostics[-120:]) or "No compiler diagnostic lines matched."
+          tail = "\n".join(lines[-120:]) or "Gradle log was not created."
           conclusion = "success" if os.environ.get("JOB_STATUS") == "success" else "failure"
           payload = {
               "name": "MySeed Gradle Log",
@@ -65,8 +72,8 @@ jobs:
               "conclusion": conclusion,
               "output": {
                   "title": f"MySeed Gradle log ({conclusion})",
-                  "summary": f"Gradle test/build job: {conclusion}",
-                  "text": f"```text\n{text}\n```",
+                  "summary": f"Gradle test/build job: {conclusion}\n\nCompiler diagnostics:\n{diagnostic_text}",
+                  "text": f"Compiler diagnostics:\n{diagnostic_text}\n\nLast Gradle lines:\n{tail}",
               },
           }
           Path("gradle-check.json").write_text(json.dumps(payload), encoding="utf-8")
