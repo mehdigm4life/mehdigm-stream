@@ -12,6 +12,7 @@ on:
     paths:
       - ".github/workflows/patch-cimacloud-mitm.yml"
       - "scripts/diagnose-cimacloud-apk.py"
+      - "scripts/resolve-mediafire-download.py"
 
 permissions:
   contents: read
@@ -73,6 +74,7 @@ jobs:
           mkdir -p "$work_dir"
           apk="$work_dir/CimaCloud_Bnhelmyy.apk"
 
+          download_method="original direct URL"
           if ! http_status="$(curl \
             --location \
             --proto '=https' \
@@ -89,9 +91,64 @@ jobs:
             --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
             --output "$apk" \
             --write-out '%{http_code}' \
-            "$apk_url")"; then
-            echo "curl could not download the APK (HTTP ${http_status:-unknown})." >&2
-            exit 1
+            "$apk_url")" || [[ "$http_status" != "200" || ! -s "$apk" ]]; then
+            echo "The supplied direct MediaFire URL did not return a valid APK (HTTP ${http_status:-unknown}); refreshing its temporary link from the same file page." >&2
+            rm -f "$apk"
+
+            mapfile -t page_info < <(python3 scripts/resolve-mediafire-download.py page-info "$apk_url")
+            if [[ "${#page_info[@]}" -ne 2 || -z "${page_info[0]}" || -z "${page_info[1]}" ]]; then
+              echo "Could not derive the stable MediaFire file page from the supplied URL." >&2
+              exit 1
+            fi
+            mediafire_page_url="${page_info[0]}"
+            mediafire_file_key="${page_info[1]}"
+            mediafire_page="$work_dir/mediafire-file-page.html"
+
+            if ! page_status="$(curl \
+              --location \
+              --proto '=https' \
+              --proto-redir '=https' \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --connect-timeout 20 \
+              --max-time 180 \
+              --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --output "$mediafire_page" \
+              --write-out '%{http_code}' \
+              "$mediafire_page_url")" || [[ "$page_status" != "200" || ! -s "$mediafire_page" ]]; then
+              echo "Could not refresh the MediaFire file page (HTTP ${page_status:-unknown})." >&2
+              exit 1
+            fi
+
+            if ! refreshed_url="$(python3 scripts/resolve-mediafire-download.py extract "$mediafire_page" "$mediafire_file_key")"; then
+              echo "MediaFire did not provide a fresh direct link for file key $mediafire_file_key." >&2
+              exit 1
+            fi
+            download_method="refreshed direct URL from the same MediaFire file page"
+            if ! http_status="$(curl \
+              --location \
+              --proto '=https' \
+              --proto-redir '=https' \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --retry-max-time 120 \
+              --connect-timeout 20 \
+              --max-time 600 \
+              --user-agent 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' \
+              --output "$apk" \
+              --write-out '%{http_code}' \
+              "$refreshed_url")"; then
+              echo "curl could not download the refreshed APK URL (HTTP ${http_status:-unknown})." >&2
+              exit 1
+            fi
           fi
 
           if [[ "$http_status" != "200" || ! -s "$apk" ]]; then
@@ -110,6 +167,7 @@ jobs:
           {
             echo "## Supplied CimaCloud APK"
             echo
+            echo "- Download method: $download_method"
             echo "- HTTP status: $http_status"
             echo "- Size: $apk_bytes bytes"
             echo "- SHA-256: \`$apk_sha256\`"
