@@ -97,31 +97,52 @@ jobs:
         shell: bash
         run: npm install --global --no-audit --no-fund apk-mitm@1.3.0
 
-      - name: Patch the APK to trust user-installed MITM certificates
+      - name: Create MITM-patched and re-sign-only diagnostic APKs
         id: patch
         shell: bash
         env:
           APK_PATH: ${{ steps.download.outputs.apk_path }}
         run: |
           set -euo pipefail
+          work_dir="$(dirname "$APK_PATH")"
+          temporary_patched="${APK_PATH%.apk}-patched.apk"
+          mitm_apk="$work_dir/CimaCloud_Bnhelmyy-mitm-patched.apk"
+          repacked_apk="$work_dir/CimaCloud_Bnhelmyy-repacked-only.apk"
+
+          # Main variant: update network security settings and disable common pinning code.
           apk-mitm "$APK_PATH"
-          patched_apk="${APK_PATH%.apk}-patched.apk"
-          if [[ ! -s "$patched_apk" ]]; then
-            echo "apk-mitm did not produce the expected patched APK." >&2
+          if [[ ! -s "$temporary_patched" ]]; then
+            echo "apk-mitm did not produce the MITM-patched APK." >&2
             exit 1
           fi
-          unzip -tq "$patched_apk" >/dev/null
-          echo "patched_apk=$patched_apk" >> "$GITHUB_OUTPUT"
-          sha256sum "$patched_apk" | tee "$patched_apk.sha256"
+          mv "$temporary_patched" "$mitm_apk"
 
-      - name: Upload patched APK artifact
+          # Control variant: apk-mitm still rebuilds and re-signs, but skips all MITM patches.
+          # Comparing launch behavior isolates patch changes from re-signing/repackaging.
+          apk-mitm --skip-patches --tmp-dir "$work_dir/apk-mitm-skip-patches" "$APK_PATH"
+          if [[ ! -s "$temporary_patched" ]]; then
+            echo "apk-mitm did not produce the re-sign-only control APK." >&2
+            exit 1
+          fi
+          mv "$temporary_patched" "$repacked_apk"
+
+          for candidate in "$mitm_apk" "$repacked_apk"; do
+            unzip -tq "$candidate" >/dev/null
+            sha256sum "$candidate" | tee "$candidate.sha256"
+          done
+          echo "mitm_apk=$mitm_apk" >> "$GITHUB_OUTPUT"
+          echo "repacked_apk=$repacked_apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload patched APK diagnostic artifact
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: CimaCloud-Bnhelmyy-apk-mitm-patched
+          name: CimaCloud-Bnhelmyy-mitm-diagnostic
           path: |
-            ${{ steps.patch.outputs.patched_apk }}
-            ${{ steps.patch.outputs.patched_apk }}.sha256
+            ${{ steps.patch.outputs.mitm_apk }}
+            ${{ steps.patch.outputs.mitm_apk }}.sha256
+            ${{ steps.patch.outputs.repacked_apk }}
+            ${{ steps.patch.outputs.repacked_apk }}.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -131,6 +152,9 @@ jobs:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          echo "## Patched APK artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo "## CimaCloud APK diagnostic artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "The artifact contains the full MITM patch and a re-sign-only control build." >> "$GITHUB_STEP_SUMMARY"
+          echo "The control still has a different APK signature, but skips apk-mitm's code and manifest patches." >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Download: $ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
