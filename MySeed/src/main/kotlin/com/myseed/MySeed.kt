@@ -1086,8 +1086,11 @@ internal object MySeedParser {
             .minOrNull()
         if (seasonLabelIndex != null) {
             val seasonLabel = text.substring(seasonLabelIndex)
+            val episodeMarker = Regex("""(?i)(?:الحلقة|الحلقه|episode|eps?)(?=[\s_-]|\d|$)""")
+                .find(seasonLabel)?.range?.first
+            val seasonOnlyLabel = seasonLabel.substring(0, episodeMarker ?: seasonLabel.length)
             for ((word, number) in arabicSeasonNumbers) {
-                if (seasonLabel.contains(word)) return number
+                if (seasonOnlyLabel.contains(word)) return number
             }
         }
         return null
@@ -1123,6 +1126,7 @@ internal object MySeedParser {
         val normalizedTitle = normalizeDigits(title).lowercase(Locale.ROOT)
         return Regex("(?i)(?:^|[-_/])s\\d{1,2}[-_]eps?\\d{1,4}(?:[-_/]|$)").containsMatchIn(path) ||
             Regex("(?i)(?:^|[-_/])(?:episode|eps?)[-_ ]?\\d{1,4}(?:[-_/]|$)").containsMatchIn(path) ||
+            Regex("""(?:^|[-_/])(?:الحلقة|الحلقه)[-_ ]?\d{1,4}(?:[-_/]|$)""").containsMatchIn(path) ||
             normalizedTitle.contains("الحلقة") || normalizedTitle.contains("episode")
     }
 
