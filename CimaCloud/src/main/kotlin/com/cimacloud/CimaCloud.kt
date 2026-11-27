@@ -1,5 +1,6 @@
 package com.cimacloud
 
+import android.util.Log
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.HomePageList
@@ -675,13 +676,29 @@ class CimaCloud : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
-        val serversApiPath = resolveServersApiPath(data) ?: return false
-        val root = CimaCloudCrypto.apiGet(serversApiPath) ?: return false
+        val serversApiPath = CimaCloudLinksData.resolveServersApiPath(data)
+        if (serversApiPath == null) {
+            val dataKind = Regex("""(?:^|/)(movie|episode|series|serie)(?:/|$)""", RegexOption.IGNORE_CASE)
+                .find(data)?.groupValues?.get(1)?.lowercase() ?: "unknown"
+            Log.w(LINK_LOG_TAG, "loadLinks: unsupported data kind=$dataKind")
+            return false
+        }
+
+        val resourceKind = serversApiPath.substringBefore('/')
+        Log.i(LINK_LOG_TAG, "loadLinks: fetching server list for $resourceKind")
+        val root = CimaCloudCrypto.apiGet(serversApiPath)
+        if (root == null) {
+            Log.w(LINK_LOG_TAG, "loadLinks: server API returned no JSON for $resourceKind")
+            return false
+        }
 
         val serversArr = root.optJSONArray("servers")
             ?: root.optJSONArray("items")
             ?: root.optJSONArray("data")
-            ?: return false
+        if (serversArr == null) {
+            Log.w(LINK_LOG_TAG, "loadLinks: response had no server array for $resourceKind")
+            return false
+        }
 
         val embedUrls = LinkedHashSet<String>()
         for (i in 0 until serversArr.length()) {
@@ -694,13 +711,22 @@ class CimaCloud : MainAPI() {
                 embedUrls.add(link)
             }
         }
-        if (embedUrls.isEmpty()) return false
+        Log.i(
+            LINK_LOG_TAG,
+            "loadLinks: server entries=${serversArr.length()} valid embeds=${embedUrls.size}",
+        )
+        if (embedUrls.isEmpty()) {
+            Log.w(LINK_LOG_TAG, "loadLinks: server list contained no HTTP embeds")
+            return false
+        }
 
-        return CimaCloudExtractors.extractAllServers(
+        val found = CimaCloudExtractors.extractAllServers(
             embedUrls = embedUrls.toList(),
             subtitleCallback = subtitleCallback,
             callback = callback,
         )
+        Log.i(LINK_LOG_TAG, "loadLinks: extraction completed found=$found")
+        return found
     }
 
     // ── Parsing & Normalization Helpers ──────────────────────────────────────
@@ -709,16 +735,6 @@ class CimaCloud : MainAPI() {
         val m = Regex("""/(movie|series|serie|episode)/(\d+)""", RegexOption.IGNORE_CASE).find(url)
             ?: return null
         return m.groupValues[1].lowercase() to m.groupValues[2]
-    }
-
-    private fun resolveServersApiPath(data: String): String? {
-        Regex("""/(movie|episode)/(\d+)/servers""", RegexOption.IGNORE_CASE).find(data)?.let {
-            return "${it.groupValues[1].lowercase()}/${it.groupValues[2]}/servers"
-        }
-        Regex("""/(movie|episode)/(\d+)""", RegexOption.IGNORE_CASE).find(data)?.let {
-            return "${it.groupValues[1].lowercase()}/${it.groupValues[2]}/servers"
-        }
-        return null
     }
 
     private fun normalizeImageUrl(raw: String?): String? {
@@ -798,5 +814,6 @@ class CimaCloud : MainAPI() {
 
     companion object {
         private const val HOME_CACHE_TTL_MS = 5 * 60 * 1000L
+        private const val LINK_LOG_TAG = "CimaCloudLinks"
     }
 }

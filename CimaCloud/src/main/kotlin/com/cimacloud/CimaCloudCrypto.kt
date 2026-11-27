@@ -1,6 +1,8 @@
 package com.cimacloud
 
 import android.util.Base64
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +30,8 @@ import javax.crypto.spec.SecretKeySpec
  * with standard JCA primitives, supporting all CPU architectures (ARM64, ARMv7, x86, x86_64).
  */
 internal object CimaCloudCrypto {
+
+    private const val API_LOG_TAG = "CimaCloudLinks"
 
     const val APP_USER_AGENT = "okhttp/4.10.0"
     const val CANONICAL_SITE_URL = "https://www.cima-cloud.com"
@@ -230,7 +234,7 @@ internal object CimaCloudCrypto {
             .header("firebase_id", buildSecureToken())
             .get()
             .build()
-        executeAndUnwrap(req, key)
+        executeAndUnwrap(req, key, apiResourceKind(pathOrUrl))
     }
 
     /**
@@ -254,26 +258,50 @@ internal object CimaCloudCrypto {
                 .header("firebase_id", buildSecureToken())
                 .post(formBuilder.build())
                 .build()
-            executeAndUnwrap(req, key)
+            executeAndUnwrap(req, key, apiResourceKind(pathOrUrl))
         }
 
-    private fun executeAndUnwrap(request: Request, key: String): JSONObject? {
+    private fun executeAndUnwrap(request: Request, key: String, resource: String): JSONObject? {
         return try {
             val rawBody = httpClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return null
+                if (!resp.isSuccessful) {
+                    Log.w(
+                        API_LOG_TAG,
+                        "API HTTP status=${resp.code} method=${request.method} resource=$resource",
+                    )
+                    return null
+                }
                 resp.body?.string()
-            }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            }?.trim()?.takeIf { it.isNotEmpty() } ?: run {
+                Log.w(API_LOG_TAG, "API response was empty method=${request.method} resource=$resource")
+                return null
+            }
 
             // Case 1: Raw Base64 ciphertext body (used by /movie/{id}/servers & /episode/{id}/servers)
             if (!rawBody.startsWith("{") && !rawBody.startsWith("[")) {
-                val decryptedText = decryptResponse(rawBody, key)?.trim() ?: return null
+                val decryptedText = decryptResponse(rawBody, key)?.trim()
+                if (decryptedText == null) {
+                    Log.w(API_LOG_TAG, "API response decryption failed method=${request.method} resource=$resource")
+                    return null
+                }
                 return when {
                     decryptedText.startsWith("{") -> {
-                        val obj = safeJsonObject(decryptedText) ?: return null
-                        if (obj.optBoolean("blocked", false)) null else (obj.optJSONObject("data") ?: obj)
+                        val obj = safeJsonObject(decryptedText)
+                        if (obj == null) {
+                            Log.w(API_LOG_TAG, "Decrypted API response was invalid JSON resource=$resource")
+                            null
+                        } else if (obj.optBoolean("blocked", false)) {
+                            Log.w(API_LOG_TAG, "API response was blocked resource=$resource")
+                            null
+                        } else {
+                            obj.optJSONObject("data") ?: obj
+                        }
                     }
                     decryptedText.startsWith("[") -> JSONObject().put("items", JSONArray(decryptedText))
-                    else -> null
+                    else -> {
+                        Log.w(API_LOG_TAG, "Decrypted API response had unexpected format resource=$resource")
+                        null
+                    }
                 }
             }
 
@@ -282,27 +310,59 @@ internal object CimaCloudCrypto {
             }
 
             // Case 2 & 3: JSON envelope (either encrypted data field or plain JSON response)
-            val outer = safeJsonObject(rawBody) ?: return null
-            if (outer.optBoolean("blocked", false)) return null
+            val outer = safeJsonObject(rawBody)
+            if (outer == null) {
+                Log.w(API_LOG_TAG, "API response was invalid JSON method=${request.method} resource=$resource")
+                return null
+            }
+            if (outer.optBoolean("blocked", false)) {
+                Log.w(API_LOG_TAG, "API response was blocked resource=$resource")
+                return null
+            }
 
             if (outer.optBoolean("encrypted", false)) {
                 val encStr = outer.optString("data", "")
                 if (encStr.isNotBlank()) {
-                    val decryptedText = decryptResponse(encStr, key)?.trim() ?: return null
+                    val decryptedText = decryptResponse(encStr, key)?.trim()
+                    if (decryptedText == null) {
+                        Log.w(API_LOG_TAG, "Encrypted API response decryption failed resource=$resource")
+                        return null
+                    }
                     if (decryptedText.startsWith("{")) {
-                        return safeJsonObject(decryptedText)
+                        val decrypted = safeJsonObject(decryptedText)
+                        if (decrypted == null) {
+                            Log.w(API_LOG_TAG, "Decrypted API response was invalid JSON resource=$resource")
+                        }
+                        return decrypted
                     } else if (decryptedText.startsWith("[")) {
                         return JSONObject().put("items", JSONArray(decryptedText))
                     }
+                    Log.w(API_LOG_TAG, "Decrypted API response had unexpected format resource=$resource")
+                    return null
                 }
+                Log.w(API_LOG_TAG, "Encrypted API response had no data resource=$resource")
             }
 
             outer.optJSONObject("data")?.let { return it }
             outer
-        } catch (_: Throwable) {
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (error: Throwable) {
+            Log.w(
+                API_LOG_TAG,
+                "API request failed method=${request.method} resource=$resource error=${error.javaClass.simpleName}",
+            )
             null
         }
     }
+
+    private fun apiResourceKind(pathOrUrl: String): String =
+        Regex("""(?:^|/)(home|section|movies|series|search|movie|episode)(?:/|[?#]|$)""", RegexOption.IGNORE_CASE)
+            .find(pathOrUrl)
+            ?.groupValues
+            ?.get(1)
+            ?.lowercase()
+            ?: "other"
 
     private fun resolveApiUrl(apiRoot: String, pathOrUrl: String): String {
         val trimmed = pathOrUrl.trim()
