@@ -1,4 +1,6 @@
-version = 29
+import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
+
+version = 30
 
 cloudstream {
     description = "AnimeDay — أنمي وكرتون مدبلج ومترجم"
@@ -19,4 +21,16 @@ cloudstream {
 
 android {
     namespace = "com.animeday"
+}
+
+tasks.matching { it.name == "make" }.configureEach {
+    (this as org.gradle.api.tasks.bundling.Zip).from("src/main/jniLibs") {
+        into("lib")
+    }
+}
+
+tasks.withType<CompileDexTask>().configureEach {
+    val javaCompile = project.tasks.named("compileDebugJavaWithJavac")
+    dependsOn(javaCompile)
+    input.from(javaCompile)
 }
