@@ -13,6 +13,7 @@ on:
       - ".github/workflows/patch-cimacloud-mitm.yml"
       - "scripts/diagnose-cimacloud-apk.py"
       - "scripts/resolve-mediafire-download.py"
+      - "scripts/inspect-cimacloud-apk-context.py"
 
 permissions:
   contents: read
@@ -283,6 +284,16 @@ jobs:
 
           echo "decoded_root=$decoded_root" >> "$GITHUB_OUTPUT"
           echo "report_dir=$report_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect app-specific Smali and native code paths
+        shell: bash
+        env:
+          DECODED_ROOT: ${{ steps.decode.outputs.decoded_root }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/cimacloud-focused-code.json"
+          python3 scripts/inspect-cimacloud-apk-context.py "$DECODED_ROOT/repacked-only" | tee "$report"
+          sed '/^::notice /d' "$report" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compare manifests, DEX, native libraries, and integrity indicators
         id: analyze

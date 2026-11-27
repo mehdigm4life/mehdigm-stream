@@ -554,7 +554,7 @@ def emit_github_notices(report: dict[str, object]) -> None:
                 if source_manifest.get(key) != manifest.get(key)
             ) if label != "source" else [],
             "smali_indicators": smali_hits,
-            "native_string_indicators": native_hits[:12],
+            "native_string_indicators": native_hits,
         }
         encoded = json.dumps(report_summary, separators=(",", ":"), ensure_ascii=True)
         encoded = encoded.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
