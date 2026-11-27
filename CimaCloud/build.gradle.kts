@@ -1,7 +1,8 @@
+import com.lagradost.cloudstream3.gradle.tasks.CompileDexTask
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 
-version = 38
+version = 39
 
 cloudstream {
     description = "CimaCloud — مباشر، مدبلج، مترجم"
@@ -26,6 +27,18 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+}
+
+tasks.matching { it.name == "make" }.configureEach {
+    (this as org.gradle.api.tasks.bundling.Zip).from("src/main/jniLibs") {
+        into("lib")
+    }
+}
+
+tasks.withType<CompileDexTask>().configureEach {
+    val javaCompile = project.tasks.named("compileDebugJavaWithJavac")
+    dependsOn(javaCompile)
+    input.from(javaCompile)
 }
 
 dependencies {
