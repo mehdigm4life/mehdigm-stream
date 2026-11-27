@@ -339,3 +339,36 @@ jobs:
           echo "## Forensic diagnostic artifact" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Download: $ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+
+  replay-previous-report:
+    name: Replay previous successful static findings
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out analysis script
+        uses: actions/checkout@v5
+
+      - name: Download the previous successful forensic artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CimaCloud-Bnhelmyy-forensic-diagnostic
+          repository: ${{ github.repository }}
+          run-id: "45973002462"
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous-cimacloud-forensic
+
+      - name: Publish previous report findings as check annotations
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_root="$RUNNER_TEMP/previous-cimacloud-forensic"
+          report_json="$(find "$report_root" -type f -name report.json -print -quit)"
+          if [[ -z "$report_json" ]]; then
+            echo "Could not locate report.json in the previous forensic artifact." >&2
+            find "$report_root" -maxdepth 5 -type f -print >&2
+            exit 1
+          fi
+          python3 scripts/diagnose-cimacloud-apk.py --report-json "$report_json" | tee "$RUNNER_TEMP/previous-cimacloud-summary.md"
+          cat "$RUNNER_TEMP/previous-cimacloud-summary.md" >> "$GITHUB_STEP_SUMMARY"

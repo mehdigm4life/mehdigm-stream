@@ -571,15 +571,26 @@ def main() -> int:
     parser.add_argument("--apk", action="append", default=[], metavar="LABEL=PATH", help="APK to compare (repeatable; source is required)")
     parser.add_argument("--decoded", action="append", default=[], metavar="LABEL=DIR", help="apktool output directory corresponding to a variant")
     parser.add_argument("--signature", action="append", default=[], metavar="LABEL=PATH", help="apksigner output file corresponding to a variant")
-    parser.add_argument("--output-dir", required=True, type=Path, help="directory for report.json and summary.md")
+    parser.add_argument("--output-dir", type=Path, help="directory for report.json and summary.md")
+    parser.add_argument("--report-json", type=Path, help="re-emit notices from an existing diagnostic report")
     args = parser.parse_args()
 
     try:
+        if args.report_json:
+            report = json.loads(args.report_json.read_text(encoding="utf-8"))
+            if not isinstance(report, dict) or "apks" not in report:
+                raise ValueError("the JSON file is not a CimaCloud APK diagnostic report")
+            print(markdown_report(report))
+            emit_github_notices(report)
+            return 0
+
+        if args.output_dir is None:
+            parser.error("--output-dir is required unless --report-json is used")
         apks = parse_pairs(args.apk, "--apk")
         decoded = parse_pairs(args.decoded, "--decoded")
         signatures = parse_pairs(args.signature, "--signature")
         report = build_report(apks, decoded, signatures)
-    except (BadZipFile, FileNotFoundError, OSError, ValueError, ET.ParseError) as error:
+    except (BadZipFile, FileNotFoundError, OSError, ValueError, ET.ParseError, json.JSONDecodeError) as error:
         print(f"APK diagnostic failed: {type(error).__name__}: {error}", file=sys.stderr)
         return 1
 
