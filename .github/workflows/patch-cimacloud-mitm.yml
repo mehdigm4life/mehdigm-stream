@@ -1,16 +1,17 @@
-name: Patch CimaCloud APK for HTTPS Inspection
+name: Diagnose and patch CimaCloud APK
 
 on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: "Direct HTTPS MediaFire APK URL (defaults to the link supplied for this run)"
+        description: "Direct HTTPS MediaFire APK URL (defaults to the supplied APK)"
         required: false
         type: string
         default: "https://download946.mediafire.com/nmnndf34oawgzYyQ5L1yJHHvlmWbU1NvVrd7bBwp6e2VjAS10B-MFpHB4e0euUn3ba8e0jvjaEV13FqWKFOibpSnq7NRzXJ2MsLH8CbNvcNyxffO08gJSqgyXfKMVZa4ZeJ8E6u9_BeUG9khouoLQSd6gkhIDsgXUyFME-WZB4LdfQ/3fhkumf5jnfl8io/Cima+Cloud_Bnhelmyy.apk"
   push:
     paths:
       - ".github/workflows/patch-cimacloud-mitm.yml"
+      - "scripts/diagnose-cimacloud-apk.py"
 
 permissions:
   contents: read
@@ -18,8 +19,11 @@ permissions:
 jobs:
   patch-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
+      - name: Check out forensic analysis script
+        uses: actions/checkout@v5
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -30,6 +34,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Set up Android SDK signing tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Apktool, ELF inspection tools, and Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes apktool binutils
+          sdkmanager --install "build-tools;35.0.0"
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+          apktool --version
+          apksigner version
+          zipalign -h >/dev/null 2>&1 || true
+          readelf --version | head -n 1
 
       - name: Download the supplied CimaCloud APK with curl
         id: download
@@ -47,7 +67,7 @@ jobs:
             exit 1
           fi
 
-          work_dir="$RUNNER_TEMP/cima-cloud-mitm"
+          work_dir="$RUNNER_TEMP/cima-cloud-forensics"
           mkdir -p "$work_dir"
           apk="$work_dir/CimaCloud_Bnhelmyy.apk"
 
@@ -86,7 +106,7 @@ jobs:
           echo "apk_path=$apk" >> "$GITHUB_OUTPUT"
           echo "work_dir=$work_dir" >> "$GITHUB_OUTPUT"
           {
-            echo "## CimaCloud APK download"
+            echo "## Supplied CimaCloud APK"
             echo
             echo "- HTTP status: $http_status"
             echo "- Size: $apk_bytes bytes"
@@ -97,7 +117,7 @@ jobs:
         shell: bash
         run: npm install --global --no-audit --no-fund apk-mitm@1.3.0
 
-      - name: Create MITM-patched and re-sign-only diagnostic APKs
+      - name: Build MITM-patched and re-sign-only variants
         id: patch
         shell: bash
         env:
@@ -109,7 +129,7 @@ jobs:
           mitm_apk="$work_dir/CimaCloud_Bnhelmyy-mitm-patched.apk"
           repacked_apk="$work_dir/CimaCloud_Bnhelmyy-repacked-only.apk"
 
-          # Main variant: update network security settings and disable common pinning code.
+          # The first variant changes TLS trust/pinning behavior and is re-signed.
           apk-mitm "$APK_PATH"
           if [[ ! -s "$temporary_patched" ]]; then
             echo "apk-mitm did not produce the MITM-patched APK." >&2
@@ -117,8 +137,7 @@ jobs:
           fi
           mv "$temporary_patched" "$mitm_apk"
 
-          # Control variant: apk-mitm still rebuilds and re-signs, but skips all MITM patches.
-          # Comparing launch behavior isolates patch changes from re-signing/repackaging.
+          # Control: rebuild and re-sign the exact same source but skip MITM edits.
           apk-mitm --skip-patches --tmp-dir "$work_dir/apk-mitm-skip-patches" "$APK_PATH"
           if [[ ! -s "$temporary_patched" ]]; then
             echo "apk-mitm did not produce the re-sign-only control APK." >&2
@@ -133,28 +152,129 @@ jobs:
           echo "mitm_apk=$mitm_apk" >> "$GITHUB_OUTPUT"
           echo "repacked_apk=$repacked_apk" >> "$GITHUB_OUTPUT"
 
-      - name: Upload patched APK diagnostic artifact
+      - name: Decode APKs and collect signing and ELF metadata
+        id: decode
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+          MITM_APK: ${{ steps.patch.outputs.mitm_apk }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
+        run: |
+          set -euo pipefail
+          work_dir="$(dirname "$APK_PATH")"
+          decoded_root="$work_dir/apktool-decoded"
+          report_dir="$work_dir/forensic-report"
+          mkdir -p "$decoded_root" "$report_dir/signatures" "$report_dir/elf"
+
+          declare -A apks=(
+            ["source"]="$APK_PATH"
+            ["repacked-only"]="$REPACKED_APK"
+            ["mitm"]="$MITM_APK"
+          )
+          decode_one() {
+            local label="$1"
+            local apk="$2"
+            local output="$decoded_root/$label"
+            local log="$report_dir/apktool-$label.log"
+            rm -rf "$output"
+            if apktool d --force --output "$output" "$apk" >"$log" 2>&1; then
+              echo "Apktool decoded $label successfully."
+            else
+              echo "Full Apktool decode failed for $label; retrying with resources disabled." >&2
+              rm -rf "$output"
+              if apktool d --force --no-res --output "$output" "$apk" >>"$log" 2>&1; then
+                echo "Apktool fallback decode succeeded for $label."
+              else
+                echo "Apktool could not decode $label; preserving its error log and continuing static ZIP analysis." >&2
+              fi
+            fi
+          }
+
+          for label in source repacked-only mitm; do
+            apk="${apks[$label]}"
+            decode_one "$label" "$apk"
+
+            sig_report="$report_dir/signatures/$label.txt"
+            if apksigner verify --verbose --print-certs "$apk" >"$sig_report" 2>&1; then
+              printf '\nRESULT=PASS\n' >> "$sig_report"
+            else
+              printf '\nRESULT=FAIL\n' >> "$sig_report"
+            fi
+
+            if ! zipalign -c -v 4 "$apk" >"$report_dir/signatures/$label-zipalign.txt" 2>&1; then
+              echo "ZIP alignment check did not pass for $label." >> "$report_dir/signatures/$label-zipalign.txt"
+            fi
+
+            decoded="$decoded_root/$label"
+            if [[ -d "$decoded/lib" ]]; then
+              while IFS= read -r -d '' library; do
+                relative="${library#"$decoded"/}"
+                safe_name="$(printf '%s' "$relative" | tr '/ ' '__')"
+                {
+                  echo "APK variant: $label"
+                  echo "Library path: $relative"
+                  echo "SHA-256: $(sha256sum "$library" | cut -d ' ' -f 1)"
+                  echo
+                  readelf -h -d -n -Ws "$library" || true
+                } > "$report_dir/elf/$label-$safe_name.txt"
+              done < <(find "$decoded/lib" -type f -name '*.so' -print0)
+            fi
+          done
+
+          echo "decoded_root=$decoded_root" >> "$GITHUB_OUTPUT"
+          echo "report_dir=$report_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Compare manifests, DEX, native libraries, and integrity indicators
+        id: analyze
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.download.outputs.apk_path }}
+          MITM_APK: ${{ steps.patch.outputs.mitm_apk }}
+          REPACKED_APK: ${{ steps.patch.outputs.repacked_apk }}
+          DECODED_ROOT: ${{ steps.decode.outputs.decoded_root }}
+          REPORT_DIR: ${{ steps.decode.outputs.report_dir }}
+        run: |
+          set -euo pipefail
+          python3 scripts/diagnose-cimacloud-apk.py \
+            --apk "source=$APK_PATH" \
+            --apk "repacked-only=$REPACKED_APK" \
+            --apk "mitm=$MITM_APK" \
+            --decoded "source=$DECODED_ROOT/source" \
+            --decoded "repacked-only=$DECODED_ROOT/repacked-only" \
+            --decoded "mitm=$DECODED_ROOT/mitm" \
+            --signature "source=$REPORT_DIR/signatures/source.txt" \
+            --signature "repacked-only=$REPORT_DIR/signatures/repacked-only.txt" \
+            --signature "mitm=$REPORT_DIR/signatures/mitm.txt" \
+            --output-dir "$REPORT_DIR/analysis"
+
+          cat "$REPORT_DIR/analysis/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "## Detailed forensic files"
+            echo
+            echo "The attached diagnostic artifact includes JSON findings, Apktool decode logs, apksigner/zipalign results, and ELF headers/dependencies/symbol tables for each native library."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK variants and forensic report
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: CimaCloud-Bnhelmyy-mitm-diagnostic
+          name: CimaCloud-Bnhelmyy-forensic-diagnostic
           path: |
             ${{ steps.patch.outputs.mitm_apk }}
             ${{ steps.patch.outputs.mitm_apk }}.sha256
             ${{ steps.patch.outputs.repacked_apk }}
             ${{ steps.patch.outputs.repacked_apk }}.sha256
+            ${{ steps.decode.outputs.report_dir }}/
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish the artifact download link in the run summary
+      - name: Publish artifact link
         shell: bash
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          echo "## CimaCloud APK diagnostic artifacts" >> "$GITHUB_STEP_SUMMARY"
-          echo >> "$GITHUB_STEP_SUMMARY"
-          echo "The artifact contains the full MITM patch and a re-sign-only control build." >> "$GITHUB_STEP_SUMMARY"
-          echo "The control still has a different APK signature, but skips apk-mitm's code and manifest patches." >> "$GITHUB_STEP_SUMMARY"
+          echo "## Forensic diagnostic artifact" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Download: $ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
