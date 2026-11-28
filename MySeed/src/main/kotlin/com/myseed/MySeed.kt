@@ -122,29 +122,10 @@ class MySeed : MainAPI() {
             }.awaitAll().flatten()
         }
 
-        // MySeed's search mixes show, season, and episode pages. Keep the exact result URL here:
-        // season slugs can contain extra suffixes that cannot safely be truncated. load() follows
-        // the page's own breadcrumb to the canonical series page and falls back to slug parsing.
-        val canonicalCards = cards.map { card ->
-            if (card.kind == MySeedContentKind.MOVIE) {
-                card
-            } else {
-                card.copy(
-                    title = MySeedParser.seriesTitleFromEpisode(card.title).ifBlank { card.title },
-                    kind = MySeedContentKind.SERIES
-                )
-            }
-        }
-        val uniqueCards = LinkedHashMap<String, MySeedCatalogCard>()
-        canonicalCards.forEach { card ->
-            val key = if (card.kind == MySeedContentKind.MOVIE) {
-                "movie:${card.url}"
-            } else {
-                "series:${card.title.trim().lowercase(Locale.ROOT)}"
-            }
-            uniqueCards.putIfAbsent(key, card)
-        }
-        return uniqueCards.values.mapNotNull(::toSearchResponse)
+        // MySeed's search mixes show, season, and episode pages. Normalize all three to a show
+        // identity, retain the best (canonical show) card, and leave its URL intact so load() can
+        // follow the page's breadcrumb instead of guessing away meaningful slug suffixes.
+        return MySeedParser.canonicalizeSearchCards(cards).mapNotNull(::toSearchResponse)
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -816,6 +797,24 @@ internal object MySeedParser {
         "director", "escritor", "producer", "tag", "author", "wp-json", "wp-content"
     )
 
+    private val seriesChildMarker = Regex(
+        """(?i)(?:[-_ ](?:الموسم|موسم|season)(?:[-_ ]|(?=\d)|$)|[-_]s\d{1,2}(?=[-_\se]|$)|[-_ ](?:الحلقة|الحلقه|episode|eps?|ep)(?:[-_ ]|\d|$))"""
+    )
+    private val seriesSlugSuffixes = listOf(
+        "مترجم-للعربية", "مترجمة-للعربية", "مدبلج-بالعربية", "مدبلجة-بالعربية",
+        "مترجم-للعربيه", "مترجمة-للعربيه", "مدبلج-بالعربيه", "مدبلجة-بالعربيه",
+        "مترجم-عربي", "مترجمة-عربي", "مدبلج-عربي", "مدبلجة-عربي",
+        "مترجم", "مترجمة", "مدبلج", "مدبلجة", "translated", "subtitled", "subbed", "dubbed"
+    )
+
+    private data class SearchCardCandidate(
+        val card: MySeedCatalogCard,
+        val seriesIdentity: String?,
+        val titleIdentity: String,
+        val isChildPage: Boolean,
+        val priority: Int
+    )
+
     private val arabicSeasonNumbers = linkedMapOf(
         "الحادي عشر" to 11,
         "الحادية عشر" to 11,
@@ -885,6 +884,75 @@ internal object MySeedParser {
         return result.values.toList()
     }
 
+    /** Convert MySeed's mixed show/season/episode search hits to one result per show. */
+    fun canonicalizeSearchCards(cards: List<MySeedCatalogCard>): List<MySeedCatalogCard> {
+        val unique = mutableListOf<SearchCardCandidate>()
+        for (card in cards) {
+            if (card.kind == MySeedContentKind.MOVIE) {
+                val existingIndex = unique.indexOfFirst {
+                    it.card.kind == MySeedContentKind.MOVIE && it.card.url == card.url
+                }
+                if (existingIndex < 0) {
+                    unique += SearchCardCandidate(card, null, "", false, 0)
+                } else {
+                    val existing = unique[existingIndex]
+                    unique[existingIndex] = existing.copy(
+                        card = existing.card.copy(
+                            posterUrl = existing.card.posterUrl ?: card.posterUrl,
+                            year = existing.card.year ?: card.year
+                        )
+                    )
+                }
+                continue
+            }
+
+            val seriesTitle = seriesTitleFromEpisode(card.title).ifBlank { card.title }
+            val normalizedCard = card.copy(title = seriesTitle, kind = MySeedContentKind.SERIES)
+            val identity = seriesIdentityKey(card.url)
+            val titleIdentity = normalizeSeriesSlug(seriesTitle)
+            val isChildPage = card.kind == MySeedContentKind.EPISODE ||
+                seasonNumber(card.url, card.title) != null || isEpisodeUrl(card.url, card.title)
+            val path = parsedPath(card.url, BASE_URL).orEmpty()
+            val isCanonicalRoot = !isChildPage && path.startsWith("/selary/", ignoreCase = true)
+            val priority = when {
+                isCanonicalRoot -> 3
+                card.kind == MySeedContentKind.SERIES && !isChildPage -> 2
+                card.kind == MySeedContentKind.SERIES -> 1
+                else -> 0
+            }
+            val candidate = SearchCardCandidate(normalizedCard, identity, titleIdentity, isChildPage, priority)
+            val duplicateIndex = unique.indexOfFirst { existing ->
+                if (existing.card.kind == MySeedContentKind.MOVIE) {
+                    false
+                } else {
+                    val sameUrlIdentity = !identity.isNullOrBlank() && identity == existing.seriesIdentity
+                    val yearsCompatible = existing.card.year == null || card.year == null || existing.card.year == card.year
+                    val sameTitleIdentity = titleIdentity.isNotBlank() && titleIdentity == existing.titleIdentity &&
+                        yearsCompatible &&
+                        (identity == null || existing.seriesIdentity == null || isChildPage || existing.isChildPage)
+                    sameUrlIdentity || sameTitleIdentity
+                }
+            }
+
+            if (duplicateIndex < 0) {
+                unique += candidate
+            } else {
+                val existing = unique[duplicateIndex]
+                val preferred = if (candidate.priority > existing.priority) candidate else existing
+                val other = if (preferred === candidate) existing else candidate
+                unique[duplicateIndex] = preferred.copy(
+                    card = preferred.card.copy(
+                        posterUrl = preferred.card.posterUrl ?: other.card.posterUrl,
+                        year = preferred.card.year ?: other.card.year
+                    ),
+                    seriesIdentity = preferred.seriesIdentity ?: other.seriesIdentity,
+                    titleIdentity = preferred.titleIdentity.ifBlank { other.titleIdentity }
+                )
+            }
+        }
+        return unique.map { it.card }
+    }
+
     fun parseDetails(document: Document, url: String): MySeedDetails {
         val title = cleanText(document.selectFirst("h1")?.text())
             .ifBlank { cleanText(document.selectFirst("meta[property=og:title]")?.attr("content")) }
@@ -949,7 +1017,15 @@ internal object MySeedParser {
      * Returns the parent /selary/ URL for a main-show, season, or episode URL. MySeed's episode
      * slugs contain the show slug followed by Arabic season/episode markers (or Sxx/Epx markers).
      */
-    fun seriesRootUrl(rawUrl: String): String? {
+    fun seriesRootUrl(rawUrl: String): String? = seriesRootSlug(rawUrl)
+        ?.let { canonicalSiteUrl("/selary/$it/") }
+
+    /** Stable show key for matching a root page to season/episode slugs with optional suffixes. */
+    fun seriesIdentityKey(rawUrl: String): String? = seriesRootSlug(rawUrl)
+        ?.let(::normalizeSeriesSlug)
+        ?.takeIf(String::isNotBlank)
+
+    private fun seriesRootSlug(rawUrl: String): String? {
         val normalized = normalizeContentUrl(rawUrl, BASE_URL) ?: return null
         val path = parsedPath(normalized, BASE_URL)?.trimEnd('/') ?: return null
         val segments = path.split('/').filter(String::isNotBlank)
@@ -957,15 +1033,11 @@ internal object MySeedParser {
         val slug = segments.lastOrNull() ?: return null
 
         val hasSeasonOrEpisode = seasonNumber(normalized) != null || isEpisodeUrl(normalized, "")
-        if (!hasSeasonOrEpisode) return if (isSeriesPath) canonicalSiteUrl(path) else null
+        if (!hasSeasonOrEpisode) return slug.takeIf { isSeriesPath }
 
-        val marker = Regex(
-            """(?i)(?:[-_ ](?:الموسم|موسم|season)(?:[-_ ]|$)|[-_]s\d{1,2}(?:[-_]|$)|[-_ ](?:الحلقة|episode|eps?|ep)(?:[-_ ]|\d|$))"""
-        ).find(slug) ?: return if (isSeriesPath) canonicalSiteUrl(path) else null
-        val rootSlug = slug.substring(0, marker.range.first).trimEnd('-', '_', ' ')
-        if (rootSlug.isBlank()) return null
-
-        return canonicalSiteUrl("/selary/$rootSlug/")
+        val marker = seriesChildMarker.find(slug)
+            ?: return slug.takeIf { isSeriesPath }
+        return slug.substring(0, marker.range.first).trimEnd('-', '_', ' ').takeIf(String::isNotBlank)
     }
 
     /** Prefer the actual series link in MySeed's breadcrumbs over guessing from unusual slugs. */
@@ -982,8 +1054,12 @@ internal object MySeedParser {
             val path = parsedPath(candidate, BASE_URL).orEmpty()
             candidate.takeIf { path.startsWith("/selary/", ignoreCase = true) && it != currentContentUrl }
         }.distinct()
-        val inferredRoot = seriesRootUrl(currentContentUrl)
-        return candidates.firstOrNull { it == inferredRoot } ?: candidates.firstOrNull()
+        val inferredIdentity = seriesIdentityKey(currentContentUrl)
+        val sameSeries = candidates.filter { seriesIdentityKey(it) == inferredIdentity && inferredIdentity != null }
+        return sameSeries.firstOrNull { seasonNumber(it) == null && !isEpisodeUrl(it, "") }
+            ?: candidates.firstOrNull { seasonNumber(it) == null && !isEpisodeUrl(it, "") }
+            ?: sameSeries.firstOrNull()
+            ?: candidates.firstOrNull()
     }
 
     private fun canonicalSiteUrl(decodedPath: String): String? {
@@ -994,17 +1070,17 @@ internal object MySeedParser {
     /** Extract this show's season pages only, and normalize MySeed's alphabetically ordered tabs. */
     fun parseSeasons(document: Document, pageUrl: String): List<MySeedSeason> {
         val base = document.baseUri().ifBlank { pageUrl.ifBlank { BASE_URL } }
-        val rootUrl = seriesRootUrl(pageUrl) ?: return emptyList()
+        val rootIdentity = seriesIdentityKey(pageUrl) ?: return emptyList()
         val seasons = LinkedHashMap<Int, MySeedSeason>()
 
         for (anchor in document.select("a[href]")) {
             val seasonUrl = normalizeContentUrl(anchor.absUrl("href").ifBlank { anchor.attr("href") }, base)
                 ?: continue
             val path = parsedPath(seasonUrl, base)?.trimEnd('/').orEmpty()
-            if (!path.startsWith("/selary/", ignoreCase = true) || seasonUrl == rootUrl) continue
+            if (!path.startsWith("/selary/", ignoreCase = true)) continue
 
             val number = seasonNumber(seasonUrl, anchorText(anchor)) ?: continue
-            if (seriesRootUrl(seasonUrl) != rootUrl) continue
+            if (seriesIdentityKey(seasonUrl) != rootIdentity) continue
             seasons.putIfAbsent(number, MySeedSeason(number, seasonUrl))
         }
 
@@ -1013,7 +1089,7 @@ internal object MySeedParser {
 
     fun parseEpisodes(document: Document, pageUrl: String): List<MySeedEpisode> {
         val base = document.baseUri().ifBlank { pageUrl.ifBlank { BASE_URL } }
-        val expectedRootUrl = seriesRootUrl(pageUrl)
+        val expectedRootIdentity = seriesIdentityKey(pageUrl)
         val explicitAnchors = document.select(
             ".episodes a[href], .episode-list a[href], .episodes-list a[href], " +
                 "[class*=episodes] a[href], [id*=episodes] a[href]"
@@ -1039,9 +1115,9 @@ internal object MySeedParser {
             val url = contentUrl(anchor.absUrl("href").ifBlank { anchor.attr("href") }, base)
                 ?: continue
             if (!isEpisodeUrl(url, anchorText(anchor))) continue
-            val candidateRootUrl = seriesRootUrl(url)
-            if (expectedRootUrl != null && candidateRootUrl != expectedRootUrl &&
-                (candidateRootUrl != null || !hasStructuredEpisodeList)
+            val candidateRootIdentity = seriesIdentityKey(url)
+            if (expectedRootIdentity != null && candidateRootIdentity != expectedRootIdentity &&
+                (candidateRootIdentity != null || !hasStructuredEpisodeList)
             ) continue
             val number = episodeNumber(url, anchorText(anchor))
             val season = seasonNumber(url, anchorText(anchor))
@@ -1607,13 +1683,15 @@ internal object MySeedParser {
 
     fun episodeNumber(url: String, label: String = ""): Int? {
         val text = normalizeDigits("${decodePath(url)} $label")
-        return Regex("(?i)(?:eps?|episode|الحلقة)\\s*[-_ ]?(\\d{1,4})")
+        return Regex("(?i)(?:eps?|episode|الحلقة|الحلقه)\\s*[-_ ]?(\\d{1,4})")
             .find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Regex("(?i)(?:^|[-_ ])s\\d{1,2}[-_ ]*e(?:ps?)?[-_ ]*(\\d{1,4})")
+                .find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 
     fun seasonNumber(url: String, label: String = ""): Int? {
         val text = normalizeDigits("${decodePath(url)} $label").replace(Regex("[-_]+"), " ")
-        Regex("(?i)(?:season|s)\\s*[-_ ]?(\\d{1,2})").find(text)
+        Regex("(?i)(?<![a-z0-9])(?:season|s)\\s*[-_ ]?(\\d{1,2})").find(text)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
         Regex("(?:الموسم|موسم)\\s*(?:رقم\\s*)?(\\d{1,2})").find(text)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
@@ -1636,13 +1714,32 @@ internal object MySeedParser {
     fun seriesTitleFromEpisode(title: String): String {
         val clean = normalizeDigits(cleanText(title))
         val withoutEpisode = clean
-            .replace(Regex("(?i)\\s*(?:الحلقة|episode|eps?|ep)\\s*[-_ ]?\\d+.*$"), "")
-            .replace(Regex("(?i)[-_]s\\d+[-_]eps?\\d+.*$"), "")
-            .trim()
+            .replace(
+                Regex("(?i)(?:^|[\\s_-])(?:s\\d{1,2}[-_\\s]*e(?:ps?)?[-_\\s]*\\d{1,4}|(?:الحلقة|الحلقه)(?:[-_\\s]*(?:\\d{1,4}|الأولى|الاولى|الأول|الاول|الثانية|الثاني|الثالثة|الثالث|الرابعة|الرابع|الخامسة|الخامس|السادسة|السادس|السابعة|السابع|الثامنة|الثامن|التاسعة|التاسع|العاشرة|العاشر))?|episode[-_\\s]*\\d{1,4}|eps?[-_\\s]*\\d{1,4}).*$"
+            ),
+            ""
+        ).trim()
         val withoutSeason = withoutEpisode
-            .replace(Regex("(?i)\\s+(?:الموسم|موسم|season)\\s+.+$"), "")
+            .replace(Regex("(?i)(?:^|[\\s_-])(?:الموسم|موسم|season)[\\s_-]*.+$"), "")
+            .replace(Regex("(?i)(?:^|[\\s_-])s\\d{1,2}(?:[-_\\s]+.*)?$"), "")
             .trim()
         return withoutSeason.ifBlank { withoutEpisode.ifBlank { clean } }
+    }
+
+    private fun normalizeSeriesSlug(value: String): String {
+        var normalized = value.lowercase(Locale.ROOT)
+            .replace('أ', 'ا')
+            .replace('إ', 'ا')
+            .replace('آ', 'ا')
+            .replace('ى', 'ي')
+            .replace(Regex("[^\\p{L}\\p{N}]+"), "-")
+            .replace(Regex("-+"), "-")
+            .trim('-')
+        while (true) {
+            val suffix = seriesSlugSuffixes.firstOrNull { normalized.endsWith("-$it") } ?: break
+            normalized = normalized.removeSuffix("-$suffix").trimEnd('-')
+        }
+        return normalized.removePrefix("مسلسل-").removePrefix("مسلسلات-").trim('-')
     }
 
     private fun classify(url: String, title: String): MySeedContentKind {
@@ -1658,7 +1755,8 @@ internal object MySeedParser {
     private fun isExplicitEpisodeTitle(title: String): Boolean {
         val normalized = normalizeDigits(title).lowercase(Locale.ROOT)
         return Regex("(?i)(?:الحلقة|الحلقه|episode|eps?)\\s*[-_ ]?\\d{1,4}")
-            .containsMatchIn(normalized)
+            .containsMatchIn(normalized) ||
+            Regex("(?i)s\\d{1,2}[-_ ]*e(?:ps?)?[-_ ]*\\d{1,4}").containsMatchIn(normalized)
     }
 
     private fun isEpisodeAnchor(anchor: org.jsoup.nodes.Element): Boolean {
@@ -1670,9 +1768,10 @@ internal object MySeedParser {
     private fun isEpisodeUrl(url: String, title: String): Boolean {
         val path = decodePath(url).lowercase(Locale.ROOT)
         val normalizedTitle = normalizeDigits(title).lowercase(Locale.ROOT)
-        return Regex("(?i)(?:^|[-_/])s\\d{1,2}[-_]eps?\\d{1,4}(?:[-_/]|$)").containsMatchIn(path) ||
+        return Regex("(?i)(?:^|[-_/])s\\d{1,2}[-_\\s]*e(?:ps?)?[-_\\s]*\\d{1,4}(?:[-_/]|$)").containsMatchIn(path) ||
             Regex("(?i)(?:^|[-_/])(?:episode|eps?)[-_ ]?\\d{1,4}(?:[-_/]|$)").containsMatchIn(path) ||
             Regex("""(?:^|[-_/])(?:الحلقة|الحلقه)[-_ ]?\d{1,4}(?:[-_/]|$)""").containsMatchIn(path) ||
+            Regex("(?i)s\\d{1,2}[-_\\s]*e(?:ps?)?[-_\\s]*\\d{1,4}").containsMatchIn(normalizedTitle) ||
             normalizedTitle.contains("الحلقة") || normalizedTitle.contains("episode")
     }
 

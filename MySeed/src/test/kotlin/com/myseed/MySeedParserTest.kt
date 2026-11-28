@@ -133,6 +133,115 @@ class MySeedParserTest {
     }
 
     @Test
+    fun translatedSuffixesDoNotBreakSeriesSeasonOrEpisodeMatching() {
+        val rootUrl = "$base/selary/مسلسل-house-of-the-dragon-مترجم/"
+        val seasonOneUrl = "$base/selary/مسلسل-house-of-the-dragon-الموسم-الاول-مترجم/"
+        val seasonTwoUrl = "$base/selary/مسلسل-house-of-the-dragon-الموسم-الثاني-مترجم/"
+        val firstEpisodeUrl = "$base/مسلسل-house-of-the-dragon-الموسم-الاول-الحلقة-1-الاولى/"
+        val secondEpisodeUrl = "$base/مسلسل-house-of-the-dragon-الموسم-الاول-الحلقة-2-الثانية/"
+        val unrelatedSeasonUrl = "$base/selary/مسلسل-another-show-الموسم-الاول-مترجم/"
+        val seriesPage = Jsoup.parse(
+            """
+            <nav class="season-tabs">
+              <a href="$seasonTwoUrl">الموسم الثاني مترجم</a>
+              <a href="$seasonOneUrl">الموسم الاول مترجم</a>
+              <a href="$unrelatedSeasonUrl">مسلسل آخر الموسم الاول مترجم</a>
+            </nav>
+            <div class="episodes-list">
+              <a href="$firstEpisodeUrl">الحلقة 1 الاولى</a>
+            </div>
+            """.trimIndent(),
+            rootUrl
+        )
+        val seasonPage = Jsoup.parse(
+            """
+            <nav class="season-tabs">
+              <a href="$seasonTwoUrl">الموسم الثاني مترجم</a>
+              <a href="$seasonOneUrl">الموسم الاول مترجم</a>
+            </nav>
+            <div class="episodes-list">
+              <a href="$firstEpisodeUrl">الحلقة 1 الاولى</a>
+              <a href="$secondEpisodeUrl">الحلقة 2 الثانية</a>
+            </div>
+            """.trimIndent(),
+            seasonOneUrl
+        )
+
+        val rootIdentity = MySeedParser.seriesIdentityKey(rootUrl)
+        val seasonsFromRoot = MySeedParser.parseSeasons(seriesPage, rootUrl)
+        val rootEpisodes = MySeedParser.parseEpisodes(seriesPage, rootUrl)
+        val seasonsFromSeasonPage = MySeedParser.parseSeasons(seasonPage, seasonOneUrl)
+        val seasonEpisodes = MySeedParser.parseEpisodes(seasonPage, seasonOneUrl)
+
+        assertEquals(rootIdentity, MySeedParser.seriesIdentityKey(seasonOneUrl))
+        assertEquals(rootIdentity, MySeedParser.seriesIdentityKey(firstEpisodeUrl))
+        assertEquals(listOf(1, 2), seasonsFromRoot.map { it.number })
+        assertEquals(listOf(1, 2), seasonsFromSeasonPage.map { it.number })
+        assertEquals(listOf(1), rootEpisodes.mapNotNull { it.number })
+        assertEquals(listOf(1, 2), seasonEpisodes.mapNotNull { it.number })
+        assertTrue(seasonEpisodes.all { it.season == 1 })
+        assertFalse(seasonsFromRoot.any { it.url == unrelatedSeasonUrl })
+    }
+
+    @Test
+    fun searchCardsFromRootSeasonAndEpisodePagesCollapseToTheCanonicalShow() {
+        val rootUrl = "$base/selary/مسلسل-outlander-blood-of-my-blood-مترجم/"
+        val seasonUrl = "$base/selary/مسلسل-outlander-blood-of-my-blood-الموسم-الاول-مترجم/"
+        val episodeUrl = "$base/مسلسل-outlander-blood-of-my-blood-الموسم-الثاني-الحلقة-2-الثانية/"
+        val cards = listOf(
+            MySeedCatalogCard(
+                title = "مسلسل Outlander Blood of my Blood الموسم الثاني الحلقة 2 الثانية مترجمة",
+                url = episodeUrl,
+                posterUrl = "https://m.myseed.tv/episode.jpg",
+                year = 2025,
+                kind = MySeedContentKind.EPISODE
+            ),
+            MySeedCatalogCard(
+                title = "مسلسل Outlander Blood of my Blood الموسم الاول مترجم",
+                url = seasonUrl,
+                posterUrl = null,
+                year = null,
+                kind = MySeedContentKind.SERIES
+            ),
+            MySeedCatalogCard(
+                title = "مسلسل Outlander Blood of my Blood مترجم",
+                url = rootUrl,
+                posterUrl = "https://m.myseed.tv/series.jpg",
+                year = 2025,
+                kind = MySeedContentKind.SERIES
+            ),
+            MySeedCatalogCard(
+                title = "فيلم Outlander 2025",
+                url = "$base/film-outlander-2025/",
+                posterUrl = null,
+                year = 2025,
+                kind = MySeedContentKind.MOVIE
+            )
+        )
+
+        val results = MySeedParser.canonicalizeSearchCards(cards)
+
+        assertEquals(2, results.size)
+        val series = results.single { it.kind == MySeedContentKind.SERIES }
+        assertEquals(rootUrl, series.url)
+        assertEquals("مسلسل Outlander Blood of my Blood مترجم", series.title)
+        assertEquals("https://m.myseed.tv/series.jpg", series.posterUrl)
+        assertEquals(MySeedContentKind.MOVIE, results.single { it.kind == MySeedContentKind.MOVIE }.kind)
+    }
+
+    @Test
+    fun compactSeasonEpisodeSlugsAreParsedWithoutLeakingSeasonIntoShowTitle() {
+        val parentUrl = "$base/selary/show-alpha/"
+        val episodeUrl = "$base/show-alpha-s02e03/"
+
+        assertEquals(2, MySeedParser.seasonNumber(episodeUrl))
+        assertEquals(3, MySeedParser.episodeNumber(episodeUrl))
+        assertNull(MySeedParser.seasonNumber("$base/selary/series-2025/"))
+        assertEquals(MySeedParser.seriesIdentityKey(parentUrl), MySeedParser.seriesIdentityKey(episodeUrl))
+        assertEquals("Show Alpha", MySeedParser.seriesTitleFromEpisode("Show Alpha S02E03"))
+    }
+
+    @Test
     fun seasonParserReturnsOnlySameShowsSeasonsInNumericOrder() {
         val slugs = listOf(
             "الاول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن",
