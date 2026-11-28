@@ -37,6 +37,29 @@ class MySeedParserTest {
     }
 
     @Test
+    fun episodeTypeWinsForEpisodeResultsUnderSelaryPaths() {
+        val document = Jsoup.parse(
+            """
+            <a href="/selary/show-alpha-s2-eps3/">
+              <img src="/episode.jpg"><h3>مسلسل Alpha الموسم الثاني الحلقة 3</h3>
+            </a>
+            <a href="/selary/show-alpha-season-2/">
+              <img src="/season.jpg"><h3>مسلسل Alpha الموسم الثاني</h3>
+            </a>
+            """.trimIndent(),
+            "$base/find/"
+        )
+
+        val episodes = MySeedParser.parseListing(document, MySeedContentKind.EPISODE)
+        val shows = MySeedParser.parseListing(document, MySeedContentKind.SERIES)
+
+        assertEquals(1, episodes.size)
+        assertTrue(episodes.single().url.endsWith("/selary/show-alpha-s2-eps3/"))
+        assertEquals(1, shows.size)
+        assertTrue(shows.single().url.endsWith("/selary/show-alpha-season-2/"))
+    }
+
+    @Test
     fun seriesDetailsExtractMetadataAndOnlyCatalogEpisodePages() {
         val document = Jsoup.parse(
             """
@@ -214,6 +237,65 @@ class MySeedParserTest {
         assertEquals(MySeedParser.seriesRootUrl(episode), MySeedParser.seriesRootUrl(unwrapped.orEmpty()))
         assertEquals(22, MySeedParser.episodeNumber(unwrapped.orEmpty()))
         assertNull(MySeedParser.episodeContentUrl("https://other.example/episode-22/"))
+    }
+
+    @Test
+    fun movieMetadataUrlsCanBuildWatchAndDownloadRoutes() {
+        val movie = "$base/film-alpha-2026/"
+
+        assertEquals(movie, MySeedParser.contentUrl(movie))
+        assertEquals("${movie}watch/", MySeedParser.routeUrl(movie, "watch"))
+        assertEquals("${movie}download/", MySeedParser.routeUrl(movie, "download"))
+        assertNull(MySeedParser.episodeContentUrl(movie))
+    }
+
+    @Test
+    fun dateBasedWweEpisodesAreKeptFromTheStructuredEpisodeList() {
+        val seriesUrl = "$base/selary/wwe-smackdown-21-08-2018/"
+        val document = Jsoup.parse(
+            """
+            <section class="episodes-list">
+              <a href="/wwe-smackdown-28-08-2018/watch/">مشاهدة الحلقة 1</a>
+              <a href="/wwe-smackdown-04-09-2018/">الحلقة 2</a>
+            </section>
+            <aside class="related">
+              <a href="/other-show-s1-eps7/">الحلقة 7</a>
+            </aside>
+            """.trimIndent(),
+            seriesUrl
+        )
+
+        val episodes = MySeedParser.parseEpisodes(document, seriesUrl)
+
+        assertEquals(listOf(1, 2), episodes.mapNotNull { it.number })
+        assertTrue(episodes.all { !it.url.endsWith("/watch/") })
+        assertTrue(episodes.none { it.url.contains("other-show") })
+    }
+
+    @Test
+    fun breadcrumbsOverrideWrongSlugDerivedSeriesRootAndNotFoundPagesAreRecognized() {
+        val seasonUrl = "$base/selary/مسلسل-rivals-الموسم-الثاني-مترجم/"
+        val seriesUrl = "$base/selary/مسلسل-rivals-مترجم/"
+        val document = Jsoup.parse(
+            """
+            <nav class="breadcrumb">
+              <a href="$seriesUrl">مسلسل Rivals مترجم</a>
+              <a href="$seasonUrl">مسلسل Rivals الموسم الثاني مترجم</a>
+            </nav>
+            <h1>مسلسل Rivals الموسم الثاني مترجم</h1>
+            """.trimIndent(),
+            seasonUrl
+        )
+        val notFound = Jsoup.parse(
+            """<html><head><title>WWE Smackdown - الصفحة غير موجودة</title></head>
+                <body><h1>الصفحة غير موجودة</h1></body></html>"""
+        )
+
+        val canonicalSeriesUrl = requireNotNull(MySeedParser.normalizeContentUrl(seriesUrl, base))
+        assertFalse(MySeedParser.seriesRootUrl(seasonUrl) == canonicalSeriesUrl)
+        assertEquals(canonicalSeriesUrl, MySeedParser.seriesRootFromBreadcrumbs(document, seasonUrl))
+        assertFalse(MySeedParser.isNotFoundPage(document))
+        assertTrue(MySeedParser.isNotFoundPage(notFound))
     }
 
     @Test
