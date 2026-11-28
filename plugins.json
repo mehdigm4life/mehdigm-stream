@@ -513,7 +513,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 5,
+        "version": 6,
         "internalName": "MySeed",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/MySeed.cs3",
         "name": "ماي سيد (MySeed)",

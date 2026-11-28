@@ -790,6 +790,7 @@ internal object MySeedParser {
     private val URL_TOKEN = Regex("""(?i)(?:https?:)?//[^\s"'<>\\]+|/(?!/)[^\s"'<>\\]+""")
     private val BASE64_TOKEN = Regex("""(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_=-]{20,}(?![A-Za-z0-9+/_=-])""")
     private val BASE64_VALUE = Regex("""^[A-Za-z0-9+/_=-]{12,}$""")
+    private val DOWNLOAD_SERVER_NAME_PREFIX = Regex("""^[\s\p{P}]*تحميل""")
 
     private val blockedPathSegments = setOf(
         "watch", "download", "l", "find", "movies", "series", "recently", "main",
@@ -1203,7 +1204,8 @@ internal object MySeedParser {
                 element.attr("data-server-name"), element.attr("data-name"), element.attr("aria-label"), element.attr("title"),
                 element.selectFirst(".server-name, .server-title, strong, b")?.text(), element.text()
             ).map(::cleanText).firstOrNull { label ->
-                label.contains("سيرفر") || label.contains("server", ignoreCase = true)
+                label.contains("سيرفر") || label.contains("server", ignoreCase = true) ||
+                    isDownloadLabeledServerName(label)
             }.orEmpty()
             val rawLink = listOf(element.attr("data-link"), element.attr("data-url"), element.attr("data-src"))
                 .firstOrNull(String::isNotBlank)
@@ -1215,6 +1217,7 @@ internal object MySeedParser {
                 rawName.contains("مباشر") || rawName.contains("direct", ignoreCase = true) ||
                 url?.let(::isMySeedDirectServerUrl) == true
             val name = rawName.ifBlank { if (isDirect) "سيرفر ماي سيد المباشر" else "سيرفر $serverId" }
+            if (isDownloadLabeledServerName(name)) return@mapNotNull null
             val qualityContext = listOf(
                 element.attr("data-qu"), element.attr("data-quality"), context,
                 element.parents().take(3).joinToString(" ") { it.attr("data-quality") }
@@ -1296,6 +1299,15 @@ internal object MySeedParser {
      */
     fun parseWatchServers(document: Document, pageUrl: String): List<MySeedServerOption> {
         val result = LinkedHashMap<String, MySeedServerOption>()
+        val downloadLabeledUrls = mutableSetOf<String>()
+        fun addWatchServerOption(option: MySeedServerOption) {
+            if (isDownloadLabeledServerName(option.name)) {
+                downloadLabeledUrls += option.url
+                result.remove(option.url)
+            } else if (option.url !in downloadLabeledUrls) {
+                addServerOption(result, option)
+            }
+        }
         val playerNodes = document.select(
             "iframe[src], video[src], video source[src], source[src], embed[src], object[data], a[href], " +
                 "meta[property*=video][content], meta[name*=video][content], meta[property*=player][content], " +
@@ -1326,7 +1338,7 @@ internal object MySeedParser {
             for (raw in values) {
                 val url = resolvePlayerTarget(raw, pageUrl) ?: continue
                 if (!isPotentialPlayerUrl(url, element, isPlayerTag)) continue
-                addServerOption(result, MySeedServerOption(
+                addWatchServerOption(MySeedServerOption(
                     name = serverName(element, context, url),
                     quality = qualityFromText(context) ?: qualityFromText(url),
                     url = url
@@ -1348,7 +1360,7 @@ internal object MySeedParser {
                 val context = scriptContext(source, raw)
                 val sourceAssignment = hasNearbyPlayerAssignment(source, raw)
                 if (!isLikelyPlayerUrl(url) && !sourceAssignment) continue
-                addServerOption(result, MySeedServerOption(
+                addWatchServerOption(MySeedServerOption(
                     name = serverName(null, context, url),
                     quality = qualityFromText(context) ?: qualityFromText(url),
                     url = url
@@ -1364,7 +1376,7 @@ internal object MySeedParser {
                     val context = scriptContext(source, encoded)
                     val sourceAssignment = hasNearbyPlayerAssignment(source, encoded)
                     if (!isLikelyPlayerUrl(url) && !sourceAssignment) continue
-                    addServerOption(result, MySeedServerOption(
+                    addWatchServerOption(MySeedServerOption(
                         name = serverName(null, context, url),
                         quality = qualityFromText(context) ?: qualityFromText(url),
                         url = url
@@ -1553,8 +1565,13 @@ internal object MySeedParser {
         }
     }
 
+    private fun isDownloadLabeledServerName(value: String): Boolean =
+        DOWNLOAD_SERVER_NAME_PREFIX.containsMatchIn(cleanText(value))
+
     private fun serverName(element: Element?, context: String, url: String): String {
         if (element != null) {
+            val visibleDownloadLabel = cleanText(element.text())
+            if (isDownloadLabeledServerName(visibleDownloadLabel)) return visibleDownloadLabel.take(60)
             for (attribute in listOf("data-server-name", "data-server", "data-name", "data-label", "aria-label", "title")) {
                 val value = cleanText(element.attr(attribute))
                 if (isUsefulServerLabel(value)) return value
@@ -1563,7 +1580,9 @@ internal object MySeedParser {
                 ?.text()?.let(::cleanText)
             if (isUsefulServerLabel(childLabel.orEmpty())) return childLabel.orEmpty()
             val ownLabel = cleanText(element.ownText())
-            if (isUsefulServerLabel(ownLabel) && (ownLabel.contains("سيرفر") || ownLabel.contains("server", true))) {
+            if (isUsefulServerLabel(ownLabel) &&
+                (ownLabel.contains("سيرفر") || ownLabel.contains("server", true) || isDownloadLabeledServerName(ownLabel))
+            ) {
                 return ownLabel.take(60)
             }
         }
