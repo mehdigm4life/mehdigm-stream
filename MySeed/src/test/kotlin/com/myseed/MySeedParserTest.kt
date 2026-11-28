@@ -291,8 +291,9 @@ class MySeedParserTest {
                 <body><h1>الصفحة غير موجودة</h1></body></html>"""
         )
 
-        assertFalse(MySeedParser.seriesRootUrl(seasonUrl) == seriesUrl)
-        assertEquals(seriesUrl, MySeedParser.seriesRootFromBreadcrumbs(document, seasonUrl))
+        val canonicalSeriesUrl = requireNotNull(MySeedParser.normalizeContentUrl(seriesUrl, base))
+        assertFalse(MySeedParser.seriesRootUrl(seasonUrl) == canonicalSeriesUrl)
+        assertEquals(canonicalSeriesUrl, MySeedParser.seriesRootFromBreadcrumbs(document, seasonUrl))
         assertFalse(MySeedParser.isNotFoundPage(document))
         assertTrue(MySeedParser.isNotFoundPage(notFound))
     }
