@@ -334,6 +334,128 @@ class MySeedParserTest {
     }
 
     @Test
+    fun watchParserKeepsMySeedPlayerEndpointsAndFiltersScriptNoise() {
+        val direct = "$base/vids.php?t=c545f3e5ae1263525d6c2846a442a5c17c478a01b3360ca753037bd02f03b02e"
+        val mirror = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val byse = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly9ieXNlemVqYXRhb3MuY29tL2UvNTR6Ymg0YWhicHY3"
+        val voe = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92b2Uuc3gvZS8wdHlvdnk4OXZ2bGI"
+        val document = Jsoup.parse(
+            """
+            <script>
+              const player = { file: "$direct" };
+              const alternate = { src: "$mirror" };
+              const alternateByse = { src: "$byse" };
+              const alternateVoe = { src: "$voe" };
+              const fakePath = "https://m.myseed.tv/film-7/watch/video/mp4";
+              const fakeQuality = "https://m.myseed.tv/film-7/watch/720";
+              const emptyWrapper = "https://m.myseed.tv/vid.php?url=";
+              const staticAsset = "https://llvpn.com/tag.min.js";
+              const regexText = "https://e/i.test(url)";
+            </script>
+            """.trimIndent(),
+            "$base/film-7-dogs-2026/watch/"
+        )
+
+        val options = MySeedParser.parseWatchServers(document, "$base/film-7-dogs-2026/watch/")
+
+        assertEquals(setOf(direct, mirror, byse, voe), options.map { it.url }.toSet())
+        assertEquals("Vidara", options.single { it.url == mirror }.name)
+        assertEquals("Byse", options.single { it.url == byse }.name)
+        assertEquals("VOE", options.single { it.url == voe }.name)
+        assertTrue(MySeedParser.isInternalPlayerUrl(mirror))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(direct))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(mirror))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(byse))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(voe))
+        assertFalse(MySeedParser.isMySeedPlayerTarget("$base/vid.php?url="))
+        assertFalse(MySeedParser.isMySeedPlayerTarget("$base/film-7-dogs-2026/watch/720"))
+        assertFalse(MySeedParser.isInternalPlayerUrl("https://other.example/vid/"))
+    }
+
+    @Test
+    fun mySeedMirrorPlayerPageExposesExternalExtractorLinks() {
+        val mirrorUrl = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val finalPlayerUrl = "$base/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val document = Jsoup.parse(
+            """<div class="player__iframe"><iframe title="Vidara" src="https://vidara.to/e/oh7IEkSdnTRR5"></iframe></div>""",
+            finalPlayerUrl
+        )
+
+        val options = MySeedParser.parseWatchServers(document, mirrorUrl)
+
+        assertTrue(MySeedParser.isInternalPlayerUrl(mirrorUrl))
+        assertEquals(1, options.size)
+        assertEquals("https://vidara.to/e/oh7IEkSdnTRR5", options.single().url)
+        assertEquals("Vidara", options.single().name)
+    }
+
+    @Test
+    fun liveFilm7DogsWatchPageExposesAllFourProviderTargets() {
+        val watchUrl = "$base/%d9%81%d9%8a%d9%84%d9%85-7-%d8%af%d9%88%d8%ac%d8%b2-2026/watch/"
+        val response = try {
+            Jsoup.connect(watchUrl)
+                .userAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                .referrer("$base/")
+                .timeout(45_000)
+                .ignoreHttpErrors(true)
+                .execute()
+        } catch (error: Exception) {
+            throw AssertionError("Live MySeed watch-page request failed: ${error.javaClass.simpleName}: ${error.message}")
+        }
+        val document = response.parse()
+        val options = MySeedParser.parseWatchServers(document, watchUrl)
+        val visibleProviders = document.select(".servers__list li[data-server]").map { it.text().trim() }.distinct()
+        val recognizedTargets = options.filter { MySeedParser.isMySeedPlayerTarget(it.url) }
+        val providerNodes = document.select(
+            "button, a, [role=button], [onclick], [data-server], [data-url], [data-src], [data-file], " +
+                "[data-source], [data-player], [data-quality], [data-link], [data-href], [class*=server], [id*=server]"
+        ).filter { element ->
+            element.text().contains("سيرفر") || listOf(
+                "data-server", "data-url", "data-src", "data-file", "data-source", "data-player", "data-link", "data-href", "onclick"
+            ).any(element::hasAttr)
+        }.take(40).joinToString("\n") { element ->
+            val attrs = listOf(
+                "id", "class", "data-server", "data-name", "data-label", "data-url", "data-src", "data-file",
+                "data-source", "data-player", "data-link", "data-href", "data-quality", "href", "src", "onclick"
+            ).mapNotNull { key ->
+                element.attr(key).takeIf(String::isNotBlank)?.let { "$key=${it.take(220)}" }
+            }.joinToString(" ")
+            "<${element.tagName()}> text=${element.text().take(100)} $attrs"
+        }
+        val playerScripts = document.select("script:not([src])").flatMap { script ->
+            val source = script.data().ifBlank { script.html() }.replace(Regex("\\s+"), " ")
+            listOf(".servers__list", "data-server", "data-link", "asPlayerFrame", "admin-ajax.php", "XMLHttpRequest", "fetch(")
+                .mapNotNull { marker ->
+                    val index = source.indexOf(marker, ignoreCase = true)
+                    if (index < 0) null else {
+                        val start = (index - 260).coerceAtLeast(0)
+                        val end = (index + 680).coerceAtMost(source.length)
+                        "$marker: ${source.substring(start, end)}"
+                    }
+                }
+        }.take(14).joinToString("\\n")
+        val parsed = options.joinToString("\n") { "${it.name} | ${it.quality}p | ${it.url}" }
+        val report = """status=${response.statusCode()} title=${document.title()}
+            |parsed providers (${options.size}):
+            |$parsed
+            |visible provider buttons: $visibleProviders
+            |recognized first-party target URLs (${recognizedTargets.size}):
+            |${recognizedTargets.joinToString("\\n") { it.url }}
+            |provider DOM:
+            |$providerNodes
+            |player scripts:
+            |$playerScripts""".trimMargin()
+
+        assertTrue("Live MySeed returned a non-success status.\n$report", response.statusCode() in 200..299)
+        assertTrue("Live watch page title did not match the selected film.\n$report", document.title().contains("7 دوجز", ignoreCase = true))
+        assertEquals("Live page should expose its four selectable watch providers.\n$report", 4, visibleProviders.size)
+        assertEquals("Live page should yield exactly four distinct valid provider targets.\n$report", 4, recognizedTargets.map { it.url }.distinct().size)
+        assertTrue("Parser returned an invalid internal player route.\n$report", options.filter { MySeedParser.isInternalPlayerUrl(it.url) }.all { MySeedParser.isMySeedPlayerTarget(it.url) })
+    }
+
+    @Test
     fun watchParserDropsMySeedVideoPageAndKeepsPlayableAlternateServer() {
         val watchUrl = "$base/episode-22/watch/"
         val document = Jsoup.parse(
