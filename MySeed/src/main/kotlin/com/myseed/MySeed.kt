@@ -560,7 +560,7 @@ class MySeed : MainAPI() {
         }
 
         if (directSources.isEmpty() && gatewayUrl != null && directMediaType(gatewayUrl) == null) {
-            var nextUrl = gatewayUrl
+            var nextUrl: String = gatewayUrl ?: return false
             var nextReferer = "$mainUrl/"
             for (hop in 0..2) {
                 val gatewayResponse = try {
