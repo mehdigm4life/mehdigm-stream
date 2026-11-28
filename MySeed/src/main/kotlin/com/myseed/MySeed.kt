@@ -325,7 +325,7 @@ class MySeed : MainAPI() {
         val emitted = mutableSetOf<String>()
         val visited = mutableSetOf<String>()
 
-        val watchDocument = getDocument(watchUrl, episodeUrl)
+        val watchDocument = getDocument(watchUrl, contentUrl)
         val watchOptions = watchDocument?.let { MySeedParser.parseWatchServers(it, watchUrl) }.orEmpty()
         var found = false
         for (option in watchOptions) {
@@ -336,7 +336,7 @@ class MySeed : MainAPI() {
 
         // Download links live on a separate /download/ page. MySeed wraps each destination in
         // /l/<base64>; the parser unwraps it before the standard CloudStream extractors run.
-        val downloadDocument = getDocument(downloadUrl, episodeUrl)
+        val downloadDocument = getDocument(downloadUrl, contentUrl)
         val downloadOptions = downloadDocument?.let { MySeedParser.parseDownloadServers(it, downloadUrl) }.orEmpty()
         for (option in downloadOptions) {
             if (resolveServerOption(option, downloadUrl, "تحميل", true, subtitleCallback, callback, emitted, visited)) {
