@@ -1099,7 +1099,7 @@ internal object MySeedParser {
         val known = listOf("سيرفر ماي سيد المباشر", "سيرفر ماي سيد", "Fastdrive", "Userload", "Uptobox")
             .firstOrNull { context.contains(it, ignoreCase = true) }
         if (known != null) return known
-        if (isMySeedPlayerUrl(url) && runCatching { URI(url).path.equals("/vids.php", ignoreCase = true) }.getOrDefault(false)) {
+        if (isInternalPlayerUrl(url) && runCatching { URI(url).path.equals("/vids.php", ignoreCase = true) }.getOrDefault(false)) {
             return "سيرفر ماي سيد المباشر"
         }
         Regex("(?i)(?:سيرفر|server)\\s*#?\\s*(\\d+)").find(context)?.groupValues?.getOrNull(1)
