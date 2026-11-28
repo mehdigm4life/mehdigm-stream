@@ -55,6 +55,7 @@ jobs:
           import re
           from pathlib import Path
           import subprocess
+          import xml.etree.ElementTree as ET
 
           log = Path("gradle.log")
           lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
@@ -62,7 +63,20 @@ jobs:
               "MySeed.kt:" in line or "MySeedParserTest.kt:" in line or
               re.search(r"(?i)(^e:\s|error:|unresolved reference|type mismatch|expecting|overload resolution ambiguity|cannot infer)", line)
           )]
+          test_failures = []
+          for report in Path("MySeed/build/test-results/testDebugUnitTest").glob("TEST-*.xml"):
+              try:
+                  root = ET.parse(report).getroot()
+              except ET.ParseError:
+                  continue
+              for case in root.iter("testcase"):
+                  for failure in list(case.findall("failure")) + list(case.findall("error")):
+                      message = failure.attrib.get("message", "").strip()
+                      test_failures.append(f"{case.attrib.get('name', 'unknown test')}: {message}")
           diagnostic_text = "\n".join(diagnostics[-120:]) or "No compiler diagnostic lines matched."
+          if test_failures:
+              diagnostic_text += "\n\nJUnit failure details:\n" + "\n".join(test_failures[-20:])
+          diagnostic_text = diagnostic_text[-12000:]
           tail = "\n".join(lines[-120:]) or "Gradle log was not created."
           conclusion = "success" if os.environ.get("JOB_STATUS") == "success" else "failure"
           payload = {
