@@ -369,8 +369,7 @@ class MySeed : MainAPI() {
             return true
         }
 
-        val uri = runCatching { URI(url) }.getOrNull()
-        val isInternalPage = uri?.host.equals("m.myseed.tv", ignoreCase = true)
+        val isInternalPage = MySeedParser.isInternalPlayerUrl(url)
         // Scrape MySeed pages only; third-party pages must go through their own extractor.
         if (isInternalPage && depth < 2) {
             val nestedDocument = getDocument(url, referer)
@@ -520,6 +519,7 @@ internal object MySeedParser {
     private const val SITE_HOST = "m.myseed.tv"
     private const val PAGE_SIZE = 20
     private const val BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    private val MYSEED_PLAYER_HOSTS = setOf(SITE_HOST, "m.myseed.pics")
 
     private val PLAYER_URL_ATTRIBUTES = listOf(
         "src", "data", "content", "data-src", "data-url", "data-file", "data-video", "data-embed", "data-player",
@@ -793,6 +793,30 @@ internal object MySeedParser {
         return "${contentUrl.trimEnd('/')}/$route/"
     }
 
+    fun isInternalPlayerUrl(rawUrl: String): Boolean {
+        val host = runCatching { URI(rawUrl).host?.lowercase(Locale.ROOT) }.getOrNull() ?: return false
+        return host in MYSEED_PLAYER_HOSTS
+    }
+
+    /** MySeed embeds providers behind its /vid(s).php and /vid/ player routes, including a mirror host. */
+    fun isMySeedPlayerTarget(rawUrl: String): Boolean {
+        val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+        if (host !in MYSEED_PLAYER_HOSTS) return false
+        val path = uri.path.orEmpty().lowercase(Locale.ROOT)
+        fun hasQueryValue(key: String): Boolean = uri.rawQuery.orEmpty().split('&').any { parameter ->
+            parameter.substringBefore('=').equals(key, ignoreCase = true) &&
+                parameter.substringAfter('=', "").isNotBlank()
+        }
+        return when (path) {
+            "/vids.php" -> hasQueryValue("t")
+            "/vid.php" -> hasQueryValue("url")
+            "/vid/" -> hasQueryValue("id")
+            else -> path.startsWith("/l/") || path.contains("/embed/") || path.contains("/player/") ||
+                Regex("\\.(?:m3u8|mpd|mp4|m4v|mkv|webm|mov|avi|ts)$").containsMatchIn(path)
+        }
+    }
+
     /**
      * Parse the selectable players from /watch/. MySeed has changed the player markup more than
      * once, so handle native media tags, server buttons carrying data-* URLs, iframe embeds, and
@@ -846,9 +870,11 @@ internal object MySeedParser {
             val playerScript = Regex("(?i)(player|server|video|source|embed|stream|file)").containsMatchIn(source)
             for (raw in extractUrlTokens(source)) {
                 val url = resolvePlayerTarget(raw, pageUrl) ?: continue
+                val path = runCatching { URI(url).path.orEmpty() }.getOrDefault("")
+                if (isStaticAsset(path) || isKnownNonMediaEndpoint(url)) continue
+                if (isInternalPlayerUrl(url) && !isMySeedPlayerTarget(url)) continue
                 val context = scriptContext(source, raw)
-                val sourceAssignment = Regex("(?i)(file|src|url|embed|player|video|server|stream)\\s*[:=(]")
-                    .containsMatchIn(context)
+                val sourceAssignment = hasNearbyPlayerAssignment(source, raw)
                 if (!isLikelyPlayerUrl(url) && !sourceAssignment) continue
                 addServerOption(result, MySeedServerOption(
                     name = serverName(null, context, url),
@@ -860,9 +886,11 @@ internal object MySeedParser {
                 for (encoded in BASE64_TOKEN.findAll(source).map { it.value }) {
                     val decoded = decodeBase64Url(encoded) ?: continue
                     val url = resolvePlayerTarget(decoded, pageUrl) ?: continue
+                    val path = runCatching { URI(url).path.orEmpty() }.getOrDefault("")
+                    if (isStaticAsset(path) || isKnownNonMediaEndpoint(url)) continue
+                    if (isInternalPlayerUrl(url) && !isMySeedPlayerTarget(url)) continue
                     val context = scriptContext(source, encoded)
-                    val sourceAssignment = Regex("(?i)(file|src|url|embed|player|video|server|stream)\\s*[:=(]")
-                        .containsMatchIn(context)
+                    val sourceAssignment = hasNearbyPlayerAssignment(source, encoded)
                     if (!isLikelyPlayerUrl(url) && !sourceAssignment) continue
                     addServerOption(result, MySeedServerOption(
                         name = serverName(null, context, url),
@@ -987,7 +1015,8 @@ internal object MySeedParser {
     private fun isPotentialPlayerUrl(url: String, element: Element, isPlayerTag: Boolean): Boolean {
         val uri = runCatching { URI(url) }.getOrNull() ?: return false
         val path = uri.path.orEmpty().lowercase(Locale.ROOT)
-        if (isStaticAsset(path)) return false
+        if (isStaticAsset(path) || isKnownNonMediaEndpoint(url)) return false
+        if (isInternalPlayerUrl(url) && !isMySeedPlayerTarget(url)) return false
         if (isPlayerTag) return true
         val relevantAttribute = PLAYER_URL_ATTRIBUTES.any { attr ->
             attr != "href" && attr != "onclick" && element.hasAttr(attr)
@@ -998,7 +1027,8 @@ internal object MySeedParser {
     private fun isLikelyPlayerUrl(url: String): Boolean {
         val uri = runCatching { URI(url) }.getOrNull() ?: return false
         val path = uri.path.orEmpty().lowercase(Locale.ROOT)
-        if (isStaticAsset(path)) return false
+        if (isStaticAsset(path) || isKnownNonMediaEndpoint(url)) return false
+        if (isInternalPlayerUrl(url)) return isMySeedPlayerTarget(url)
         return path.contains("/l/") ||
             path.contains("embed") || path.contains("player") || path.contains("video") ||
             path.contains("stream") || path.endsWith(".m3u8") || path.endsWith(".mpd") ||
@@ -1021,7 +1051,7 @@ internal object MySeedParser {
         repeat(5) { depth ->
             val node = current ?: return@repeat
             val own = listOf(
-                node.attr("data-server"), node.attr("data-quality"), node.attr("data-name"),
+                node.attr("data-server"), node.attr("data-server-name"), node.attr("data-quality"), node.attr("data-name"),
                 node.attr("aria-label"), node.attr("title"), node.attr("label"), node.attr("data-label"), node.id(), node.className(),
                 node.selectFirst(".server-name, [class*=server-name], .quality, strong, b")?.text(),
                 node.text().takeIf { it.length <= 220 }
@@ -1037,7 +1067,7 @@ internal object MySeedParser {
 
     private fun serverName(element: Element?, context: String, url: String): String {
         if (element != null) {
-            for (attribute in listOf("data-server", "data-name", "data-label", "aria-label", "title")) {
+            for (attribute in listOf("data-server-name", "data-server", "data-name", "data-label", "aria-label", "title")) {
                 val value = cleanText(element.attr(attribute))
                 if (isUsefulServerLabel(value)) return value
             }
@@ -1069,6 +1099,26 @@ internal object MySeedParser {
             (existing.quality == null && option.quality != null)
         ) {
             result[option.url] = option
+        }
+    }
+
+    private fun hasNearbyPlayerAssignment(source: String, token: String): Boolean {
+        val index = source.indexOf(token)
+        if (index < 0) return false
+        val boundary = maxOf(
+            source.lastIndexOf(';', index), source.lastIndexOf('{', index), source.lastIndexOf('}', index), index - 180
+        ).coerceAtLeast(0)
+        val prefix = source.substring(boundary, index)
+        val keys = listOf("file", "src", "url", "embed", "player", "video", "server", "stream", "iframe", "source", "sources")
+        return keys.any { key ->
+            val keyIndex = prefix.lastIndexOf(key, ignoreCase = true)
+            if (keyIndex < 0) return@any false
+            val before = prefix.getOrNull(keyIndex - 1)
+            val afterName = prefix.getOrNull(keyIndex + key.length)
+            val isWord = (before == null || !before.isLetterOrDigit()) &&
+                (afterName == null || !afterName.isLetterOrDigit())
+            val assignment = prefix.substring(keyIndex + key.length).trimStart()
+            isWord && (assignment.startsWith(":") || assignment.startsWith("="))
         }
     }
 

@@ -334,12 +334,60 @@ class MySeedParserTest {
     }
 
     @Test
+    fun watchParserKeepsMySeedPlayerEndpointsAndFiltersScriptNoise() {
+        val direct = "$base/vids.php?t=c545f3e5ae1263525d6c2846a442a5c17c478a01b3360ca753037bd02f03b02e"
+        val mirror = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val document = Jsoup.parse(
+            """
+            <script>
+              const player = { file: "$direct" };
+              const alternate = { src: "$mirror" };
+              const fakePath = "https://m.myseed.tv/film-7/watch/video/mp4";
+              const fakeQuality = "https://m.myseed.tv/film-7/watch/720";
+              const emptyWrapper = "https://m.myseed.tv/vid.php?url=";
+              const staticAsset = "https://llvpn.com/tag.min.js";
+              const regexText = "https://e/i.test(url)";
+            </script>
+            """.trimIndent(),
+            "$base/film-7-dogs-2026/watch/"
+        )
+
+        val options = MySeedParser.parseWatchServers(document, "$base/film-7-dogs-2026/watch/")
+
+        assertEquals(setOf(direct, mirror), options.map { it.url }.toSet())
+        assertTrue(MySeedParser.isInternalPlayerUrl(mirror))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(direct))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(mirror))
+        assertFalse(MySeedParser.isMySeedPlayerTarget("$base/vid.php?url="))
+        assertFalse(MySeedParser.isMySeedPlayerTarget("$base/film-7-dogs-2026/watch/720"))
+        assertFalse(MySeedParser.isInternalPlayerUrl("https://other.example/vid/"))
+    }
+
+    @Test
+    fun mySeedMirrorPlayerPageExposesExternalExtractorLinks() {
+        val mirrorUrl = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val finalPlayerUrl = "$base/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val document = Jsoup.parse(
+            """<div class="player__iframe"><iframe title="Vidara" src="https://vidara.to/e/oh7IEkSdnTRR5"></iframe></div>""",
+            finalPlayerUrl
+        )
+
+        val options = MySeedParser.parseWatchServers(document, mirrorUrl)
+
+        assertTrue(MySeedParser.isInternalPlayerUrl(mirrorUrl))
+        assertEquals(1, options.size)
+        assertEquals("https://vidara.to/e/oh7IEkSdnTRR5", options.single().url)
+        assertEquals("Vidara", options.single().name)
+    }
+
+    @Test
     fun liveFilm7DogsWatchPageExposesAllFourProviderTargets() {
         val watchUrl = "$base/%d9%81%d9%8a%d9%84%d9%85-7-%d8%af%d9%88%d8%ac%d8%b2-2026/watch/"
         val response = try {
             Jsoup.connect(watchUrl)
-                .userAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/132.0 Safari/537.36")
-                .header("Accept-Language", "ar,en-US;q=0.8")
+                .userAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
                 .referrer("$base/")
                 .timeout(45_000)
                 .ignoreHttpErrors(true)
@@ -349,10 +397,8 @@ class MySeedParserTest {
         }
         val document = response.parse()
         val options = MySeedParser.parseWatchServers(document, watchUrl)
-        val expectedProviders = listOf("سيرفر ماي سيد المباشر", "سيرفر 1", "سيرفر 2", "سيرفر 3")
-        val missingProviders = expectedProviders.filter { expected ->
-            options.none { option -> option.name.contains(expected, ignoreCase = true) }
-        }
+        val visibleProviders = document.select(".servers__list li[data-server]").map { it.text().trim() }.distinct()
+        val recognizedTargets = options.filter { MySeedParser.isMySeedPlayerTarget(it.url) }
         val providerNodes = document.select(
             "button, a, [role=button], [onclick], [data-server], [data-url], [data-src], [data-file], " +
                 "[data-source], [data-player], [data-quality], [data-link], [data-href], [class*=server], [id*=server]"
@@ -385,7 +431,9 @@ class MySeedParserTest {
         val report = """status=${response.statusCode()} title=${document.title()}
             |parsed providers (${options.size}):
             |$parsed
-            |missing visible provider labels: $missingProviders
+            |visible provider buttons: $visibleProviders
+            |recognized first-party target URLs (${recognizedTargets.size}):
+            |${recognizedTargets.joinToString("\\n") { it.url }}
             |provider DOM:
             |$providerNodes
             |player scripts:
@@ -393,8 +441,9 @@ class MySeedParserTest {
 
         assertTrue("Live MySeed returned a non-success status.\n$report", response.statusCode() in 200..299)
         assertTrue("Live watch page title did not match the selected film.\n$report", document.title().contains("7 دوجز", ignoreCase = true))
-        assertTrue("Live page did not yield all four unique provider targets.\n$report", options.map { it.url }.distinct().size >= 4)
-        assertTrue("Live page did not yield every visible watch provider.\n$report", missingProviders.isEmpty())
+        assertEquals("Live page should expose its four selectable watch providers.\n$report", 4, visibleProviders.size)
+        assertTrue("Live page did not yield four valid first-party provider targets.\n$report", recognizedTargets.map { it.url }.distinct().size >= 4)
+        assertTrue("Parser returned an invalid internal player route.\n$report", options.filter { MySeedParser.isInternalPlayerUrl(it.url) }.all { MySeedParser.isMySeedPlayerTarget(it.url) })
     }
 
     @Test

@@ -1,4 +1,4 @@
-version = 2
+version = 3
 
 cloudstream {
     description = "MySeed — بحث وتصفح ومشاهدة وتحميل الأفلام والمسلسلات والحلقات."
