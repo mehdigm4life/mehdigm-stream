@@ -334,6 +334,63 @@ class MySeedParserTest {
     }
 
     @Test
+    fun liveFilm7DogsWatchPageExposesAllFourProviderTargets() {
+        val watchUrl = "$base/%d9%81%d9%8a%d9%84%d9%85-7-%d8%af%d9%88%d8%ac%d8%b2-2026/watch/"
+        val response = try {
+            Jsoup.connect(watchUrl)
+                .userAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/132.0 Safari/537.36")
+                .header("Accept-Language", "ar,en-US;q=0.8")
+                .referrer("$base/")
+                .timeout(45_000)
+                .ignoreHttpErrors(true)
+                .execute()
+        } catch (error: Exception) {
+            throw AssertionError("Live MySeed watch-page request failed: ${error.javaClass.simpleName}: ${error.message}")
+        }
+        val document = response.parse()
+        val options = MySeedParser.parseWatchServers(document, watchUrl)
+        val expectedProviders = listOf("سيرفر ماي سيد المباشر", "سيرفر 1", "سيرفر 2", "سيرفر 3")
+        val missingProviders = expectedProviders.filter { expected ->
+            options.none { option -> option.name.contains(expected, ignoreCase = true) }
+        }
+        val providerNodes = document.select(
+            "button, a, [role=button], [onclick], [data-server], [data-url], [data-src], [data-file], " +
+                "[data-source], [data-player], [data-quality], [class*=server], [id*=server]"
+        ).filter { element ->
+            element.text().contains("سيرفر") || listOf(
+                "data-server", "data-url", "data-src", "data-file", "data-source", "data-player", "onclick"
+            ).any(element::hasAttr)
+        }.take(40).joinToString("\n") { element ->
+            val attrs = listOf(
+                "id", "class", "data-server", "data-name", "data-label", "data-url", "data-src", "data-file",
+                "data-source", "data-player", "data-quality", "href", "src", "onclick"
+            ).mapNotNull { key ->
+                element.attr(key).takeIf(String::isNotBlank)?.let { "$key=${it.take(220)}" }
+            }.joinToString(" ")
+            "<${element.tagName()}> text=${element.text().take(100)} $attrs"
+        }
+        val playerScripts = document.select("script:not([src])").mapNotNull { script ->
+            script.data().ifBlank { script.html() }
+                .takeIf { it.contains(Regex("(?i)(player|server|quality|video|stream|ajax)")) }
+                ?.replace(Regex("\\s+"), " ")?.take(500)
+        }.take(8).joinToString("\n")
+        val parsed = options.joinToString("\n") { "${it.name} | ${it.quality}p | ${it.url}" }
+        val report = """status=${response.statusCode()} title=${document.title()}
+            |parsed providers (${options.size}):
+            |$parsed
+            |missing visible provider labels: $missingProviders
+            |provider DOM:
+            |$providerNodes
+            |player scripts:
+            |$playerScripts""".trimMargin()
+
+        assertTrue("Live MySeed returned a non-success status.\n$report", response.statusCode() in 200..299)
+        assertTrue("Live watch page title did not match the selected film.\n$report", document.title().contains("7 دوجز", ignoreCase = true))
+        assertTrue("Live page did not yield all four unique provider targets.\n$report", options.map { it.url }.distinct().size >= 4)
+        assertTrue("Live page did not yield every visible watch provider.\n$report", missingProviders.isEmpty())
+    }
+
+    @Test
     fun watchParserDropsMySeedVideoPageAndKeepsPlayableAlternateServer() {
         val watchUrl = "$base/episode-22/watch/"
         val document = Jsoup.parse(
