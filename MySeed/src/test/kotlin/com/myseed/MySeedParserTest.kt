@@ -355,25 +355,32 @@ class MySeedParserTest {
         }
         val providerNodes = document.select(
             "button, a, [role=button], [onclick], [data-server], [data-url], [data-src], [data-file], " +
-                "[data-source], [data-player], [data-quality], [class*=server], [id*=server]"
+                "[data-source], [data-player], [data-quality], [data-link], [data-href], [class*=server], [id*=server]"
         ).filter { element ->
             element.text().contains("سيرفر") || listOf(
-                "data-server", "data-url", "data-src", "data-file", "data-source", "data-player", "onclick"
+                "data-server", "data-url", "data-src", "data-file", "data-source", "data-player", "data-link", "data-href", "onclick"
             ).any(element::hasAttr)
         }.take(40).joinToString("\n") { element ->
             val attrs = listOf(
                 "id", "class", "data-server", "data-name", "data-label", "data-url", "data-src", "data-file",
-                "data-source", "data-player", "data-quality", "href", "src", "onclick"
+                "data-source", "data-player", "data-link", "data-href", "data-quality", "href", "src", "onclick"
             ).mapNotNull { key ->
                 element.attr(key).takeIf(String::isNotBlank)?.let { "$key=${it.take(220)}" }
             }.joinToString(" ")
             "<${element.tagName()}> text=${element.text().take(100)} $attrs"
         }
-        val playerScripts = document.select("script:not([src])").mapNotNull { script ->
-            script.data().ifBlank { script.html() }
-                .takeIf { it.contains(Regex("(?i)(player|server|quality|video|stream|ajax)")) }
-                ?.replace(Regex("\\s+"), " ")?.take(500)
-        }.take(8).joinToString("\n")
+        val playerScripts = document.select("script:not([src])").flatMap { script ->
+            val source = script.data().ifBlank { script.html() }.replace(Regex("\\s+"), " ")
+            listOf(".servers__list", "data-server", "data-link", "asPlayerFrame", "admin-ajax.php", "XMLHttpRequest", "fetch(")
+                .mapNotNull { marker ->
+                    val index = source.indexOf(marker, ignoreCase = true)
+                    if (index < 0) null else {
+                        val start = (index - 260).coerceAtLeast(0)
+                        val end = (index + 680).coerceAtMost(source.length)
+                        "$marker: ${source.substring(start, end)}"
+                    }
+                }
+        }.take(14).joinToString("\\n")
         val parsed = options.joinToString("\n") { "${it.name} | ${it.quality}p | ${it.url}" }
         val report = """status=${response.statusCode()} title=${document.title()}
             |parsed providers (${options.size}):
