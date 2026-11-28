@@ -115,21 +115,29 @@ class MySeed : MainAPI() {
             }.awaitAll().flatten()
         }
 
-        // MySeed's search mixes the main show, its individual season pages, and matching episodes.
-        // Collapse all non-movie hits to the canonical parent series so every related result opens
-        // the same complete season/episode catalog instead of a partial season or a one-episode stub.
+        // MySeed's search mixes show, season, and episode pages. Keep the exact result URL here:
+        // season slugs can contain extra suffixes that cannot safely be truncated. load() follows
+        // the page's own breadcrumb to the canonical series page and falls back to slug parsing.
         val canonicalCards = cards.map { card ->
             if (card.kind == MySeedContentKind.MOVIE) {
                 card
             } else {
                 card.copy(
                     title = MySeedParser.seriesTitleFromEpisode(card.title).ifBlank { card.title },
-                    url = MySeedParser.seriesRootUrl(card.url) ?: card.url,
                     kind = MySeedContentKind.SERIES
                 )
             }
         }
-        return canonicalCards.distinctBy { it.url }.mapNotNull(::toSearchResponse)
+        val uniqueCards = LinkedHashMap<String, MySeedCatalogCard>()
+        canonicalCards.forEach { card ->
+            val key = if (card.kind == MySeedContentKind.MOVIE) {
+                "movie:${card.url}"
+            } else {
+                "series:${card.title.trim().lowercase(Locale.ROOT)}"
+            }
+            uniqueCards.putIfAbsent(key, card)
+        }
+        return uniqueCards.values.mapNotNull(::toSearchResponse)
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse> = search(query)
@@ -151,6 +159,7 @@ class MySeed : MainAPI() {
     override suspend fun load(url: String): com.lagradost.cloudstream3.LoadResponse {
         val metadataUrl = MySeedParser.normalizeContentUrl(url, mainUrl) ?: return unavailable(url)
         val inputDocument = getDocument(metadataUrl) ?: return unavailable(metadataUrl)
+        if (MySeedParser.isNotFoundPage(inputDocument)) return unavailable(metadataUrl)
         val inputDetails = MySeedParser.parseDetails(inputDocument, metadataUrl)
 
         if (inputDetails.kind == MySeedContentKind.MOVIE) {
@@ -158,7 +167,7 @@ class MySeed : MainAPI() {
                 inputDetails.title.ifBlank { "بدون عنوان" },
                 metadataUrl,
                 TvType.Movie,
-                ""
+                metadataUrl
             ) {
                 this.posterUrl = inputDetails.posterUrl
                 this.plot = inputDetails.plot
@@ -169,10 +178,16 @@ class MySeed : MainAPI() {
 
         // Search can return the parent show, one of its season pages, or an episode page.
         // Resolve all three to the same parent catalog before constructing the series response.
-        val seriesUrl = MySeedParser.seriesRootUrl(metadataUrl) ?: metadataUrl
-        val parentDocument = if (seriesUrl == metadataUrl) inputDocument else getDocument(seriesUrl)
+        val candidateSeriesUrl = MySeedParser.seriesRootFromBreadcrumbs(inputDocument, metadataUrl)
+            ?: MySeedParser.seriesRootUrl(metadataUrl)
+            ?: metadataUrl
+        val fetchedParent = if (candidateSeriesUrl == metadataUrl) inputDocument else getDocument(candidateSeriesUrl)
+        val parentDocument = fetchedParent?.takeUnless { MySeedParser.isNotFoundPage(it) }
+        // If MySeed's inferred parent is a 404, keep the real selected page instead of showing
+        // the site's generic not-found page and any unrelated links it happens to contain.
+        val seriesUrl = if (parentDocument != null) candidateSeriesUrl else metadataUrl
         val catalogDocument = parentDocument ?: inputDocument
-        val catalogUrl = if (parentDocument != null) seriesUrl else metadataUrl
+        val catalogUrl = seriesUrl
         val details = if (parentDocument != null && parentDocument !== inputDocument) {
             MySeedParser.parseDetails(catalogDocument, catalogUrl)
         } else {
@@ -284,7 +299,12 @@ class MySeed : MainAPI() {
 
     private suspend fun getDocument(url: String, referer: String = "$mainUrl/"): Document? {
         return try {
-            app.get(url, headers = REQUEST_HEADERS, referer = referer).document
+            val response = app.get(url, headers = REQUEST_HEADERS, referer = referer)
+            if (!response.isSuccessful) {
+                Log.i(TAG, "Page request returned HTTP ${response.code} for $url")
+                return null
+            }
+            response.document.takeUnless { MySeedParser.isNotFoundPage(it) }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -299,9 +319,9 @@ class MySeed : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val episodeUrl = MySeedParser.episodeContentUrl(data) ?: return false
-        val watchUrl = MySeedParser.routeUrl(episodeUrl, "watch") ?: return false
-        val downloadUrl = MySeedParser.routeUrl(episodeUrl, "download") ?: return false
+        val contentUrl = MySeedParser.contentUrl(data) ?: return false
+        val watchUrl = MySeedParser.routeUrl(contentUrl, "watch") ?: return false
+        val downloadUrl = MySeedParser.routeUrl(contentUrl, "download") ?: return false
         val emitted = mutableSetOf<String>()
         val visited = mutableSetOf<String>()
 
@@ -630,6 +650,20 @@ internal object MySeedParser {
         )
     }
 
+    fun isNotFoundPage(document: Document): Boolean {
+        val heading = cleanText(document.selectFirst("h1")?.text())
+        val title = cleanText(document.title())
+        val markers = listOf(
+            "الصفحة غير موجودة",
+            "لم يتم العثور على الصفحة",
+            "page not found",
+            "404 not found"
+        )
+        return markers.any { marker ->
+            heading.contains(marker, ignoreCase = true) || title.contains(marker, ignoreCase = true)
+        } || listOf(heading, title).any { Regex("(?i)^404(?:\\b|\\s*[-|])").containsMatchIn(it) }
+    }
+
     /**
      * Returns the parent /selary/ URL for a main-show, season, or episode URL. MySeed's episode
      * slugs contain the show slug followed by Arabic season/episode markers (or Sxx/Epx markers).
@@ -651,6 +685,24 @@ internal object MySeedParser {
         if (rootSlug.isBlank()) return null
 
         return canonicalSiteUrl("/selary/$rootSlug/")
+    }
+
+    /** Prefer the actual series link in MySeed's breadcrumbs over guessing from unusual slugs. */
+    fun seriesRootFromBreadcrumbs(document: Document, currentUrl: String): String? {
+        val currentContentUrl = contentUrl(currentUrl)
+            ?: normalizeContentUrl(currentUrl, BASE_URL)
+            ?: return null
+        val candidates = document.select(
+            ".breadcrumb a[href], .breadcrumbs a[href], #breadcrumb a[href], #breadcrumbs a[href], " +
+                "[class*=breadcrumb] a[href], [id*=breadcrumb] a[href], nav[aria-label*=breadcrumb] a[href]"
+        ).mapNotNull { anchor ->
+            val href = anchor.absUrl("href").ifBlank { anchor.attr("href") }
+            val candidate = contentUrl(href, document.baseUri().ifBlank { BASE_URL }) ?: return@mapNotNull null
+            val path = parsedPath(candidate, BASE_URL).orEmpty()
+            candidate.takeIf { path.startsWith("/selary/", ignoreCase = true) && it != currentContentUrl }
+        }.distinct()
+        val inferredRoot = seriesRootUrl(currentContentUrl)
+        return candidates.firstOrNull { it == inferredRoot } ?: candidates.firstOrNull()
     }
 
     private fun canonicalSiteUrl(decodedPath: String): String? {
@@ -699,13 +751,17 @@ internal object MySeedParser {
             }
         }
 
+        val hasStructuredEpisodeList = explicitAnchors.isNotEmpty() || headingAnchors.isNotEmpty()
         val candidates = explicitAnchors.ifEmpty { headingAnchors.ifEmpty { document.select("a[href]").filter(::isEpisodeAnchor) } }
         val episodes = LinkedHashMap<String, MySeedEpisode>()
         for (anchor in candidates) {
-            val url = normalizeContentUrl(anchor.absUrl("href").ifBlank { anchor.attr("href") }, base)
+            val url = contentUrl(anchor.absUrl("href").ifBlank { anchor.attr("href") }, base)
                 ?: continue
             if (!isEpisodeUrl(url, anchorText(anchor))) continue
-            if (expectedRootUrl != null && seriesRootUrl(url) != expectedRootUrl) continue
+            val candidateRootUrl = seriesRootUrl(url)
+            if (expectedRootUrl != null && candidateRootUrl != expectedRootUrl &&
+                (candidateRootUrl != null || !hasStructuredEpisodeList)
+            ) continue
             val number = episodeNumber(url, anchorText(anchor))
             val season = seasonNumber(url, anchorText(anchor))
             val rawName = anchorTitle(anchor)
@@ -717,21 +773,23 @@ internal object MySeedParser {
         return episodes.values.toList()
     }
 
-    /** Normalize episode metadata URLs and construct MySeed's real watch/download routes. */
-    fun episodeContentUrl(rawUrl: String): String? {
-        val resolved = runCatching { URI(BASE_URL).resolve(rawUrl.trim()).normalize() }.getOrNull()
+    /** Normalize a movie, series, or episode URL and remove MySeed's watch/download suffix. */
+    fun contentUrl(rawUrl: String, base: String = BASE_URL): String? {
+        val resolved = runCatching { URI(base).resolve(rawUrl.trim()).normalize() }.getOrNull()
             ?: return null
         if (resolved.host?.lowercase(Locale.ROOT) != SITE_HOST) return null
         val contentPath = resolved.path.orEmpty()
             .replace(Regex("(?i)/(?:watch|download)/?$"), "")
             .ifBlank { return null }
-        val contentUrl = normalizeContentUrl(contentPath, BASE_URL) ?: return null
-        return contentUrl.takeIf { isEpisodeUrl(it, "") }
+        return normalizeContentUrl(contentPath, BASE_URL)
     }
 
-    fun routeUrl(episodeUrl: String, route: String): String? {
+    fun episodeContentUrl(rawUrl: String): String? = contentUrl(rawUrl)
+        ?.takeIf { isEpisodeUrl(it, "") }
+
+    fun routeUrl(contentPageUrl: String, route: String): String? {
         if (route !in setOf("watch", "download")) return null
-        val contentUrl = episodeContentUrl(episodeUrl) ?: return null
+        val contentUrl = contentUrl(contentPageUrl) ?: return null
         return "${contentUrl.trimEnd('/')}/$route/"
     }
 
@@ -1123,15 +1181,24 @@ internal object MySeedParser {
 
     private fun classify(url: String, title: String): MySeedContentKind {
         val path = parsedPath(url, BASE_URL)?.lowercase(Locale.ROOT).orEmpty()
-        if (path.split('/').any { it == "selary" }) return MySeedContentKind.SERIES
+        if (isEpisodeUrl(url, "")) return MySeedContentKind.EPISODE
+        if (path.split('/').any { it == "selary" }) {
+            return if (isExplicitEpisodeTitle(title)) MySeedContentKind.EPISODE else MySeedContentKind.SERIES
+        }
         if (isEpisodeUrl(url, title)) return MySeedContentKind.EPISODE
         return MySeedContentKind.MOVIE
     }
 
+    private fun isExplicitEpisodeTitle(title: String): Boolean {
+        val normalized = normalizeDigits(title).lowercase(Locale.ROOT)
+        return Regex("(?i)(?:الحلقة|الحلقه|episode|eps?)\\s*[-_ ]?\\d{1,4}")
+            .containsMatchIn(normalized)
+    }
+
     private fun isEpisodeAnchor(anchor: org.jsoup.nodes.Element): Boolean {
         val url = anchor.absUrl("href").ifBlank { anchor.attr("href") }
-        return normalizeContentUrl(url, anchor.baseUri().ifBlank { BASE_URL }) != null &&
-            isEpisodeUrl(url, anchorText(anchor))
+        val contentUrl = contentUrl(url, anchor.baseUri().ifBlank { BASE_URL }) ?: return false
+        return isEpisodeUrl(contentUrl, anchorText(anchor))
     }
 
     private fun isEpisodeUrl(url: String, title: String): Boolean {
