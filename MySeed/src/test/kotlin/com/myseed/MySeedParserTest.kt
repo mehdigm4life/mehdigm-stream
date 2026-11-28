@@ -442,7 +442,7 @@ class MySeedParserTest {
         assertTrue("Live MySeed returned a non-success status.\n$report", response.statusCode() in 200..299)
         assertTrue("Live watch page title did not match the selected film.\n$report", document.title().contains("7 دوجز", ignoreCase = true))
         assertEquals("Live page should expose its four selectable watch providers.\n$report", 4, visibleProviders.size)
-        assertTrue("Live page did not yield four valid first-party provider targets.\n$report", recognizedTargets.map { it.url }.distinct().size >= 4)
+        assertEquals("Live page should yield exactly four distinct valid provider targets.\n$report", 4, recognizedTargets.map { it.url }.distinct().size)
         assertTrue("Parser returned an invalid internal player route.\n$report", options.filter { MySeedParser.isInternalPlayerUrl(it.url) }.all { MySeedParser.isMySeedPlayerTarget(it.url) })
     }
 
