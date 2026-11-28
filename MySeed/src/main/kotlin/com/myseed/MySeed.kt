@@ -1065,6 +1065,22 @@ internal object MySeedParser {
         return pieces.joinToString(" ").take(900)
     }
 
+    private fun mirrorProviderLabel(url: String): String? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val encoded = uri.rawQuery.orEmpty().split('&').firstNotNullOfOrNull { parameter ->
+            parameter.substringBefore('=').takeIf { it.equals("id", ignoreCase = true) }
+                ?.let { parameter.substringAfter('=', "") }
+        } ?: return null
+        val decodedUrl = decodeBase64Url(encoded) ?: return null
+        val host = runCatching { URI(decodedUrl).host?.lowercase(Locale.ROOT) }.getOrNull() ?: return null
+        return when {
+            host.contains("vidara") -> "Vidara"
+            host.contains("byse") -> "Byse"
+            host == "voe.sx" || host.endsWith(".voe.sx") -> "VOE"
+            else -> host.removePrefix("www.")
+        }
+    }
+
     private fun serverName(element: Element?, context: String, url: String): String {
         if (element != null) {
             for (attribute in listOf("data-server-name", "data-server", "data-name", "data-label", "aria-label", "title")) {
@@ -1079,9 +1095,13 @@ internal object MySeedParser {
                 return ownLabel.take(60)
             }
         }
+        mirrorProviderLabel(url)?.let { return it }
         val known = listOf("سيرفر ماي سيد المباشر", "سيرفر ماي سيد", "Fastdrive", "Userload", "Uptobox")
             .firstOrNull { context.contains(it, ignoreCase = true) }
         if (known != null) return known
+        if (isMySeedPlayerUrl(url) && runCatching { URI(url).path.equals("/vids.php", ignoreCase = true) }.getOrDefault(false)) {
+            return "سيرفر ماي سيد المباشر"
+        }
         Regex("(?i)(?:سيرفر|server)\\s*#?\\s*(\\d+)").find(context)?.groupValues?.getOrNull(1)
             ?.let { return "سيرفر $it" }
         val host = runCatching { URI(url).host }.getOrNull().orEmpty().removePrefix("www.")

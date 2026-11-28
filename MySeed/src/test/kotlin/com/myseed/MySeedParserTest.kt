@@ -337,11 +337,15 @@ class MySeedParserTest {
     fun watchParserKeepsMySeedPlayerEndpointsAndFiltersScriptNoise() {
         val direct = "$base/vids.php?t=c545f3e5ae1263525d6c2846a442a5c17c478a01b3360ca753037bd02f03b02e"
         val mirror = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92aWRhcmEudG8vZS9vaDdJRWtTZG5UUlI1"
+        val byse = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly9ieXNlemVqYXRhb3MuY29tL2UvNTR6Ymg0YWhicHY3"
+        val voe = "https://m.myseed.pics/vid/?id=aHR0cHM6Ly92b2Uuc3gvZS8wdHlvdnk4OXZ2bGI"
         val document = Jsoup.parse(
             """
             <script>
               const player = { file: "$direct" };
               const alternate = { src: "$mirror" };
+              const alternateByse = { src: "$byse" };
+              const alternateVoe = { src: "$voe" };
               const fakePath = "https://m.myseed.tv/film-7/watch/video/mp4";
               const fakeQuality = "https://m.myseed.tv/film-7/watch/720";
               const emptyWrapper = "https://m.myseed.tv/vid.php?url=";
@@ -354,10 +358,15 @@ class MySeedParserTest {
 
         val options = MySeedParser.parseWatchServers(document, "$base/film-7-dogs-2026/watch/")
 
-        assertEquals(setOf(direct, mirror), options.map { it.url }.toSet())
+        assertEquals(setOf(direct, mirror, byse, voe), options.map { it.url }.toSet())
+        assertEquals("Vidara", options.single { it.url == mirror }.name)
+        assertEquals("Byse", options.single { it.url == byse }.name)
+        assertEquals("VOE", options.single { it.url == voe }.name)
         assertTrue(MySeedParser.isInternalPlayerUrl(mirror))
         assertTrue(MySeedParser.isMySeedPlayerTarget(direct))
         assertTrue(MySeedParser.isMySeedPlayerTarget(mirror))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(byse))
+        assertTrue(MySeedParser.isMySeedPlayerTarget(voe))
         assertFalse(MySeedParser.isMySeedPlayerTarget("$base/vid.php?url="))
         assertFalse(MySeedParser.isMySeedPlayerTarget("$base/film-7-dogs-2026/watch/720"))
         assertFalse(MySeedParser.isInternalPlayerUrl("https://other.example/vid/"))
