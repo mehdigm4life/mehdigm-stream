@@ -514,18 +514,15 @@ class MySeedParserTest {
         }
         val playerBase = playerResponse.url().toString()
         val redirect = playerResponse.header("Location")?.let { MySeedParser.resolvePlayerTarget(it, playerBase) }
-        val redirectIsMedia = redirect?.let { url ->
+        val directMediaRedirect = redirect?.takeIf { url ->
             val path = runCatching { java.net.URI(url).path.orEmpty() }.getOrDefault("")
             Regex("""(?i)\.(?:m3u8|mpd|mp4|m4v|mkv|webm|mov|avi|ts)$""").containsMatchIn(path)
-        } == true
-        val gateway = if (redirectIsMedia) null else {
+        }
+        val gateway = if (directMediaRedirect != null) null else {
             redirect ?: MySeedParser.extractMySeedPlayerGateway(playerResponse.body(), playerBase)
         }
-        var sources = if (redirectIsMedia && redirect != null) {
-            listOf(MySeedDirectMediaSource(redirect, directChoice?.quality))
-        } else {
-            MySeedParser.parseMySeedDirectMediaSources(playerResponse.body(), playerBase)
-        }
+        var sources = directMediaRedirect?.let { listOf(MySeedDirectMediaSource(it, directChoice?.quality)) }
+            ?: MySeedParser.parseMySeedDirectMediaSources(playerResponse.body(), playerBase)
         var sourceRefererBase = gateway ?: playerBase
 
         if (sources.isEmpty() && gateway != null) {
