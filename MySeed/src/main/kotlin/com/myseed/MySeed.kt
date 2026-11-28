@@ -361,18 +361,22 @@ class MySeed : MainAPI() {
 
         // MySeed sometimes leaves the direct player's data-link empty and only returns it after
         // the selected server is requested through its CSRF-protected get__watch__server endpoint.
-        val directChoice = playbackState?.serverChoices?.firstOrNull(MySeedWatchServerChoice::isDirectServer)
-        if (!directServerResolved && directChoice != null && playbackState != null) {
-            val directUrl = directChoice.url ?: requestMySeedDirectServerUrl(directChoice, playbackState, watchUrl)
-            if (!directUrl.isNullOrBlank() && directUrl !in visited) {
-                val directOption = MySeedServerOption(
-                    name = directChoice.name.ifBlank { "سيرفر ماي سيد المباشر" },
-                    quality = directChoice.quality,
-                    url = directUrl
-                )
-                if (resolveServerOption(directOption, watchUrl, "مشاهدة", false, subtitleCallback, callback, emitted, visited)) {
-                    found = true
-                    directServerResolved = true
+        if (!directServerResolved) {
+            playbackState?.let { state ->
+                val directChoice = state.serverChoices.firstOrNull { it.isDirectServer }
+                if (directChoice != null) {
+                    val directUrl = directChoice.url ?: requestMySeedDirectServerUrl(directChoice, state, watchUrl)
+                    if (!directUrl.isNullOrBlank() && directUrl !in visited) {
+                        val directOption = MySeedServerOption(
+                            name = directChoice.name.ifBlank { "سيرفر ماي سيد المباشر" },
+                            quality = directChoice.quality,
+                            url = directUrl
+                        )
+                        if (resolveServerOption(directOption, watchUrl, "مشاهدة", false, subtitleCallback, callback, emitted, visited)) {
+                            found = true
+                            directServerResolved = true
+                        }
+                    }
                 }
             }
         }
@@ -634,7 +638,7 @@ class MySeed : MainAPI() {
         )
         var emittedAny = false
         for (source in directSources.distinctBy { it.url }) {
-            val type = source.type ?: directMediaType(source.url) ?: continue
+            val type = source.type?.let(::cloudstreamMediaType) ?: directMediaType(source.url) ?: continue
             if (source.url.isBlank() || !emitted.add(source.url)) continue
             val sourceQuality = source.quality ?: option.quality
             callbackForOption(
@@ -692,14 +696,20 @@ class MySeed : MainAPI() {
         }
     }
 
-    private fun mediaTypeFromContentType(contentType: String): ExtractorLinkType? {
+    private fun mediaTypeFromContentType(contentType: String): MySeedDirectMediaKind? {
         val normalized = contentType.lowercase(Locale.ROOT)
         return when {
-            normalized.contains("mpegurl") || normalized.contains("m3u8") -> ExtractorLinkType.M3U8
-            normalized.contains("dash+xml") -> ExtractorLinkType.DASH
-            normalized.startsWith("video/") -> ExtractorLinkType.VIDEO
+            normalized.contains("mpegurl") || normalized.contains("m3u8") -> MySeedDirectMediaKind.M3U8
+            normalized.contains("dash+xml") -> MySeedDirectMediaKind.DASH
+            normalized.startsWith("video/") -> MySeedDirectMediaKind.VIDEO
             else -> null
         }
+    }
+
+    private fun cloudstreamMediaType(type: MySeedDirectMediaKind): ExtractorLinkType = when (type) {
+        MySeedDirectMediaKind.M3U8 -> ExtractorLinkType.M3U8
+        MySeedDirectMediaKind.DASH -> ExtractorLinkType.DASH
+        MySeedDirectMediaKind.VIDEO -> ExtractorLinkType.VIDEO
     }
 
     private fun cloudQuality(value: Int?): Int = when (value) {
@@ -761,10 +771,16 @@ internal data class MySeedWatchPlaybackState(
     val serverChoices: List<MySeedWatchServerChoice>
 )
 
+internal enum class MySeedDirectMediaKind {
+    VIDEO,
+    M3U8,
+    DASH
+}
+
 internal data class MySeedDirectMediaSource(
     val url: String,
     val quality: Int?,
-    val type: ExtractorLinkType? = null
+    val type: MySeedDirectMediaKind? = null
 )
 
 internal data class MySeedDetails(
@@ -1177,10 +1193,10 @@ internal object MySeedParser {
             val path = runCatching { URI(url).path.orEmpty() }.getOrDefault("").lowercase(Locale.ROOT)
             val mimeType = element.attr("type").lowercase(Locale.ROOT)
             val mediaType = when {
-                mimeType.contains("mpegurl") || mimeType.contains("m3u8") || path.endsWith(".m3u8") -> ExtractorLinkType.M3U8
-                mimeType.contains("dash+xml") || path.endsWith(".mpd") -> ExtractorLinkType.DASH
+                mimeType.contains("mpegurl") || mimeType.contains("m3u8") || path.endsWith(".m3u8") -> MySeedDirectMediaKind.M3U8
+                mimeType.contains("dash+xml") || path.endsWith(".mpd") -> MySeedDirectMediaKind.DASH
                 mimeType.startsWith("video/") || Regex("\\.(?:mp4|m4v|mkv|webm|mov|avi|ts)$").containsMatchIn(path) ||
-                    element.tagName() == "video" || element.parents().any { it.tagName() == "video" } -> ExtractorLinkType.VIDEO
+                    element.tagName() == "video" || element.parents().any { it.tagName() == "video" } -> MySeedDirectMediaKind.VIDEO
                 else -> return@mapNotNull null
             }
             val qualityContext = listOf(
