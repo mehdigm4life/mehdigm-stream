@@ -422,6 +422,7 @@ class MySeedParserTest {
                 <iframe title="سيرفر 1" src="https://embed.example/e/episode-720"></iframe>
               </div>
               <a class="server-option" href="https://embed.example/e/episode-1080">سيرفر 2 · 1080p</a>
+              <a class="server-option" href="https://embed.example/e/episode-download">(تحميل) سيرفر 3 · 720p</a>
             </div>
             """.trimIndent(),
             watchUrl
@@ -438,6 +439,7 @@ class MySeedParserTest {
         assertTrue(servers.any { it.name == "سيرفر ماي سيد المباشر" && it.quality == 480 && it.url.endsWith("episode-480.m3u8") })
         assertTrue(servers.any { it.name == "سيرفر 1" && it.quality == 720 && it.url == "https://embed.example/e/episode-720" })
         assertTrue(servers.any { it.quality == 1080 && it.url == "https://embed.example/e/episode-1080" })
+        assertFalse(servers.any { it.url == "https://embed.example/e/episode-download" })
         assertEquals(2160, metaServers.single().quality)
         assertEquals("https://media.example/episode-4k.m3u8", metaServers.single().url)
     }
@@ -509,6 +511,7 @@ class MySeedParserTest {
             <ul class="servers__list">
               <li data-server="0" data-qu="480"><span>سيرفر ماي سيد المباشر</span></li>
               <li data-server="1" data-qu="480" data-link="https://embed.example/e/alpha">سيرفر 1</li>
+              <li data-server="2" data-qu="720" data-link="https://embed.example/e/download">تحميل سيرفر 2</li>
             </ul>
             """.trimIndent(),
             watchUrl
@@ -523,6 +526,7 @@ class MySeedParserTest {
         assertEquals("0", direct.serverId)
         assertEquals(480, direct.quality)
         assertNull(direct.url)
+        assertTrue(state.serverChoices.none { it.serverId == "2" })
         assertEquals(
             mapOf("post_id" to "9274", "quality" to "480", "server" to "0", "csrf_token" to "csrf-live-token"),
             request
