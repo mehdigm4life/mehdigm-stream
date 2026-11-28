@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import org.json.JSONObject
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
@@ -53,6 +54,12 @@ class MySeed : MainAPI() {
             "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8"
+        )
+        private val AJAX_HEADERS = REQUEST_HEADERS + mapOf(
+            "Accept" to "application/json, text/javascript, */*; q=0.01",
+            "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With" to "XMLHttpRequest",
+            "Origin" to BASE_URL
         )
     }
 
@@ -313,6 +320,22 @@ class MySeed : MainAPI() {
         }
     }
 
+    private suspend fun getFreshDocument(url: String, referer: String): Document? {
+        return try {
+            val response = app.get(url, headers = REQUEST_HEADERS, referer = referer, cacheTime = 0)
+            if (!response.isSuccessful) {
+                Log.i(TAG, "Fresh page request returned HTTP ${response.code} for $url")
+                return null
+            }
+            response.document.takeUnless { MySeedParser.isNotFoundPage(it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.i(TAG, "Fresh page request failed for $url: ${error.message}")
+            null
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -327,10 +350,34 @@ class MySeed : MainAPI() {
 
         val watchDocument = getDocument(watchUrl, contentUrl)
         val watchOptions = watchDocument?.let { MySeedParser.parseWatchServers(it, watchUrl) }.orEmpty()
+        val playbackState = watchDocument?.let { MySeedParser.parseWatchPlaybackState(it, watchUrl) }
         var found = false
+        var directServerResolved = false
         for (option in watchOptions) {
-            if (resolveServerOption(option, watchUrl, "مشاهدة", false, subtitleCallback, callback, emitted, visited)) {
-                found = true
+            val resolved = resolveServerOption(option, watchUrl, "مشاهدة", false, subtitleCallback, callback, emitted, visited)
+            if (resolved) found = true
+            if (MySeedParser.isMySeedDirectServerUrl(option.url) && resolved) directServerResolved = true
+        }
+
+        // MySeed sometimes leaves the direct player's data-link empty and only returns it after
+        // the selected server is requested through its CSRF-protected get__watch__server endpoint.
+        if (!directServerResolved) {
+            playbackState?.let { state ->
+                val directChoice = state.serverChoices.firstOrNull { it.isDirectServer }
+                if (directChoice != null) {
+                    val directUrl = directChoice.url ?: requestMySeedDirectServerUrl(directChoice, state, watchUrl)
+                    if (!directUrl.isNullOrBlank() && directUrl !in visited) {
+                        val directOption = MySeedServerOption(
+                            name = directChoice.name.ifBlank { "سيرفر ماي سيد المباشر" },
+                            quality = directChoice.quality,
+                            url = directUrl
+                        )
+                        if (resolveServerOption(directOption, watchUrl, "مشاهدة", false, subtitleCallback, callback, emitted, visited)) {
+                            found = true
+                            directServerResolved = true
+                        }
+                    }
+                }
             }
         }
 
@@ -367,6 +414,10 @@ class MySeed : MainAPI() {
                 callbackForOption(option, url, mediaType, referer, routeLabel, quality, null, callback)
             }
             return true
+        }
+
+        if (MySeedParser.isMySeedDirectServerUrl(url)) {
+            return resolveMySeedOwnServer(option, url, referer, routeLabel, emitted, callback)
         }
 
         val isInternalPage = MySeedParser.isInternalPlayerUrl(url)
@@ -422,6 +473,190 @@ class MySeed : MainAPI() {
         return extracted || emitted.size > before
     }
 
+    private suspend fun requestMySeedDirectServerUrl(
+        initialChoice: MySeedWatchServerChoice,
+        initialState: MySeedWatchPlaybackState,
+        watchUrl: String
+    ): String? {
+        var state = initialState
+        var choice = initialChoice
+        repeat(2) { attempt ->
+            val payload = MySeedParser.directServerRequestData(choice, state) ?: run {
+                Log.i(TAG, "MySeed direct server is missing its playback token or server metadata")
+                return null
+            }
+            val response = try {
+                app.post(
+                    "$mainUrl/get__watch__server/",
+                    data = payload,
+                    headers = AJAX_HEADERS,
+                    referer = watchUrl
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.i(TAG, "MySeed direct server request failed: ${error.message}")
+                return null
+            }
+            val result = runCatching { JSONObject(response.text) }.getOrNull()
+            val server = result?.optString("server")?.takeIf { it.isNotBlank() && it != "null" }
+            if (response.isSuccessful && result?.optString("type") == "success" && server != null) {
+                return MySeedParser.resolvePlayerTarget(server, watchUrl)
+            }
+
+            val unauthorized = result?.optString("message").equals("unauthorized request", ignoreCase = true)
+            if (attempt == 0 && unauthorized) {
+                val freshDocument = getFreshDocument(watchUrl, "$mainUrl/") ?: return null
+                state = MySeedParser.parseWatchPlaybackState(freshDocument, watchUrl)
+                choice = state.serverChoices.firstOrNull { it.serverId == initialChoice.serverId }
+                    ?: initialChoice.copy(quality = initialChoice.quality ?: state.serverChoices.firstOrNull()?.quality)
+                return@repeat
+            }
+            Log.i(TAG, "MySeed direct server endpoint returned HTTP ${response.code} or an invalid response")
+            return null
+        }
+        return null
+    }
+
+    private suspend fun resolveMySeedOwnServer(
+        option: MySeedServerOption,
+        playerUrl: String,
+        watchUrl: String,
+        routeLabel: String,
+        emitted: MutableSet<String>,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val playerResponse = try {
+            app.get(
+                playerUrl,
+                headers = REQUEST_HEADERS,
+                referer = watchUrl,
+                allowRedirects = false,
+                cacheTime = 0
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.i(TAG, "MySeed direct player request failed: ${error.message}")
+            return false
+        }
+
+        val playerBaseUrl = playerResponse.url.ifBlank { playerUrl }
+        val playerContentType = playerResponse.headers["Content-Type"].orEmpty()
+        val playerResponseType = mediaTypeFromContentType(playerContentType)
+        val playerHtml = if (playerResponseType == null) playerResponse.text else ""
+        val playerLocation = playerResponse.headers["Location"] ?: playerResponse.headers["location"]
+        val redirectedUrl = playerLocation?.let { MySeedParser.resolvePlayerTarget(it, playerBaseUrl) }
+        val directSources = mutableListOf<MySeedDirectMediaSource>()
+        var gatewayUrl = MySeedParser.extractMySeedPlayerGateway(playerHtml, playerBaseUrl)
+        var gatewayForHeaders = gatewayUrl ?: playerBaseUrl
+        var mediaHtml = playerHtml
+        var mediaBaseUrl = playerBaseUrl
+
+        if (redirectedUrl != null) {
+            if (directMediaType(redirectedUrl) != null) {
+                directSources += MySeedDirectMediaSource(redirectedUrl, option.quality)
+                gatewayForHeaders = playerBaseUrl
+            } else if (gatewayUrl == null) {
+                gatewayUrl = redirectedUrl
+                gatewayForHeaders = redirectedUrl
+            }
+        }
+
+        if (directSources.isEmpty() && gatewayUrl != null && directMediaType(gatewayUrl) == null) {
+            var nextUrl: String = gatewayUrl ?: return false
+            var nextReferer = "$mainUrl/"
+            for (hop in 0..2) {
+                val gatewayResponse = try {
+                    app.get(
+                        nextUrl,
+                        headers = REQUEST_HEADERS,
+                        referer = nextReferer,
+                        allowRedirects = false,
+                        cacheTime = 0
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.i(TAG, "MySeed player gateway request failed: ${error.message}")
+                    return false
+                }
+                val gatewayBase = gatewayResponse.url.ifBlank { nextUrl }
+                val location = gatewayResponse.headers["Location"] ?: gatewayResponse.headers["location"]
+                val nextLocation = location?.let { MySeedParser.resolvePlayerTarget(it, gatewayBase) }
+                if (nextLocation != null && gatewayResponse.code in 300..399) {
+                    val mediaType = directMediaType(nextLocation)
+                    if (mediaType != null) {
+                        directSources += MySeedDirectMediaSource(nextLocation, option.quality)
+                        gatewayForHeaders = gatewayBase
+                        break
+                    }
+                    if (hop < 2) {
+                        nextUrl = nextLocation
+                        nextReferer = "${MySeedParser.originOf(gatewayBase) ?: mainUrl}/"
+                        gatewayForHeaders = gatewayBase
+                        continue
+                    }
+                }
+                val gatewayType = mediaTypeFromContentType(gatewayResponse.headers["Content-Type"].orEmpty())
+                if (gatewayType != null) {
+                    directSources += MySeedDirectMediaSource(gatewayBase, option.quality, gatewayType)
+                    gatewayForHeaders = nextUrl
+                    break
+                }
+                if (!gatewayResponse.isSuccessful) {
+                    Log.i(TAG, "MySeed player gateway returned HTTP ${gatewayResponse.code}")
+                    return false
+                }
+                mediaHtml = gatewayResponse.text
+                mediaBaseUrl = gatewayBase
+                gatewayForHeaders = nextUrl
+                break
+            }
+        } else if (!playerResponse.isSuccessful && playerResponse.code !in 300..399) {
+            Log.i(TAG, "MySeed direct player returned HTTP ${playerResponse.code}")
+            return false
+        }
+
+        if (directSources.isEmpty()) {
+            directSources += MySeedParser.parseMySeedDirectMediaSources(mediaHtml, mediaBaseUrl)
+        }
+        if (directSources.isEmpty() && playerResponseType != null) {
+            directSources += MySeedDirectMediaSource(playerBaseUrl, option.quality, playerResponseType)
+        }
+        if (directSources.isEmpty()) {
+            Log.i(TAG, "MySeed direct player did not expose a gateway or media source")
+            return false
+        }
+
+        val origin = MySeedParser.originOf(gatewayForHeaders) ?: mainUrl
+        val mediaReferer = "$origin/"
+        val mediaHeaders = mapOf(
+            "User-Agent" to REQUEST_HEADERS.getValue("User-Agent"),
+            "Referer" to mediaReferer,
+            "Origin" to origin
+        )
+        var emittedAny = false
+        for (source in directSources.distinctBy { it.url }) {
+            val type = source.type?.let(::cloudstreamMediaType) ?: directMediaType(source.url) ?: continue
+            if (source.url.isBlank() || !emitted.add(source.url)) continue
+            val sourceQuality = source.quality ?: option.quality
+            callbackForOption(
+                option.copy(quality = sourceQuality),
+                source.url,
+                type,
+                mediaReferer,
+                routeLabel,
+                sourceQuality,
+                null,
+                callback,
+                mediaHeaders
+            )
+            emittedAny = true
+        }
+        return emittedAny
+    }
+
     private suspend fun callbackForOption(
         option: MySeedServerOption,
         url: String,
@@ -430,7 +665,8 @@ class MySeed : MainAPI() {
         routeLabel: String,
         quality: Int?,
         extracted: ExtractorLink?,
-        callback: (ExtractorLink) -> Unit
+        callback: (ExtractorLink) -> Unit,
+        customHeaders: Map<String, String>? = null
     ) {
         val qualityLabel = quality?.let { "${it}p" }
             ?: extracted?.quality?.takeIf { it > 0 }?.let { "${it}p" }
@@ -438,9 +674,12 @@ class MySeed : MainAPI() {
             .joinToString(" · ")
         callback(
             newExtractorLink("MySeed", name.ifBlank { "MySeed · $routeLabel" }, url, type) {
-                this.referer = extracted?.referer?.takeIf(String::isNotBlank) ?: referer
+                this.referer = extracted?.referer?.takeIf(String::isNotBlank)
+                    ?: customHeaders?.get("Referer")?.takeIf(String::isNotBlank)
+                    ?: referer
                 this.quality = extracted?.quality?.takeIf { it > 0 } ?: cloudQuality(quality)
                 this.headers = extracted?.headers?.takeIf { it.isNotEmpty() }
+                    ?: customHeaders
                     ?: mapOf("User-Agent" to REQUEST_HEADERS.getValue("User-Agent"), "Referer" to referer)
                 if (extracted != null) this.extractorData = extracted.extractorData
             }
@@ -455,6 +694,22 @@ class MySeed : MainAPI() {
             Regex("\\.(?:mp4|m4v|mkv|webm|mov|avi|ts)$").containsMatchIn(path) -> ExtractorLinkType.VIDEO
             else -> null
         }
+    }
+
+    private fun mediaTypeFromContentType(contentType: String): MySeedDirectMediaKind? {
+        val normalized = contentType.lowercase(Locale.ROOT)
+        return when {
+            normalized.contains("mpegurl") || normalized.contains("m3u8") -> MySeedDirectMediaKind.M3U8
+            normalized.contains("dash+xml") -> MySeedDirectMediaKind.DASH
+            normalized.startsWith("video/") -> MySeedDirectMediaKind.VIDEO
+            else -> null
+        }
+    }
+
+    private fun cloudstreamMediaType(type: MySeedDirectMediaKind): ExtractorLinkType = when (type) {
+        MySeedDirectMediaKind.M3U8 -> ExtractorLinkType.M3U8
+        MySeedDirectMediaKind.DASH -> ExtractorLinkType.DASH
+        MySeedDirectMediaKind.VIDEO -> ExtractorLinkType.VIDEO
     }
 
     private fun cloudQuality(value: Int?): Int = when (value) {
@@ -500,6 +755,32 @@ internal data class MySeedServerOption(
     val name: String,
     val quality: Int?,
     val url: String
+)
+
+internal data class MySeedWatchServerChoice(
+    val name: String,
+    val serverId: String,
+    val quality: Int?,
+    val url: String?,
+    val isDirectServer: Boolean
+)
+
+internal data class MySeedWatchPlaybackState(
+    val postId: String?,
+    val csrfToken: String?,
+    val serverChoices: List<MySeedWatchServerChoice>
+)
+
+internal enum class MySeedDirectMediaKind {
+    VIDEO,
+    M3U8,
+    DASH
+}
+
+internal data class MySeedDirectMediaSource(
+    val url: String,
+    val quality: Int?,
+    val type: MySeedDirectMediaKind? = null
 )
 
 internal data class MySeedDetails(
@@ -817,6 +1098,121 @@ internal object MySeedParser {
         }
     }
 
+    fun isMySeedDirectServerUrl(rawUrl: String): Boolean {
+        val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
+        return uri.host?.lowercase(Locale.ROOT) in MYSEED_PLAYER_HOSTS &&
+            uri.path.equals("/vids.php", ignoreCase = true) &&
+            uri.rawQuery.orEmpty().split('&').any { parameter ->
+                parameter.substringBefore('=').equals("t", ignoreCase = true) &&
+                    parameter.substringAfter('=', "").isNotBlank()
+            }
+    }
+
+    fun parseWatchPlaybackState(document: Document, pageUrl: String): MySeedWatchPlaybackState {
+        val source = document.html()
+        val tokenPattern = Regex("""(?i)[\"']?(?:csrf__token|csrf_token)[\"']?\s*[:=]\s*[\"']([^\"']+)[\"']""")
+        val postIdPattern = Regex("""(?i)[\"']?(?:psot_id|post_id)[\"']?\s*[:=]\s*[\"']?(\d+)""")
+        val csrfToken = tokenPattern.find(source)?.groupValues?.getOrNull(1)
+            ?: document.select("input[name]").firstOrNull { it.attr("name").contains("csrf", ignoreCase = true) }
+                ?.attr("value")?.takeIf(String::isNotBlank)
+        val postId = postIdPattern.find(source)?.groupValues?.getOrNull(1)
+            ?: document.selectFirst("[data-post-id], [data-post_id]")
+                ?.let { it.attr("data-post-id").ifBlank { it.attr("data-post_id") } }
+                ?.takeIf(String::isNotBlank)
+
+        val choices = document.select("li[data-server]").mapNotNull { element ->
+            val serverId = element.attr("data-server").trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val context = elementContext(element)
+            val rawName = listOf(
+                element.attr("data-server-name"), element.attr("data-name"), element.attr("aria-label"), element.attr("title"),
+                element.selectFirst(".server-name, .server-title, strong, b")?.text(), element.text()
+            ).map(::cleanText).firstOrNull { label ->
+                label.contains("سيرفر") || label.contains("server", ignoreCase = true)
+            }.orEmpty()
+            val rawLink = listOf(element.attr("data-link"), element.attr("data-url"), element.attr("data-src"))
+                .firstOrNull(String::isNotBlank)
+                ?: element.selectFirst("a[href], [data-link]")?.let { nested ->
+                    listOf(nested.attr("data-link"), nested.attr("href")).firstOrNull(String::isNotBlank)
+                }.orEmpty()
+            val url = rawLink.takeIf(String::isNotBlank)?.let { resolvePlayerTarget(it, pageUrl) }
+            val isDirect = serverId == "0" ||
+                rawName.contains("مباشر") || rawName.contains("direct", ignoreCase = true) ||
+                url?.let(::isMySeedDirectServerUrl) == true
+            val name = rawName.ifBlank { if (isDirect) "سيرفر ماي سيد المباشر" else "سيرفر $serverId" }
+            val qualityContext = listOf(
+                element.attr("data-qu"), element.attr("data-quality"), context,
+                element.parents().take(3).joinToString(" ") { it.attr("data-quality") }
+            ).joinToString(" ")
+            MySeedWatchServerChoice(
+                name = name.take(80),
+                serverId = serverId,
+                quality = qualityFromText(qualityContext),
+                url = url,
+                isDirectServer = isDirect
+            )
+        }.distinctBy { Triple(it.serverId, it.quality, it.url) }
+
+        return MySeedWatchPlaybackState(postId, csrfToken, choices)
+    }
+
+    fun directServerRequestData(
+        choice: MySeedWatchServerChoice,
+        state: MySeedWatchPlaybackState
+    ): Map<String, String>? {
+        val postId = state.postId?.takeIf(String::isNotBlank) ?: return null
+        val csrfToken = state.csrfToken?.takeIf(String::isNotBlank) ?: return null
+        val quality = choice.quality?.takeIf { it > 0 }?.toString() ?: return null
+        return mapOf(
+            "post_id" to postId,
+            "quality" to quality,
+            "server" to choice.serverId,
+            "csrf_token" to csrfToken
+        )
+    }
+
+    fun extractMySeedPlayerGateway(html: String, pageUrl: String): String? {
+        val document = org.jsoup.Jsoup.parse(html, pageUrl)
+        val candidates = document.select("iframe[src]").mapNotNull { iframe ->
+            val raw = iframe.absUrl("src").ifBlank { iframe.attr("src") }
+            absoluteHttpUrl(raw, pageUrl)
+        } + extractUrlTokens(html).mapNotNull { token -> absoluteHttpUrl(token, pageUrl) }
+        return candidates.firstOrNull { candidate ->
+            val uri = runCatching { URI(candidate) }.getOrNull() ?: return@firstOrNull false
+            val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+            host == "d.myseed.tv" || host.endsWith(".myseed.tv") &&
+                (uri.path.orEmpty().contains("player", ignoreCase = true) || uri.path.orEmpty().contains("gateway", ignoreCase = true))
+        }
+    }
+
+    fun parseMySeedDirectMediaSources(html: String, pageUrl: String): List<MySeedDirectMediaSource> {
+        val document = org.jsoup.Jsoup.parse(html, pageUrl)
+        val sources = document.select("video[src], video source[src], source[src]")
+        return sources.mapNotNull { element ->
+            val raw = element.absUrl("src").ifBlank { element.attr("src") }
+            val url = absoluteHttpUrl(raw, pageUrl) ?: return@mapNotNull null
+            val path = runCatching { URI(url).path.orEmpty() }.getOrDefault("").lowercase(Locale.ROOT)
+            val mimeType = element.attr("type").lowercase(Locale.ROOT)
+            val mediaType = when {
+                mimeType.contains("mpegurl") || mimeType.contains("m3u8") || path.endsWith(".m3u8") -> MySeedDirectMediaKind.M3U8
+                mimeType.contains("dash+xml") || path.endsWith(".mpd") -> MySeedDirectMediaKind.DASH
+                mimeType.startsWith("video/") || Regex("\\.(?:mp4|m4v|mkv|webm|mov|avi|ts)$").containsMatchIn(path) ||
+                    element.tagName() == "video" || element.parents().any { it.tagName() == "video" } -> MySeedDirectMediaKind.VIDEO
+                else -> return@mapNotNull null
+            }
+            val qualityContext = listOf(
+                element.attr("label"), element.attr("size"), element.attr("res"), element.attr("data-quality"),
+                element.attr("type"), element.parent()?.text()
+            ).filterNotNull().joinToString(" ")
+            MySeedDirectMediaSource(url, qualityFromText(qualityContext), mediaType)
+        }.distinctBy { it.url }
+    }
+
+    fun originOf(rawUrl: String): String? = runCatching {
+        val uri = URI(rawUrl)
+        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) null
+        else "${uri.scheme}://${uri.rawAuthority}"
+    }.getOrNull()
+
     /**
      * Parse the selectable players from /watch/. MySeed has changed the player markup more than
      * once, so handle native media tags, server buttons carrying data-* URLs, iframe embeds, and
@@ -961,7 +1357,7 @@ internal object MySeedParser {
             Regex("(?i)^/video/\\d+\\.mp4$").matches(uri.path.orEmpty())
     }
 
-    private fun resolvePlayerTarget(raw: String, base: String): String? {
+    fun resolvePlayerTarget(raw: String, base: String): String? {
         val clean = cleanUrl(raw)
         if (clean.isBlank()) return null
         if (BASE64_VALUE.matches(clean)) {
@@ -1051,7 +1447,7 @@ internal object MySeedParser {
         repeat(5) { depth ->
             val node = current ?: return@repeat
             val own = listOf(
-                node.attr("data-server"), node.attr("data-server-name"), node.attr("data-quality"), node.attr("data-name"),
+                node.attr("data-server"), node.attr("data-server-name"), node.attr("data-quality"), node.attr("data-qu"), node.attr("data-name"),
                 node.attr("aria-label"), node.attr("title"), node.attr("label"), node.attr("data-label"), node.id(), node.className(),
                 node.selectFirst(".server-name, [class*=server-name], .quality, strong, b")?.text(),
                 node.text().takeIf { it.length <= 220 }

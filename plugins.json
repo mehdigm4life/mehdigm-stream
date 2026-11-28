@@ -503,7 +503,7 @@
         "iconUrl": "https://m.myseed.tv/wp-content/uploads/2022/09/logo333.webp",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/mehdigm4life/mehdigm-stream",
-        "fileSize": 60069,
+        "fileSize": 77792,
         "status": 1,
         "language": "ar",
         "authors": [
@@ -513,7 +513,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 3,
+        "version": 4,
         "internalName": "MySeed",
         "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/MySeed.cs3",
         "name": "ماي سيد (MySeed)",
