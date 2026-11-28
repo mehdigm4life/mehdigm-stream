@@ -390,6 +390,207 @@ class MySeedParserTest {
     }
 
     @Test
+    fun mySeedDirectServerStateBuildsItsCsrfAjaxRequest() {
+        val watchUrl = "$base/show-alpha-s1-eps1/watch/"
+        val document = Jsoup.parse(
+            """
+            <script>
+              const myseedPlayer = { psot_id: 9274, csrf__token: "csrf-live-token" };
+            </script>
+            <ul class="servers__list">
+              <li data-server="0" data-qu="480"><span>سيرفر ماي سيد المباشر</span></li>
+              <li data-server="1" data-qu="480" data-link="https://embed.example/e/alpha">سيرفر 1</li>
+            </ul>
+            """.trimIndent(),
+            watchUrl
+        )
+
+        val state = MySeedParser.parseWatchPlaybackState(document, watchUrl)
+        val direct = state.serverChoices.single { it.isDirectServer }
+        val request = MySeedParser.directServerRequestData(direct, state)
+
+        assertEquals("9274", state.postId)
+        assertEquals("csrf-live-token", state.csrfToken)
+        assertEquals("0", direct.serverId)
+        assertEquals(480, direct.quality)
+        assertNull(direct.url)
+        assertEquals(
+            mapOf("post_id" to "9274", "quality" to "480", "server" to "0", "csrf_token" to "csrf-live-token"),
+            request
+        )
+    }
+
+    @Test
+    fun mySeedDirectPlayerUnwrapsGatewayAndQualitySources() {
+        val playerUrl = "$base/vids.php?t=0123456789abcdef"
+        val playerHtml = """<div class="player"><iframe src="https://d.myseed.tv/player-gateway.php?id=abc"></iframe></div>"""
+        val gatewayUrl = requireNotNull(MySeedParser.extractMySeedPlayerGateway(playerHtml, playerUrl))
+        val gatewayHtml = """
+            <video controls>
+              <source src="/media/got-480.mp4" type="video/mp4" label="480p">
+              <source src="https://cdn.myseed.tv/media/got-720.m3u8?token=x" type="application/x-mpegURL" label="720p">
+            </video>
+        """.trimIndent()
+
+        val sources = MySeedParser.parseMySeedDirectMediaSources(gatewayHtml, gatewayUrl)
+
+        assertEquals("https://d.myseed.tv/player-gateway.php?id=abc", gatewayUrl)
+        assertEquals(2, sources.size)
+        assertTrue(sources.any { it.url == "https://d.myseed.tv/media/got-480.mp4" && it.quality == 480 })
+        assertTrue(sources.any { it.url == "https://cdn.myseed.tv/media/got-720.m3u8?token=x" && it.quality == 720 })
+        assertEquals("https://d.myseed.tv", MySeedParser.originOf(gatewayUrl))
+    }
+
+    @Test
+    fun liveGameOfThronesDirectServerResolvesToPlayableMediaUrl() {
+        val watchUrl = "$base/%d9%85%d8%b3%d9%84%d8%b3%d9%84-game-of-thrones-%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-%d8%a7%d9%84%d8%a7%d9%88%d9%84-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-1-%d8%a7%d9%84%d8%a7%d9%88%d9%84%d9%8a-y60/watch/"
+        val userAgent = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        val session = Jsoup.newSession()
+        val watchResponse = try {
+            session.newRequest(watchUrl)
+                .userAgent(userAgent)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                .referrer("$base/")
+                .timeout(45_000)
+                .ignoreHttpErrors(true)
+                .execute()
+        } catch (error: Exception) {
+            throw AssertionError("Game of Thrones watch page request failed: ${error.javaClass.simpleName}: ${error.message}")
+        }
+        val watchDocument = watchResponse.parse()
+        val state = MySeedParser.parseWatchPlaybackState(watchDocument, watchUrl)
+        val parsedDirectOption = MySeedParser.parseWatchServers(watchDocument, watchUrl)
+            .firstOrNull { MySeedParser.isMySeedDirectServerUrl(it.url) }
+        val directChoice = state.serverChoices.firstOrNull { it.isDirectServer }
+            ?: parsedDirectOption?.let {
+                MySeedWatchServerChoice(it.name, "0", it.quality, it.url, isDirectServer = true)
+            }
+        val reportPrefix = "status=${watchResponse.statusCode()} title=${watchDocument.title()} direct=${directChoice?.name} serverId=${directChoice?.serverId} quality=${directChoice?.quality} postIdPresent=${state.postId != null} csrfPresent=${state.csrfToken != null}"
+        assertTrue("Game of Thrones page did not expose the direct MySeed server. $reportPrefix", watchResponse.statusCode() in 200..299 && directChoice != null)
+
+        var directUrl = directChoice?.url
+        if (directUrl.isNullOrBlank()) {
+            val requestData = directChoice?.let { MySeedParser.directServerRequestData(it, state) }
+                ?: throw AssertionError("Direct server has no CSRF AJAX metadata. $reportPrefix")
+            val ajaxResponse = try {
+                session.newRequest("$base/get__watch__server/")
+                    .method(org.jsoup.Connection.Method.POST)
+                    .data(requestData)
+                    .userAgent(userAgent)
+                    .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                    .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("Origin", base)
+                    .referrer(watchUrl)
+                    .timeout(45_000)
+                    .ignoreHttpErrors(true)
+                    .execute()
+            } catch (error: Exception) {
+                throw AssertionError("Direct server AJAX request failed: ${error.javaClass.simpleName}: ${error.message}. $reportPrefix")
+            }
+            val ajaxBody = ajaxResponse.body()
+            fun jsonString(name: String): String? = Regex("\"${Regex.escape(name)}\"\\s*:\\s*\"([^\"]*)\"")
+                .find(ajaxBody)?.groupValues?.getOrNull(1)
+            directUrl = jsonString("server")?.takeIf(String::isNotBlank)
+                ?.let { MySeedParser.resolvePlayerTarget(it, watchUrl) }
+            assertTrue(
+                "Direct server AJAX did not return a player URL (HTTP ${ajaxResponse.statusCode()}, message=${jsonString("message")}). $reportPrefix",
+                ajaxResponse.statusCode() in 200..299 && jsonString("type") == "success" && !directUrl.isNullOrBlank()
+            )
+        }
+
+        val playerResponse = try {
+            session.newRequest(requireNotNull(directUrl))
+                .userAgent(userAgent)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .referrer(watchUrl)
+                .timeout(45_000)
+                .ignoreHttpErrors(true)
+                .followRedirects(false)
+                .execute()
+        } catch (error: Exception) {
+            throw AssertionError("Direct player request failed: ${error.javaClass.simpleName}: ${error.message}. $reportPrefix")
+        }
+        val playerBase = playerResponse.url().toString()
+        val redirect = playerResponse.header("Location")?.let { MySeedParser.resolvePlayerTarget(it, playerBase) }
+        val redirectIsMedia = redirect?.let { url ->
+            val path = runCatching { java.net.URI(url).path.orEmpty() }.getOrDefault("")
+            Regex("""(?i)\.(?:m3u8|mpd|mp4|m4v|mkv|webm|mov|avi|ts)$""").containsMatchIn(path)
+        } == true
+        val gateway = if (redirectIsMedia) null else {
+            redirect ?: MySeedParser.extractMySeedPlayerGateway(playerResponse.body(), playerBase)
+        }
+        var sources = if (redirectIsMedia && redirect != null) {
+            listOf(MySeedDirectMediaSource(redirect, directChoice?.quality))
+        } else {
+            MySeedParser.parseMySeedDirectMediaSources(playerResponse.body(), playerBase)
+        }
+        var sourceRefererBase = gateway ?: playerBase
+
+        if (sources.isEmpty() && gateway != null) {
+            val gatewayResponse = try {
+                session.newRequest(gateway)
+                    .userAgent(userAgent)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .referrer("$base/")
+                    .timeout(45_000)
+                    .ignoreHttpErrors(true)
+                    .followRedirects(false)
+                    .execute()
+            } catch (error: Exception) {
+                throw AssertionError("Direct player gateway request failed: ${error.javaClass.simpleName}: ${error.message}. $reportPrefix")
+            }
+            val gatewayBase = gatewayResponse.url().toString()
+            val mediaRedirect = gatewayResponse.header("Location")?.let { MySeedParser.resolvePlayerTarget(it, gatewayBase) }
+            sources = if (mediaRedirect != null) {
+                listOf(MySeedDirectMediaSource(mediaRedirect, directChoice?.quality))
+            } else {
+                MySeedParser.parseMySeedDirectMediaSources(gatewayResponse.body(), gatewayBase)
+            }
+            sourceRefererBase = gateway
+            assertTrue(
+                "MySeed gateway returned HTTP ${gatewayResponse.statusCode()} without a media source. gateway=${MySeedParser.originOf(gateway)} body=${gatewayResponse.body().take(500)}. $reportPrefix",
+                gatewayResponse.statusCode() in 200..299 || !mediaRedirect.isNullOrBlank()
+            )
+        }
+
+        val playableSource = sources.firstOrNull { source ->
+            Regex("(?i)\\.(?:m3u8|mpd|mp4|m4v|mkv|webm|mov|avi|ts)$")
+                .containsMatchIn(runCatching { java.net.URI(source.url).path.orEmpty() }.getOrDefault(""))
+        }
+        assertTrue(
+            "MySeed direct player did not expose a playable MP4/HLS/DASH source. status=${playerResponse.statusCode()} location=${playerResponse.header("Location")?.substringBefore('?')} body=${playerResponse.body().take(800)}. $reportPrefix",
+            playableSource != null
+        )
+
+        val mediaOrigin = requireNotNull(MySeedParser.originOf(sourceRefererBase))
+        val mediaUrl = requireNotNull(playableSource).url
+        val probe = try {
+            session.newRequest(mediaUrl)
+                .userAgent(userAgent)
+                .header("Referer", "$mediaOrigin/")
+                .header("Origin", mediaOrigin)
+                .apply {
+                    if (!Regex("(?i)\\.(?:m3u8|mpd)$").containsMatchIn(mediaUrl.substringBefore('?'))) {
+                        header("Range", "bytes=0-0")
+                    }
+                }
+                .timeout(45_000)
+                .ignoreHttpErrors(true)
+                .ignoreContentType(true)
+                .maxBodySize(64)
+                .execute()
+        } catch (error: Exception) {
+            throw AssertionError("Direct media probe failed: ${error.javaClass.simpleName}: ${error.message}; url=${mediaUrl.substringBefore('?')}. $reportPrefix")
+        }
+        assertTrue(
+            "MySeed direct media returned HTTP ${probe.statusCode()} content-type=${probe.contentType()} range=${probe.header("Content-Range")}; url=${mediaUrl.substringBefore('?')}. $reportPrefix",
+            probe.statusCode() in 200..206
+        )
+    }
+
+    @Test
     fun liveFilm7DogsWatchPageExposesAllFourProviderTargets() {
         val watchUrl = "$base/%d9%81%d9%8a%d9%84%d9%85-7-%d8%af%d9%88%d8%ac%d8%b2-2026/watch/"
         val response = try {
